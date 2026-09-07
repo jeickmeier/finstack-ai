@@ -37,16 +37,17 @@ async fn wake_fairness(
         expires_at: None,
         pending_id: Arc::from("waiting"),
         leased_by: None,
+        lease_id: None,
         lease_expires_at: None,
         attempts: 0,
     };
-    store.upsert(&row).unwrap();
+    store.upsert(&row, None).unwrap();
     let mut ready = row.clone();
     ready.session_id = id(2);
     ready.reason = WakeReason::Timer;
     ready.wake_at = Some(UNIX_EPOCH);
     ready.pending_id = Arc::from("ready");
-    store.upsert(&ready).unwrap();
+    store.upsert(&ready, None).unwrap();
     let worker = WorkerBuilder::new(
         journal,
         Arc::new(finstack_ai_workflow_local::MemoryCronStore::new()),

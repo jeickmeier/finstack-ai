@@ -2554,3 +2554,5 @@ mod composition;
 
 #[cfg(feature = "durable-host")]
 mod durable;
+
+mod child_admission;

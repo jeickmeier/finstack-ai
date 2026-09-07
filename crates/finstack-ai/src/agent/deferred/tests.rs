@@ -260,6 +260,10 @@ async fn preview_parent() -> (AgentRun, Arc<dyn JournalStore>) {
             Arc::clone(&store),
         ),
     )
+    .policy(crate::RunPolicy {
+        child_runs: crate::ChildRunPolicy::Allow { max_depth: 1 },
+        ..crate::RunPolicy::default()
+    })
     .build()
     .await
     .expect("agent");
@@ -501,6 +505,10 @@ async fn deferred_tool_parent() -> (AgentRun, Arc<dyn JournalStore>) {
         ),
         toolset,
     )
+    .policy(crate::RunPolicy {
+        child_runs: crate::ChildRunPolicy::Allow { max_depth: 1 },
+        ..crate::RunPolicy::default()
+    })
     .build()
     .await
     .expect("agent");
@@ -597,3 +605,5 @@ async fn recover_settles_outstanding_deferrals_and_is_idempotent() {
     let second = bridge.recover(&parent).await.expect("second recover");
     assert!(second.is_empty());
 }
+
+mod delivery;

@@ -40,20 +40,24 @@ fn harness() -> (
 
     let worker_store = Arc::new(MemoryWorkerStore::new());
     worker_store
-        .upsert(&WakeRow {
-            tenant_scope: Arc::from("tenant-a"),
-            session_id: id(1),
-            lane_id: id(2),
-            run_id: id(3),
-            workflow_kind: Arc::from("research"),
-            reason: WakeReason::Interaction,
-            wake_at: None,
-            expires_at: None,
-            pending_id: Arc::from(interaction_id.to_canonical_string()),
-            leased_by: None,
-            lease_expires_at: None,
-            attempts: 0,
-        })
+        .upsert(
+            &WakeRow {
+                tenant_scope: Arc::from("tenant-a"),
+                session_id: id(1),
+                lane_id: id(2),
+                run_id: id(3),
+                workflow_kind: Arc::from("research"),
+                reason: WakeReason::Interaction,
+                wake_at: None,
+                expires_at: None,
+                pending_id: Arc::from(interaction_id.to_canonical_string()),
+                leased_by: None,
+                lease_id: None,
+                lease_expires_at: None,
+                attempts: 0,
+            },
+            None,
+        )
         .expect("wake");
     let worker = Arc::new(
         WorkerBuilder::new(
@@ -90,7 +94,7 @@ fn sweep_keeps_an_interaction_that_is_still_awaited() {
 fn sweep_closes_an_active_row_after_its_wake_is_consumed() {
     let (inbox, worker_store, router, interaction_id) = harness();
     worker_store
-        .delete("tenant-a", id(1))
+        .delete("tenant-a", id(1), None)
         .expect("consume wake");
 
     assert_eq!(router.sweep(timestamp(3_000)).expect("sweep").reconciled, 1);

@@ -9,7 +9,9 @@ use finstack_ai_kernel::{SessionId, Timestamp};
 use crate::error::WorkerError;
 use crate::fires::{FireRow, FireStartOutcome, FireStatus, FireStore};
 use crate::inbox::{DeadLetterRow, InboxInsertOutcome, InboxRow, InboxStore};
-use crate::wake::{WakeIndexStore, WakeRow, lease_deadline, lease_open, wake_due};
+use crate::wake::{
+    WakeIndexStore, WakeLease, WakeRow, check_lease, lease_deadline, lease_open, wake_due,
+};
 
 type WakeRows = BTreeMap<(Arc<str>, SessionId), WakeRow>;
 type FireRows = BTreeMap<(Arc<str>, Arc<str>, u64), FireRow>;
@@ -47,15 +49,27 @@ fn locked<T>(table: &Mutex<T>) -> Result<MutexGuard<'_, T>, WorkerError> {
 }
 
 impl WakeIndexStore for MemoryWorkerStore {
-    fn upsert(&self, row: &WakeRow) -> Result<(), WorkerError> {
+    fn upsert(&self, row: &WakeRow, lease: Option<&WakeLease>) -> Result<(), WorkerError> {
         let mut wake = locked(&self.wake)?;
-        wake.insert((Arc::clone(&row.tenant_scope), row.session_id), row.clone());
+        let key = (Arc::clone(&row.tenant_scope), row.session_id);
+        check_lease(&row.tenant_scope, row.session_id, wake.get(&key), lease)?;
+        if row.leased_by.is_some() || row.lease_id.is_some() || row.lease_expires_at.is_some() {
+            return Err(WorkerError::LeaseLost);
+        }
+        wake.insert(key, row.clone());
         Ok(())
     }
 
-    fn delete(&self, tenant_scope: &str, session_id: SessionId) -> Result<(), WorkerError> {
+    fn delete(
+        &self,
+        tenant_scope: &str,
+        session_id: SessionId,
+        lease: Option<&WakeLease>,
+    ) -> Result<(), WorkerError> {
         let mut wake = locked(&self.wake)?;
-        wake.remove(&(Arc::from(tenant_scope), session_id));
+        let key = (Arc::from(tenant_scope), session_id);
+        check_lease(tenant_scope, session_id, wake.get(&key), lease)?;
+        wake.remove(&key);
         Ok(())
     }
 
@@ -111,68 +125,68 @@ impl WakeIndexStore for MemoryWorkerStore {
         worker_id: &str,
         now: Timestamp,
         lease_ttl_ms: u64,
-    ) -> Result<bool, WorkerError> {
+    ) -> Result<Option<WakeLease>, WorkerError> {
         let mut wake = locked(&self.wake)?;
         let Some(row) = wake.get_mut(&(Arc::from(tenant_scope), session_id)) else {
-            return Ok(false);
+            return Ok(None);
         };
         if !lease_open(row, now) {
-            return Ok(false);
+            return Ok(None);
         }
+        let lease = WakeLease::try_new(tenant_scope, session_id, now)?;
+        let expires = lease_deadline(now, lease_ttl_ms)?;
         row.leased_by = Some(Arc::from(worker_id));
-        row.lease_expires_at = Some(lease_deadline(now, lease_ttl_ms)?);
-        Ok(true)
+        row.lease_id = Some(lease.id);
+        row.lease_expires_at = Some(expires);
+        Ok(Some(lease))
     }
-
     fn renew(
         &self,
-        tenant_scope: &str,
-        session_id: SessionId,
-        worker_id: &str,
+        lease: &WakeLease,
         now: Timestamp,
         lease_ttl_ms: u64,
     ) -> Result<bool, WorkerError> {
         let mut wake = locked(&self.wake)?;
-        let Some(row) = wake.get_mut(&(Arc::from(tenant_scope), session_id)) else {
+        let Some(row) = wake.get_mut(&(Arc::clone(&lease.tenant_scope), lease.session_id)) else {
             return Ok(false);
         };
-        if row.leased_by.as_deref() != Some(worker_id) {
+        if row.lease_id != Some(lease.id) || lease_open(row, now) {
             return Ok(false);
         }
         row.lease_expires_at = Some(lease_deadline(now, lease_ttl_ms)?);
         Ok(true)
     }
-
-    fn release(
-        &self,
-        tenant_scope: &str,
-        session_id: SessionId,
-        worker_id: &str,
-    ) -> Result<bool, WorkerError> {
+    fn release(&self, lease: &WakeLease) -> Result<bool, WorkerError> {
         let mut wake = locked(&self.wake)?;
-        let Some(row) = wake.get_mut(&(Arc::from(tenant_scope), session_id)) else {
+        let Some(row) = wake.get_mut(&(Arc::clone(&lease.tenant_scope), lease.session_id)) else {
             return Ok(false);
         };
-        if row.leased_by.as_deref() != Some(worker_id) {
+        if row.lease_id != Some(lease.id) {
             return Ok(false);
         }
         row.leased_by = None;
+        row.lease_id = None;
         row.lease_expires_at = None;
         Ok(true)
     }
-
-    fn record_failure(
-        &self,
-        tenant_scope: &str,
-        session_id: SessionId,
-        retry_at: Timestamp,
-    ) -> Result<(), WorkerError> {
+    fn record_failure(&self, lease: &WakeLease, retry_at: Timestamp) -> Result<(), WorkerError> {
         let mut wake = locked(&self.wake)?;
-        let Some(row) = wake.get_mut(&(Arc::from(tenant_scope), session_id)) else {
-            return Ok(());
-        };
-        row.attempts += 1;
+        let key = (Arc::clone(&lease.tenant_scope), lease.session_id);
+        check_lease(
+            &lease.tenant_scope,
+            lease.session_id,
+            wake.get(&key),
+            Some(lease),
+        )?;
+        let row = wake.get_mut(&key).ok_or(WorkerError::LeaseLost)?;
+        row.attempts = row
+            .attempts
+            .checked_add(1)
+            .ok_or(WorkerError::StoreIntegrity {
+                code: "wake_attempts_overflow",
+            })?;
         row.leased_by = None;
+        row.lease_id = None;
         row.lease_expires_at = None;
         row.wake_at = Some(retry_at);
         Ok(())
@@ -400,6 +414,7 @@ mod tests {
             expires_at: None,
             pending_id: Arc::from("effect-1"),
             leased_by: None,
+            lease_id: None,
             lease_expires_at: None,
             attempts: 0,
         }
@@ -409,7 +424,7 @@ mod tests {
     fn timer_rows_are_due_only_at_or_after_wake_at() {
         let store = MemoryWorkerStore::new();
         store
-            .upsert(&timer_row("tenant-a", 1, 2_000))
+            .upsert(&timer_row("tenant-a", 1, 2_000), None)
             .expect("upsert");
         assert!(store.load_due(ts(1_999), 10).expect("early").is_empty());
         assert_eq!(store.load_due(ts(2_000), 10).expect("due").len(), 1);
@@ -421,7 +436,7 @@ mod tests {
         let mut row = timer_row("tenant-a", 1, 9_000);
         row.reason = WakeReason::Interaction;
         row.wake_at = None;
-        store.upsert(&row).expect("upsert");
+        store.upsert(&row, None).expect("upsert");
         assert_eq!(store.load_due(ts(0), 10).expect("due").len(), 1);
     }
 
@@ -429,23 +444,26 @@ mod tests {
     fn claim_excludes_row_until_lease_expires() {
         let store = MemoryWorkerStore::new();
         store
-            .upsert(&timer_row("tenant-a", 1, 1_000))
+            .upsert(&timer_row("tenant-a", 1, 1_000), None)
             .expect("upsert");
         assert!(
             store
                 .try_claim("tenant-a", id(1), "worker-a", ts(1_500), 1_000)
                 .expect("first claim")
+                .is_some()
         );
         assert!(
-            !store
+            store
                 .try_claim("tenant-a", id(1), "worker-b", ts(1_600), 1_000)
                 .expect("held")
+                .is_none()
         );
         assert!(store.load_due(ts(1_600), 10).expect("hidden").is_empty());
         assert!(
             store
                 .try_claim("tenant-a", id(1), "worker-b", ts(2_600), 1_000)
                 .expect("expired lease is claimable")
+                .is_some()
         );
     }
 
@@ -453,16 +471,13 @@ mod tests {
     fn record_failure_backs_off_and_unleases() {
         let store = MemoryWorkerStore::new();
         store
-            .upsert(&timer_row("tenant-a", 1, 1_000))
+            .upsert(&timer_row("tenant-a", 1, 1_000), None)
             .expect("upsert");
-        assert!(
-            store
-                .try_claim("tenant-a", id(1), "worker-a", ts(1_000), 1_000)
-                .expect("claim")
-        );
-        store
-            .record_failure("tenant-a", id(1), ts(5_000))
-            .expect("failure");
+        let lease = store
+            .try_claim("tenant-a", id(1), "worker-a", ts(1_000), 1_000)
+            .expect("claim")
+            .expect("won");
+        store.record_failure(&lease, ts(5_000)).expect("failure");
         let rows = store.load_tenant("tenant-a").expect("load");
         assert_eq!(rows[0].attempts, 1);
         assert_eq!(rows[0].leased_by, None);
@@ -473,8 +488,12 @@ mod tests {
     #[test]
     fn tenants_are_isolated() {
         let store = MemoryWorkerStore::new();
-        store.upsert(&timer_row("tenant-a", 1, 1_000)).expect("a");
-        store.upsert(&timer_row("tenant-b", 2, 1_000)).expect("b");
+        store
+            .upsert(&timer_row("tenant-a", 1, 1_000), None)
+            .expect("a");
+        store
+            .upsert(&timer_row("tenant-b", 2, 1_000), None)
+            .expect("b");
         assert_eq!(store.load_tenant("tenant-a").expect("a").len(), 1);
         assert_eq!(store.load_tenant("tenant-b").expect("b").len(), 1);
     }

@@ -42,11 +42,20 @@ impl WorkflowExecution for Host {
             *self.handle.lock().expect("handle") = session.run_handle();
             if self.lose_lease {
                 let locator = session.locator();
-                assert!(self.store.release(
-                    &locator.tenant_scope,
-                    locator.session_id,
-                    "worker-1"
-                )?);
+                let row = self
+                    .store
+                    .load_tenant(&locator.tenant_scope)?
+                    .into_iter()
+                    .find(|row| row.session_id == locator.session_id)
+                    .expect("leased row");
+                assert!(
+                    self.store
+                        .release(&finstack_ai_workflow_worker::WakeLease {
+                            tenant_scope: locator.tenant_scope.clone(),
+                            session_id: locator.session_id,
+                            id: row.lease_id.expect("claim id"),
+                        })?
+                );
                 std::future::pending().await
             } else {
                 Ok(classify_wait(session.last_state()).expect("future timer"))
@@ -71,7 +80,7 @@ async fn exercise(lose_lease: bool) {
     // Claim the hint before its authoritative future timer, so the callback
     // controls the test without dispatching another external model request.
     row.wake_at = Some(timestamp(2_001));
-    store.upsert(&row).expect("hint");
+    store.upsert(&row, None).expect("hint");
     clock.set(timestamp(2_002));
     let host = Arc::new(Host {
         model,

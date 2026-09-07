@@ -28,8 +28,13 @@ pub use recovery::{
     MAX_RECOVERY_DESCRIPTOR_BYTES, MAX_RECOVERY_SCAN, RecoveryRegistration, RecoveryStore,
 };
 pub use sqlite::{SqliteWorkerStore, is_memory_sqlite_path};
-pub use wake::{WakeIndexStore, WakeReason, WakeRow, lease_deadline, lease_open, wake_due};
+pub use wake::{
+    WakeIndexStore, WakeLease, WakeLeaseId, WakeLeaseTag, WakeReason, WakeRow, lease_deadline,
+    lease_open, wake_due,
+};
 pub use worker::{
     InteractionDeliveryOutcome, InteractionLifecycle, PortsFactory, RunStarter, StartedRun,
     TickReport, WorkerBuilder, WorkerHandle, WorkflowExecution, WorkflowWorker,
 };
+
+mod blocking;

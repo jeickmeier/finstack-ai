@@ -31,7 +31,7 @@ pub struct EvalRunner {
 struct Inner {
     spec: Arc<EvalSpec>,
     scoring: crate::scoring_session::ScoringSession,
-    store: Arc<dyn EvalStore>,
+    store: crate::async_store::AsyncEvalStore,
     subjects: BTreeMap<Arc<str>, SubjectBinding>,
     cancellation: crate::execution::Cancellation,
 }
@@ -73,7 +73,7 @@ impl EvalRunner {
             inner: Arc::new(Inner {
                 spec,
                 scoring,
-                store,
+                store: crate::async_store::AsyncEvalStore::new(store),
                 subjects: indexed,
                 cancellation: crate::execution::Cancellation::default(),
             }),
@@ -114,10 +114,10 @@ impl EvalRunner {
 }
 impl Inner {
     async fn rescore(&self) -> Result<EvalRunReport, EvalError> {
-        let _lease = self.store.acquire_runner()?;
-        self.store.freeze(&self.spec)?;
+        let _lease = self.store.acquire_runner().await?;
+        self.store.freeze(&self.spec).await?;
         for (id, binding) in &self.subjects {
-            self.store.bind_subject(id, binding.lock_digest()?)?;
+            self.store.bind_subject(id, binding.lock_digest()?).await?;
         }
         self.scoring.preflight()?;
         let mut stop_reason = self
@@ -125,7 +125,7 @@ impl Inner {
             .reconcile_graders()
             .await?
             .then(|| Arc::from(EVAL_ATTEMPT_UNRESOLVED));
-        let snapshot = self.store.snapshot()?;
+        let snapshot = self.store.snapshot().await?;
         for cell in self.spec.cells()? {
             if stop_reason.is_some() {
                 break;
@@ -164,12 +164,12 @@ impl Inner {
             }
         }
         Ok(EvalRunReport {
-            snapshot: self.store.snapshot()?,
+            snapshot: self.store.snapshot().await?,
             stop_reason,
         })
     }
     async fn execute(self: Arc<Self>) -> Result<EvalRunReport, EvalError> {
-        let _lease = self.store.acquire_runner()?;
+        let _lease = self.store.acquire_runner().await?;
         let mut stop = self.preflight_and_reconcile().await?;
         let mut cells: VecDeque<_> = self.spec.cells()?.into();
         let mut active = JoinSet::new();
@@ -183,7 +183,7 @@ impl Inner {
                     stop = Some(Arc::from("eval_cancelled"));
                     break;
                 }
-                let snapshot = match self.store.snapshot() {
+                let snapshot = match self.store.snapshot().await {
                     Ok(snapshot) => snapshot,
                     Err(error) => {
                         store_error = Some(error);
@@ -216,7 +216,7 @@ impl Inner {
                     stop = Some(Arc::from(error.code()));
                     break;
                 }
-                let reservation = match self.store.reserve(&cell, sequence, now_ms()) {
+                let reservation = match self.store.reserve(&cell, sequence, now_ms()).await {
                     Ok(reservation) => reservation,
                     Err(error) => {
                         store_error = Some(error);
@@ -258,18 +258,18 @@ impl Inner {
             return Err(error);
         }
         Ok(EvalRunReport {
-            snapshot: self.store.snapshot()?,
+            snapshot: self.store.snapshot().await?,
             stop_reason: stop,
         })
     }
     async fn preflight_and_reconcile(&self) -> Result<Option<Arc<str>>, EvalError> {
-        self.store.freeze(&self.spec)?;
+        self.store.freeze(&self.spec).await?;
         for (id, binding) in &self.subjects {
-            self.store.bind_subject(id, binding.lock_digest()?)?;
+            self.store.bind_subject(id, binding.lock_digest()?).await?;
             crate::budget::check_pricing_policy(&self.spec, &binding.agent)?;
         }
         self.scoring.preflight()?;
-        let initial = self.store.snapshot()?;
+        let initial = self.store.snapshot().await?;
         for reservations in initial.reservations.values() {
             for reservation in reservations {
                 let prior = initial
@@ -295,14 +295,14 @@ impl Inner {
                 });
                 let record = measured.map_or_else(|_| unknown(reservation), |result| result.record);
                 if !(prior.is_some() && record.status == AttemptStatus::Indeterminate) {
-                    self.store.settle(&record)?;
+                    self.store.settle(&record).await?;
                 }
             }
         }
         if self.scoring.reconcile_graders().await? {
             return Ok(Some(Arc::from(EVAL_ATTEMPT_UNRESOLVED)));
         }
-        let snapshot = self.store.snapshot()?;
+        let snapshot = self.store.snapshot().await?;
         for (cell_id, records) in &snapshot.attempts {
             for record in records.iter().filter(|record| record.status.is_final()) {
                 let cell = &snapshot
@@ -328,7 +328,8 @@ impl Inner {
         }
         Ok(self
             .store
-            .snapshot()?
+            .snapshot()
+            .await?
             .attempts
             .values()
             .flatten()
@@ -350,7 +351,7 @@ impl Inner {
             let record =
                 crate::measurement::no_admission(&reservation, now_ms(), "eval_prepare_failed")
                     .record;
-            self.store.settle(&record)?;
+            self.store.settle(&record).await?;
             return Ok(record);
         };
         if binding.check(&prepared).is_err() {
@@ -360,7 +361,7 @@ impl Inner {
                 crate::EVAL_SUBJECT_LOCK_MISMATCH,
             )
             .record;
-            self.store.settle(&record)?;
+            self.store.settle(&record).await?;
             return Ok(record);
         }
         let session = tokio::time::timeout_at(
@@ -375,7 +376,7 @@ impl Inner {
             let record =
                 crate::measurement::no_admission(&reservation, now_ms(), "eval_session_failed")
                     .record;
-            self.store.settle(&record)?;
+            self.store.settle(&record).await?;
             return Ok(record);
         };
         let lane = tokio::time::timeout_at(deadline, session.lane("main"))
@@ -388,7 +389,8 @@ impl Inner {
             lane_id: lane.lane_id(),
         };
         self.store
-            .bind_execution(&reservation.cell.id, reservation.sequence, identity.clone())?;
+            .bind_execution(&reservation.cell.id, reservation.sequence, identity.clone())
+            .await?;
         let reservation = AttemptReservation {
             execution: Some(identity),
             ..reservation
@@ -409,7 +411,7 @@ impl Inner {
             |_| (unknown(&reservation), None),
             |result| (result.record, result.output),
         );
-        self.store.settle(&record)?;
+        self.store.settle(&record).await?;
         self.scoring
             .score(
                 &reservation.cell,

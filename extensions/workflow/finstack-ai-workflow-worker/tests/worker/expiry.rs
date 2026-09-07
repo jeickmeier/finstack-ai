@@ -208,6 +208,7 @@ fn interaction_row(session: u64, expires_at: Option<Timestamp>) -> WakeRow {
         expires_at,
         pending_id: Arc::from("interaction-1"),
         leased_by: None,
+        lease_id: None,
         lease_expires_at: None,
         attempts: 0,
     }
@@ -217,7 +218,7 @@ fn interaction_row(session: u64, expires_at: Option<Timestamp>) -> WakeRow {
 async fn an_interaction_before_its_deadline_is_never_claimed() {
     let store = Arc::new(MemoryWorkerStore::new());
     store
-        .upsert(&interaction_row(11, Some(timestamp(DEADLINE_MS))))
+        .upsert(&interaction_row(11, Some(timestamp(DEADLINE_MS))), None)
         .expect("row");
     let clock = ExternalClock::new(timestamp(DEADLINE_MS - 1));
     let worker = bare_worker(&store, &clock);
@@ -234,7 +235,7 @@ async fn an_interaction_before_its_deadline_is_never_claimed() {
 #[tokio::test]
 async fn a_deadline_less_interaction_is_never_claimed() {
     let store = Arc::new(MemoryWorkerStore::new());
-    store.upsert(&interaction_row(12, None)).expect("row");
+    store.upsert(&interaction_row(12, None), None).expect("row");
     let clock = ExternalClock::new(timestamp(1_000_000));
     let worker = bare_worker(&store, &clock);
 

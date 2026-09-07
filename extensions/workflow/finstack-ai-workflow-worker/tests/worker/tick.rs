@@ -231,7 +231,7 @@ async fn tick_reparks_a_row_that_is_due_before_its_committed_timer() {
     let mut early = store.load_tenant("tenant-a").expect("rows").remove(0);
     assert_eq!(early.wake_at, Some(timestamp(2_310)));
     early.wake_at = Some(timestamp(2_100));
-    store.upsert(&early).expect("early row");
+    store.upsert(&early, None).expect("early row");
     clock.set(timestamp(2_200));
 
     let worker = WorkerBuilder::new(

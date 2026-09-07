@@ -102,7 +102,9 @@ impl AgentRun {
     /// # Errors
     ///
     /// Returns a runtime failure when the parent is not accepted, the durable
-    /// mapping conflicts, or the invoker rejects the child.
+    /// mapping conflicts, the child policy denies admission, or the invoker
+    /// rejects the child. Denial writes no child mapping and never calls the
+    /// invoker, including on an attach retry.
     #[cfg(feature = "native-tokio")]
     pub async fn start_or_attach_child(
         &self,
@@ -123,6 +125,10 @@ impl AgentRun {
                 "recovered acceptance does not match this run",
             ));
         }
+        enforce_child_run_policy(
+            self.inner.child_runs,
+            child_depth(accepted.relation().depth())?,
+        )?;
         let security = accepted.security();
         let context = ChildRunContext {
             parent: self.locator().clone(),

@@ -663,3 +663,5 @@ fn load_rejects_world_mismatch_without_compiling_guest() {
     };
     assert_eq!(error.code(), "plugin_registration_invalid");
 }
+
+mod reuse;

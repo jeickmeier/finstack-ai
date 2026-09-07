@@ -17,8 +17,11 @@ pub struct ChildEventContext {
 
 /// Receives child-run event batches without gating the child.
 ///
-/// Implementations must tolerate dropped progress. Errors and panics are
-/// diagnostics only and must not fail the parent settlement.
+/// Delivery is best effort: at most one callback runs per settlement, with a
+/// one-second deadline and no queued batches. Notifications arriving while it
+/// is busy are dropped. The callback is dropped when event pumping finishes or
+/// its settlement future is cancelled. Errors and panics never fail the parent.
+/// Implementations must poll cooperatively and tolerate dropped notifications.
 pub trait ChildEventSink: Send + Sync {
     /// Observe one child event batch.
     fn on_batch(

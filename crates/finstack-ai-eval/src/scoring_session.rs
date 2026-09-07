@@ -12,7 +12,7 @@ use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 pub(crate) struct ScoringSession {
     spec: Arc<EvalSpec>,
-    store: Arc<dyn EvalStore>,
+    store: crate::async_store::AsyncEvalStore,
     scorers: BTreeMap<Arc<str>, Arc<dyn Scorer>>,
 }
 impl ScoringSession {
@@ -35,7 +35,7 @@ impl ScoringSession {
         }
         Ok(Self {
             spec,
-            store,
+            store: crate::async_store::AsyncEvalStore::new(store),
             scorers: indexed,
         })
     }
@@ -49,7 +49,7 @@ impl ScoringSession {
         Ok(())
     }
     pub(crate) async fn reconcile_graders(&self) -> Result<bool, EvalError> {
-        let snapshot = self.store.snapshot()?;
+        let snapshot = self.store.snapshot().await?;
         for record in snapshot
             .graders
             .values()
@@ -76,8 +76,7 @@ impl ScoringSession {
                 })
                 .ok_or_else(crate::error::invalid)?
                 .cell;
-            let result =
-                crate::grading::recover_grader(self.store.as_ref(), &agent, cell, record).await;
+            let result = crate::grading::recover_grader(&self.store, &agent, cell, record).await;
             if let Err(error) = result
                 && error.code() != EVAL_ATTEMPT_UNRESOLVED
             {
@@ -86,7 +85,8 @@ impl ScoringSession {
         }
         Ok(self
             .store
-            .snapshot()?
+            .snapshot()
+            .await?
             .graders
             .values()
             .any(crate::GraderRecord::unresolved))
@@ -113,7 +113,8 @@ impl ScoringSession {
         }
         let reservation = self
             .store
-            .snapshot()?
+            .snapshot()
+            .await?
             .reservations
             .get(&cell.id)
             .and_then(|items| items.iter().find(|item| item.sequence == record.sequence))
@@ -124,7 +125,8 @@ impl ScoringSession {
                 .await;
         let lock = self
             .store
-            .snapshot()?
+            .snapshot()
+            .await?
             .subject_locks
             .get(&cell.subject_id)
             .copied()
@@ -142,10 +144,10 @@ impl ScoringSession {
                 )
                 .await
             }
-            _ => self.record_unavailable(record, force),
+            _ => self.record_unavailable(record, force).await,
         }
     }
-    fn record_unavailable(
+    async fn record_unavailable(
         &self,
         mut record: AttemptRecord,
         force: bool,
@@ -162,7 +164,8 @@ impl ScoringSession {
                 failure_code: Some(Arc::from(crate::EVAL_RESCORE_SESSION_MISSING)),
             };
             self.store
-                .append_scores(&record.cell, record.sequence, &scores)?;
+                .append_scores(&record.cell, record.sequence, &scores)
+                .await?;
             record.scores.push(scores);
         }
         Ok(record)
@@ -204,7 +207,7 @@ impl ScoringSession {
             .map_err(|_| crate::error::invalid())?;
             let grader = implementation.grader_agent().map(|agent| {
                 GraderExecution::new(GraderInvocation {
-                    store: Arc::clone(&self.store),
+                    store: self.store.clone(),
                     agent,
                     spec: Arc::clone(&self.spec),
                     cell: cell.clone(),
@@ -263,7 +266,8 @@ impl ScoringSession {
                 },
             };
             self.store
-                .append_scores(&record.cell, record.sequence, &scores)?;
+                .append_scores(&record.cell, record.sequence, &scores)
+                .await?;
             record.scores.push(scores);
         }
         Ok(record)

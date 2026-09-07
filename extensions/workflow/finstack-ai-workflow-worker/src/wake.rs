@@ -3,9 +3,73 @@
 
 use std::sync::Arc;
 
-use finstack_ai_kernel::{LaneId, RunId, SessionId, Timestamp};
+use finstack_ai_kernel::{Id, IdTag, LaneId, RunId, SessionId, Timestamp};
+use finstack_ai_runtime::ids::{ExternalClock, OsRandomSource, UuidV7Generator};
 
 use crate::error::WorkerError;
+
+/// UUID family for one acquisition of a workflow wake lease.
+pub enum WakeLeaseTag {}
+impl IdTag for WakeLeaseTag {
+    const NAME: &'static str = "wake-lease";
+}
+/// Unique identity of one claim, including reacquisition by the same worker.
+pub type WakeLeaseId = Id<WakeLeaseTag>;
+
+/// Ownership fence returned by a successful claim. Stores compare its exact
+/// identity on every owner mutation; worker labels are never ownership tokens.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WakeLease {
+    /// Tenant of the claimed row.
+    pub tenant_scope: Arc<str>,
+    /// Session of the claimed row.
+    pub session_id: SessionId,
+    /// Unique acquisition identity.
+    pub id: WakeLeaseId,
+}
+impl WakeLease {
+    /// Allocate a fresh claim identity using operating-system entropy.
+    /// # Errors
+    /// Returns store-unavailable when an identity cannot be generated.
+    pub fn try_new(
+        tenant_scope: &str,
+        session_id: SessionId,
+        now: Timestamp,
+    ) -> Result<Self, WorkerError> {
+        let id = UuidV7Generator::new(ExternalClock::new(now), OsRandomSource)
+            .generate()
+            .map_err(|_| WorkerError::StoreUnavailable {
+                code: "wake_lease_entropy",
+            })?;
+        Ok(Self {
+            tenant_scope: Arc::from(tenant_scope),
+            session_id,
+            id,
+        })
+    }
+}
+
+/// Validate an atomic wake-row mutation against its current ownership.
+pub(crate) fn check_lease(
+    tenant: &str,
+    session: SessionId,
+    current: Option<&WakeRow>,
+    lease: Option<&WakeLease>,
+) -> Result<(), WorkerError> {
+    let valid = match lease {
+        Some(lease) => {
+            lease.tenant_scope.as_ref() == tenant
+                && lease.session_id == session
+                && current.is_some_and(|row| row.lease_id == Some(lease.id))
+        }
+        None => current.is_none_or(|row| row.leased_by.is_none() && row.lease_id.is_none()),
+    };
+    if valid {
+        Ok(())
+    } else {
+        Err(WorkerError::LeaseLost)
+    }
+}
 
 /// Why a parked session is expected to wake.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -89,6 +153,8 @@ pub struct WakeRow {
     pub pending_id: Arc<str>,
     /// Worker currently holding the claim lease, if any.
     pub leased_by: Option<Arc<str>>,
+    /// Unique acquisition identity, absent when unleased.
+    pub lease_id: Option<WakeLeaseId>,
     /// When the current lease expires, if any.
     pub lease_expires_at: Option<Timestamp>,
     /// Number of failed claim/resume attempts recorded so far.
@@ -96,60 +162,43 @@ pub struct WakeRow {
 }
 
 /// Adapter-owned wake index. Not part of the kernel journal schema.
+/// All mutations atomically compare the acquisition fence. Initial publication
+/// (`lease = None`) may modify only unleased rows. Successful publication clears
+/// the lease; callers must never manufacture lease state in the replacement row.
 pub trait WakeIndexStore: Send + Sync {
-    /// Insert or replace one row, keyed by `(tenant_scope, session_id)`.
-    ///
+    /// Insert or replace a hint, atomically checking ownership.
     /// # Errors
-    ///
-    /// Returns store-unavailable or integrity failures.
-    fn upsert(&self, row: &WakeRow) -> Result<(), WorkerError>;
-
-    /// Remove the row for one session, if present.
-    ///
+    /// Returns `LeaseLost` for a stale fence or unfenced write to a leased row.
+    fn upsert(&self, row: &WakeRow, lease: Option<&WakeLease>) -> Result<(), WorkerError>;
+    /// Remove a hint, atomically checking ownership.
     /// # Errors
-    ///
-    /// Returns store-unavailable or integrity failures.
-    fn delete(&self, tenant_scope: &str, session_id: SessionId) -> Result<(), WorkerError>;
-
-    /// Every row (any tenant) that is due at `now` and not currently
-    /// under an open lease, up to `limit`.
-    ///
-    /// Repeated bounded scans must make progress past previously returned
-    /// rows even when callers leave them unchanged (for example, unanswered
-    /// interactions). Built-in stores rotate in key order per store handle;
-    /// a newly opened handle starts at the beginning. Ordering is not stable
-    /// across calls. A zero limit does not advance the scan.
-    ///
+    /// Returns `LeaseLost` for a stale fence or unfenced delete of a leased row.
+    fn delete(
+        &self,
+        tenant_scope: &str,
+        session_id: SessionId,
+        lease: Option<&WakeLease>,
+    ) -> Result<(), WorkerError>;
+    /// Read a bounded, rotating page of due rows with absent or expired leases.
+    /// A zero limit does not advance the cursor. Ordering across calls is not stable.
     /// # Errors
-    ///
     /// Returns store-unavailable or integrity failures.
     fn load_due(&self, now: Timestamp, limit: usize) -> Result<Vec<WakeRow>, WorkerError>;
-
-    /// Every row for one tenant, regardless of lease or due state.
-    ///
+    /// Read every row for one tenant, including leased rows.
     /// # Errors
-    ///
     /// Returns store-unavailable or integrity failures.
     fn load_tenant(&self, tenant_scope: &str) -> Result<Vec<WakeRow>, WorkerError>;
-
-    /// Whether one tenant currently has an interaction wake for `pending_id`.
-    ///
+    /// Whether the tenant has an interaction hint for the pending identity.
     /// # Errors
-    ///
     /// Returns store-unavailable or integrity failures.
     fn contains_interaction(
         &self,
         tenant_scope: &str,
         pending_id: &str,
     ) -> Result<bool, WorkerError>;
-
-    /// Attempt to claim one session for `worker_id`, winning only when the
-    /// existing lease is absent or expired. Third-party stores fail closed
-    /// unless they override this method.
-    ///
+    /// Claim an absent or expired lease and return a fresh acquisition fence.
     /// # Errors
-    ///
-    /// Returns [`WorkerError::StoreUnavailable`] by default.
+    /// Third-party stores fail closed unless they implement fenced claims.
     fn try_claim(
         &self,
         tenant_scope: &str,
@@ -157,58 +206,29 @@ pub trait WakeIndexStore: Send + Sync {
         worker_id: &str,
         now: Timestamp,
         lease_ttl_ms: u64,
-    ) -> Result<bool, WorkerError> {
+    ) -> Result<Option<WakeLease>, WorkerError> {
         let _ = (tenant_scope, session_id, worker_id, now, lease_ttl_ms);
         Err(WorkerError::StoreUnavailable {
             code: "wake_claim_unsupported",
         })
     }
-
-    /// Extend the current holder's lease. Succeeds only when `worker_id`
-    /// already holds the lease. Third-party stores fail closed unless they
-    /// override this method.
-    ///
+    /// Renew a matching, unexpired acquisition. Expired fences cannot resurrect leases.
     /// # Errors
-    ///
-    /// Returns [`WorkerError::StoreUnavailable`] by default.
+    /// Returns store-unavailable or integrity failures.
     fn renew(
         &self,
-        tenant_scope: &str,
-        session_id: SessionId,
-        worker_id: &str,
+        lease: &WakeLease,
         now: Timestamp,
         lease_ttl_ms: u64,
-    ) -> Result<bool, WorkerError> {
-        let _ = (tenant_scope, session_id, worker_id, now, lease_ttl_ms);
-        Err(WorkerError::StoreUnavailable {
-            code: "wake_renew_unsupported",
-        })
-    }
-
-    /// Release a lease held by `worker_id` without modifying retry state.
-    ///
-    /// # Errors
-    ///
-    /// Returns store-unavailable or integrity failures.
-    fn release(
-        &self,
-        tenant_scope: &str,
-        session_id: SessionId,
-        worker_id: &str,
     ) -> Result<bool, WorkerError>;
-
-    /// Record a failed resume attempt: clears the lease, increments
-    /// `attempts`, and schedules the next attempt at `retry_at`.
-    ///
+    /// Release only the matching acquisition without changing retry state.
     /// # Errors
-    ///
     /// Returns store-unavailable or integrity failures.
-    fn record_failure(
-        &self,
-        tenant_scope: &str,
-        session_id: SessionId,
-        retry_at: Timestamp,
-    ) -> Result<(), WorkerError>;
+    fn release(&self, lease: &WakeLease) -> Result<bool, WorkerError>;
+    /// Record failure and backoff only for the matching acquisition.
+    /// # Errors
+    /// Returns `LeaseLost` for a stale fence, or storage/integrity failures.
+    fn record_failure(&self, lease: &WakeLease, retry_at: Timestamp) -> Result<(), WorkerError>;
 }
 
 /// Whether the row's lease is absent or expired at `now`.

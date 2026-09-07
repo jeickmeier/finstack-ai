@@ -4,6 +4,9 @@ use std::future::{Future, poll_fn};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 use std::task::Poll;
+use std::time::Duration;
+
+use finstack_ai_runtime::ports::PortFuture;
 
 use finstack_ai_kernel::{
     AuthorizationEvidence, ContentBlock, EffectDeferred, ErrorCategory, ErrorDescriptor,
@@ -235,26 +238,44 @@ impl ChildRunBridge {
     }
 
     async fn pump_child(&self, child: &AgentRun, context: &ChildEventContext) {
+        // One in-flight callback and no queued batches. It is polled alongside
+        // event consumption, so a pending sink never gates child settlement.
+        // Completion or cancellation of this pump drops the callback directly.
+        let mut delivery: Option<PortFuture<()>> = None;
         loop {
-            match child.next_event_batch().await {
-                Ok(Some(batch)) => {
+            let mut next = Box::pin(child.next_event_batch());
+            let batch = poll_fn(|cx| {
+                if delivery
+                    .as_mut()
+                    .is_some_and(|future| future.as_mut().poll(cx).is_ready())
+                {
+                    delivery = None;
+                }
+                next.as_mut().poll(cx)
+            })
+            .await;
+            match batch {
+                Ok(Some(batch)) if delivery.is_none() => {
                     if let Some(sink) = &self.sink {
                         let sink = Arc::clone(sink);
                         let context = context.clone();
-                        let _ = driver::spawn(Box::pin(async move {
-                            let mut fut = sink.on_batch(&context, &batch);
-                            poll_fn(move |cx| {
-                                match catch_unwind(AssertUnwindSafe(|| {
-                                    Future::poll(fut.as_mut(), cx)
-                                })) {
+                        delivery = Some(Box::pin(async move {
+                            let Ok(mut future) =
+                                catch_unwind(AssertUnwindSafe(|| sink.on_batch(&context, &batch)))
+                            else {
+                                return;
+                            };
+                            let callback = poll_fn(move |cx| {
+                                match catch_unwind(AssertUnwindSafe(|| future.as_mut().poll(cx))) {
                                     Ok(poll) => poll.map(|_| ()),
                                     Err(_) => Poll::Ready(()),
                                 }
-                            })
-                            .await;
+                            });
+                            let _ = driver::timeout(Duration::from_secs(1), callback).await;
                         }));
                     }
                 }
+                Ok(Some(_)) => {} // Best-effort notifications are dropped while busy.
                 Ok(None) | Err(_) => return,
             }
         }

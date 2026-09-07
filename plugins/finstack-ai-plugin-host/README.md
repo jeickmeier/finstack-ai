@@ -15,6 +15,13 @@ reads one local lockfile through `PluginHost::load_enabled` and does not
 claim that WASM alone is complete application-level safety. Discovery does
 not walk a plugin directory and does not fetch from a registry.
 
+`InstancePolicy::Serialized` keeps a successful instance between calls and
+replenishes its fuel budget for each invocation. A guest-call error, trap,
+timeout, cancellation, or dropped in-flight call discards that instance; the
+next call reconstructs it. Guests using this policy must tolerate losing their
+in-memory state after an interrupted or failed call. `Exclusive` continues to
+instantiate a fresh store for every call.
+
 Author a guest with [`finstack-ai-guest-sdk`](../finstack-ai-guest-sdk/README.md)
 and the templates under `plugins/templates/`. Host proofs for the
 published calculator, context-provider, and filesystem-sandbox

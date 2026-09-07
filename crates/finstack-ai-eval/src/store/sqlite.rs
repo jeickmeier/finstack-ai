@@ -180,3 +180,7 @@ impl EvalStore for SqliteEvalStore {
         Ok(inner.state.snapshot.clone())
     }
 }
+
+#[cfg(all(test, feature = "native-tokio"))]
+#[path = "sqlite_executor_tests.rs"]
+mod executor_tests;

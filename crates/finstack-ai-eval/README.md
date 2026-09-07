@@ -121,3 +121,9 @@ Validate all four Rust slices, including real process restart, using:
 ```sh
 mise run test-eval
 ```
+
+Native evaluation runners and graders await synchronous experiment-store operations
+on a blocking pool capped at 16 admitted calls across runners. Store acknowledgments
+still precede dispatch and scoring, and the runner owner retains its lease through
+settlement. A dropped database await does not cancel the call or release its pool
+capacity early. Direct `EvalStore` APIs remain synchronous for offline use.

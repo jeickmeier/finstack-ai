@@ -364,20 +364,24 @@ impl DurableHost {
 
     fn enqueue(&self, descriptor: &Descriptor, now: Timestamp) -> Result<(), DurableHostError> {
         let locator = &descriptor.locator;
-        self.adapters.upsert(&WakeRow {
-            tenant_scope: Arc::clone(&locator.tenant_scope),
-            session_id: locator.session_id,
-            lane_id: locator.lane_id,
-            run_id: locator.run_id,
-            workflow_kind: Arc::clone(&descriptor.workflow_kind),
-            reason: WakeReason::Runnable,
-            wake_at: Some(now),
-            expires_at: None,
-            pending_id: Arc::from(locator.run_id.to_canonical_string()),
-            leased_by: None,
-            lease_expires_at: None,
-            attempts: 0,
-        })?;
+        self.adapters.upsert(
+            &WakeRow {
+                tenant_scope: Arc::clone(&locator.tenant_scope),
+                session_id: locator.session_id,
+                lane_id: locator.lane_id,
+                run_id: locator.run_id,
+                workflow_kind: Arc::clone(&descriptor.workflow_kind),
+                reason: WakeReason::Runnable,
+                wake_at: Some(now),
+                expires_at: None,
+                pending_id: Arc::from(locator.run_id.to_canonical_string()),
+                leased_by: None,
+                lease_id: None,
+                lease_expires_at: None,
+                attempts: 0,
+            },
+            None,
+        )?;
         Ok(())
     }
 

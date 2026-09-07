@@ -2,8 +2,8 @@
 use crate::execution::Cancellation;
 use crate::{
     AttemptStatus, Cell, EVAL_ATTEMPT_UNRESOLVED, EVAL_SCORER_FAILED, EVAL_SUBJECT_LOCK_MISMATCH,
-    EvalError, EvalSpec, EvalStore, ExecutionIdentity, GraderOutcome, GraderRecord,
-    GraderReservation, ReconciledAttempt,
+    EvalError, EvalSpec, ExecutionIdentity, GraderOutcome, GraderRecord, GraderReservation,
+    ReconciledAttempt,
 };
 use finstack_ai::{Agent, AgentRunOutput, AgentRunRequest, Session};
 use finstack_ai_kernel::Digest;
@@ -24,7 +24,7 @@ pub struct GraderExecution {
     inner: Arc<Inner>,
 }
 pub(crate) struct GraderInvocation {
-    pub store: Arc<dyn EvalStore>,
+    pub store: crate::async_store::AsyncEvalStore,
     pub agent: Agent,
     pub spec: Arc<EvalSpec>,
     pub cell: Cell,
@@ -123,7 +123,7 @@ impl Inner {
             started_at_ms: crate::runner::now_ms(),
         };
         let key = reservation.key();
-        let snapshot = invocation.store.snapshot()?;
+        let snapshot = invocation.store.snapshot().await?;
         if let Some(prior) = snapshot.graders.get(&key) {
             if prior.reservation.lock_digest != reservation.lock_digest
                 || prior.reservation.request_digest != reservation.request_digest
@@ -135,7 +135,7 @@ impl Inner {
                 ));
             }
             return recover_grader(
-                invocation.store.as_ref(),
+                &invocation.store,
                 &invocation.agent,
                 &invocation.cell,
                 prior,
@@ -145,7 +145,7 @@ impl Inner {
             .ok_or_else(failed);
         }
         crate::budget::admission_budget(&invocation.spec, &snapshot)?;
-        invocation.store.reserve_grader(&reservation)?;
+        invocation.store.reserve_grader(&reservation).await?;
         let mut record = GraderRecord {
             reservation,
             execution: None,
@@ -163,7 +163,7 @@ impl Inner {
         .await;
         let Ok(Ok(session)) = session else {
             return recover_grader(
-                invocation.store.as_ref(),
+                &invocation.store,
                 &invocation.agent,
                 &invocation.cell,
                 &record,
@@ -183,7 +183,8 @@ impl Inner {
         };
         invocation
             .store
-            .bind_grader_execution(&key, identity.clone())?;
+            .bind_grader_execution(&key, identity.clone())
+            .await?;
         record.execution = Some(identity);
         crate::execution::drive(
             &lane,
@@ -194,7 +195,7 @@ impl Inner {
         )
         .await;
         recover_grader(
-            invocation.store.as_ref(),
+            &invocation.store,
             &invocation.agent,
             &invocation.cell,
             &record,
@@ -206,7 +207,7 @@ impl Inner {
 }
 
 pub(crate) async fn recover_grader(
-    store: &dyn EvalStore,
+    store: &crate::async_store::AsyncEvalStore,
     agent: &Agent,
     cell: &Cell,
     record: &GraderRecord,
@@ -237,7 +238,9 @@ pub(crate) async fn recover_grader(
                 unknown.status = AttemptStatus::Indeterminate;
                 unknown.reconciliation = crate::Reconciliation::Unresolved;
                 unknown.usage = crate::MeasuredUsage::default();
-                store.settle_grader(&record.reservation.key(), &GraderOutcome::from(unknown))?;
+                store
+                    .settle_grader(&record.reservation.key(), &GraderOutcome::from(unknown))
+                    .await?;
             }
             return Err(error);
         }
@@ -245,10 +248,12 @@ pub(crate) async fn recover_grader(
     if record.outcome.is_none()
         || (record.unresolved() && result.record.status != AttemptStatus::Indeterminate)
     {
-        store.settle_grader(
-            &record.reservation.key(),
-            &GraderOutcome::from(result.record.clone()),
-        )?;
+        store
+            .settle_grader(
+                &record.reservation.key(),
+                &GraderOutcome::from(result.record.clone()),
+            )
+            .await?;
     }
     if result.record.status == AttemptStatus::Indeterminate {
         return Err(unresolved());

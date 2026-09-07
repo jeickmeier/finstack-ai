@@ -33,7 +33,9 @@ use crate::signature::{SignaturePolicy, verify_manifest};
 pub enum InstancePolicy {
     /// Each call gets its own `Store` and `Instance` from the cached `Component`.
     Exclusive,
-    /// One store/instance behind a mutex. Concurrent guest entry fails closed.
+    /// Reuse a successful store/instance behind a mutex, with fresh fuel per call.
+    /// Concurrent entry fails closed. Errors, timeout, cancellation and dropped
+    /// calls discard the instance, so guest state must tolerate reconstruction.
     Serialized,
 }
 

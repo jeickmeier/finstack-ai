@@ -73,7 +73,7 @@ async fn a_poisoned_row_backs_off_and_does_not_stall_the_tick() {
     // cheap fast path instead of spending the drive budget.
     let mut healthy = store.load_tenant("tenant-a").expect("rows").remove(0);
     healthy.wake_at = Some(timestamp(2_100));
-    store.upsert(&healthy).expect("healthy row");
+    store.upsert(&healthy, None).expect("healthy row");
 
     // A poisoned row for a workflow kind with no registered ports factory.
     // Its claim never touches the journal: `resume_row` fails in the ports
@@ -89,10 +89,11 @@ async fn a_poisoned_row_backs_off_and_does_not_stall_the_tick() {
         expires_at: None,
         pending_id: Arc::from("effect-poison"),
         leased_by: None,
+        lease_id: None,
         lease_expires_at: None,
         attempts: 0,
     };
-    store.upsert(&poisoned).expect("poisoned row");
+    store.upsert(&poisoned, None).expect("poisoned row");
 
     clock.set(timestamp(2_200));
     let worker = WorkerBuilder::new(
@@ -375,11 +376,12 @@ fn wake_claim_defaults_fail_closed() {
 
     struct Naked;
 
+    use finstack_ai_workflow_worker::WakeLease;
     impl WakeIndexStore for Naked {
-        fn upsert(&self, _: &WakeRow) -> Result<(), WorkerError> {
+        fn upsert(&self, _: &WakeRow, _: Option<&WakeLease>) -> Result<(), WorkerError> {
             Ok(())
         }
-        fn delete(&self, _: &str, _: SessionId) -> Result<(), WorkerError> {
+        fn delete(&self, _: &str, _: SessionId, _: Option<&WakeLease>) -> Result<(), WorkerError> {
             Ok(())
         }
         fn load_due(&self, _: Timestamp, _: usize) -> Result<Vec<WakeRow>, WorkerError> {
@@ -391,10 +393,13 @@ fn wake_claim_defaults_fail_closed() {
         fn contains_interaction(&self, _: &str, _: &str) -> Result<bool, WorkerError> {
             Ok(false)
         }
-        fn release(&self, _: &str, _: SessionId, _: &str) -> Result<bool, WorkerError> {
+        fn renew(&self, _: &WakeLease, _: Timestamp, _: u64) -> Result<bool, WorkerError> {
             Ok(false)
         }
-        fn record_failure(&self, _: &str, _: SessionId, _: Timestamp) -> Result<(), WorkerError> {
+        fn release(&self, _: &WakeLease) -> Result<bool, WorkerError> {
+            Ok(false)
+        }
+        fn record_failure(&self, _: &WakeLease, _: Timestamp) -> Result<(), WorkerError> {
             Ok(())
         }
     }

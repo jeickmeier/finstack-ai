@@ -34,16 +34,30 @@ cargo run -p finstack-ai-workflow-worker --features daemon -- <sqlite-path>
 - Fire starts store a typed `SessionId` and compare-and-set from `Claimed` to
   `Started`. Fire idempotency keys use a domain-separated digest over
   length-prefixed identity fields.
-- Wake leases are claimed, renewed, and explicitly released by holder. A
-  worker that loses ownership performs no further journal work for that row.
+- Every successful wake claim returns a fresh `WakeLease`, even when the same
+  worker reacquires the row. Renewal, release, failure backoff, repark and delete
+  atomically compare that acquisition identity. Initial publication passes `None`
+  and cannot overwrite a leased row. Expired leases cannot be renewed.
+- A worker that loses ownership performs no further journal work for that row.
 
 ## SQLite schema
 
-`SqliteWorkerStore` owns `finstack_workflow_worker_schema` at version `1`.
+`SqliteWorkerStore` owns `finstack_workflow_worker_schema` at version `3`.
 It does not modify `PRAGMA user_version`, so it can share a file with the
 journal. Historical unversioned worker tables are intentionally rejected with
 `workflow_schema_reset_required`; create a fresh adapter database for this
 breaking release.
+
+Stop all workers before upgrading a version 1 or 2 adapter. Opening it with v3
+adds the claim identity column, preserves hints/inbox/fire records, and clears
+legacy leases in one transaction. Restart workers only after the upgrade;
+running old and new workers against the same database is unsupported. Old
+binaries reject the new schema when opened. The journal format is unchanged.
+
+Custom `WakeIndexStore` implementations must return `Option<WakeLease>` from
+`try_claim` and implement atomic fence checks on all owner mutations. Callers
+pass the acquired lease to renewal/release/backoff and `Some(&lease)` to repark
+or delete; initial publication uses `None`. There is no unfenced owner fallback.
 
 Started fires and dead letters have bounded retention methods. Hosts choose
 their retention window and call `purge_started` / `purge_dead_letters` from
@@ -56,3 +70,10 @@ maintenance work.
 `HitlLifecycle`, allowing the worker to capture interactions created during a
 re-park and to report authoritative `Accepted` or `Rejected` ingress outcomes
 without a crate dependency cycle.
+
+Worker ticks await synchronous adapter and interaction-lifecycle calls on a blocking
+pool with at most 16 admitted calls across workers. Dropping an await cannot cancel
+a database call; its capacity remains held until the call finishes, and wake writes
+still require the acquisition fence. Lease renewal runs every one-third of the
+lease duration, separately from session polling. Direct synchronous store and
+delivery APIs remain the caller's responsibility to schedule off an async executor.

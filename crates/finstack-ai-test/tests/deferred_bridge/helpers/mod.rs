@@ -333,6 +333,10 @@ pub(crate) async fn deferred_tool_parent() -> (Agent, AgentRun, Arc<dyn JournalS
             Arc::clone(&store),
         ),
     )
+    .policy(finstack_ai::RunPolicy {
+        child_runs: finstack_ai::ChildRunPolicy::Allow { max_depth: 1 },
+        ..finstack_ai::RunPolicy::default()
+    })
     .toolset(
         ComponentRef::new(
             ComponentId::parse("test.tools.echo").expect("toolset"),

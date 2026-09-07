@@ -66,6 +66,9 @@ impl core::fmt::Debug for finstack_ai_workflow_worker::InteractionDeliveryOutcom
 pub fn finstack_ai_workflow_worker::InteractionDeliveryOutcome::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Copy for finstack_ai_workflow_worker::InteractionDeliveryOutcome
 impl core::marker::StructuralPartialEq for finstack_ai_workflow_worker::InteractionDeliveryOutcome
+pub enum finstack_ai_workflow_worker::WakeLeaseTag
+impl finstack_ai_kernel::primitives::ids::IdTag for finstack_ai_workflow_worker::WakeLeaseTag
+pub const finstack_ai_workflow_worker::WakeLeaseTag::NAME: &'static str
 pub enum finstack_ai_workflow_worker::WakeReason
 pub finstack_ai_workflow_worker::WakeReason::Deferred
 pub finstack_ai_workflow_worker::WakeReason::Interaction
@@ -202,14 +205,14 @@ pub fn finstack_ai_workflow_worker::MemoryWorkerStore::load_dead_letters(&self, 
 pub fn finstack_ai_workflow_worker::MemoryWorkerStore::purge_dead_letters(&self, finstack_ai_kernel::primitives::time::Timestamp, usize) -> core::result::Result<usize, finstack_ai_workflow_worker::WorkerError>
 impl finstack_ai_workflow_worker::WakeIndexStore for finstack_ai_workflow_worker::MemoryWorkerStore
 pub fn finstack_ai_workflow_worker::MemoryWorkerStore::contains_interaction(&self, &str, &str) -> core::result::Result<bool, finstack_ai_workflow_worker::WorkerError>
-pub fn finstack_ai_workflow_worker::MemoryWorkerStore::delete(&self, &str, finstack_ai_kernel::primitives::ids::SessionId) -> core::result::Result<(), finstack_ai_workflow_worker::WorkerError>
+pub fn finstack_ai_workflow_worker::MemoryWorkerStore::delete(&self, &str, finstack_ai_kernel::primitives::ids::SessionId, core::option::Option<&finstack_ai_workflow_worker::WakeLease>) -> core::result::Result<(), finstack_ai_workflow_worker::WorkerError>
 pub fn finstack_ai_workflow_worker::MemoryWorkerStore::load_due(&self, finstack_ai_kernel::primitives::time::Timestamp, usize) -> core::result::Result<alloc::vec::Vec<finstack_ai_workflow_worker::WakeRow>, finstack_ai_workflow_worker::WorkerError>
 pub fn finstack_ai_workflow_worker::MemoryWorkerStore::load_tenant(&self, &str) -> core::result::Result<alloc::vec::Vec<finstack_ai_workflow_worker::WakeRow>, finstack_ai_workflow_worker::WorkerError>
-pub fn finstack_ai_workflow_worker::MemoryWorkerStore::record_failure(&self, &str, finstack_ai_kernel::primitives::ids::SessionId, finstack_ai_kernel::primitives::time::Timestamp) -> core::result::Result<(), finstack_ai_workflow_worker::WorkerError>
-pub fn finstack_ai_workflow_worker::MemoryWorkerStore::release(&self, &str, finstack_ai_kernel::primitives::ids::SessionId, &str) -> core::result::Result<bool, finstack_ai_workflow_worker::WorkerError>
-pub fn finstack_ai_workflow_worker::MemoryWorkerStore::renew(&self, &str, finstack_ai_kernel::primitives::ids::SessionId, &str, finstack_ai_kernel::primitives::time::Timestamp, u64) -> core::result::Result<bool, finstack_ai_workflow_worker::WorkerError>
-pub fn finstack_ai_workflow_worker::MemoryWorkerStore::try_claim(&self, &str, finstack_ai_kernel::primitives::ids::SessionId, &str, finstack_ai_kernel::primitives::time::Timestamp, u64) -> core::result::Result<bool, finstack_ai_workflow_worker::WorkerError>
-pub fn finstack_ai_workflow_worker::MemoryWorkerStore::upsert(&self, &finstack_ai_workflow_worker::WakeRow) -> core::result::Result<(), finstack_ai_workflow_worker::WorkerError>
+pub fn finstack_ai_workflow_worker::MemoryWorkerStore::record_failure(&self, &finstack_ai_workflow_worker::WakeLease, finstack_ai_kernel::primitives::time::Timestamp) -> core::result::Result<(), finstack_ai_workflow_worker::WorkerError>
+pub fn finstack_ai_workflow_worker::MemoryWorkerStore::release(&self, &finstack_ai_workflow_worker::WakeLease) -> core::result::Result<bool, finstack_ai_workflow_worker::WorkerError>
+pub fn finstack_ai_workflow_worker::MemoryWorkerStore::renew(&self, &finstack_ai_workflow_worker::WakeLease, finstack_ai_kernel::primitives::time::Timestamp, u64) -> core::result::Result<bool, finstack_ai_workflow_worker::WorkerError>
+pub fn finstack_ai_workflow_worker::MemoryWorkerStore::try_claim(&self, &str, finstack_ai_kernel::primitives::ids::SessionId, &str, finstack_ai_kernel::primitives::time::Timestamp, u64) -> core::result::Result<core::option::Option<finstack_ai_workflow_worker::WakeLease>, finstack_ai_workflow_worker::WorkerError>
+pub fn finstack_ai_workflow_worker::MemoryWorkerStore::upsert(&self, &finstack_ai_workflow_worker::WakeRow, core::option::Option<&finstack_ai_workflow_worker::WakeLease>) -> core::result::Result<(), finstack_ai_workflow_worker::WorkerError>
 pub struct finstack_ai_workflow_worker::RecoveryRegistration
 pub finstack_ai_workflow_worker::RecoveryRegistration::descriptor: alloc::sync::Arc<[u8]>
 pub finstack_ai_workflow_worker::RecoveryRegistration::locator: finstack_ai_kernel::records::run::external::OperationLocator
@@ -246,14 +249,14 @@ pub fn finstack_ai_workflow_worker::SqliteWorkerStore::load_recovery(&self, &fin
 pub fn finstack_ai_workflow_worker::SqliteWorkerStore::scan_recovery(&self, &str, core::option::Option<finstack_ai_kernel::primitives::ids::RunId>, usize) -> core::result::Result<alloc::vec::Vec<finstack_ai_workflow_worker::RecoveryRegistration>, finstack_ai_workflow_worker::WorkerError>
 impl finstack_ai_workflow_worker::WakeIndexStore for finstack_ai_workflow_worker::SqliteWorkerStore
 pub fn finstack_ai_workflow_worker::SqliteWorkerStore::contains_interaction(&self, &str, &str) -> core::result::Result<bool, finstack_ai_workflow_worker::WorkerError>
-pub fn finstack_ai_workflow_worker::SqliteWorkerStore::delete(&self, &str, finstack_ai_kernel::primitives::ids::SessionId) -> core::result::Result<(), finstack_ai_workflow_worker::WorkerError>
+pub fn finstack_ai_workflow_worker::SqliteWorkerStore::delete(&self, &str, finstack_ai_kernel::primitives::ids::SessionId, core::option::Option<&finstack_ai_workflow_worker::WakeLease>) -> core::result::Result<(), finstack_ai_workflow_worker::WorkerError>
 pub fn finstack_ai_workflow_worker::SqliteWorkerStore::load_due(&self, finstack_ai_kernel::primitives::time::Timestamp, usize) -> core::result::Result<alloc::vec::Vec<finstack_ai_workflow_worker::WakeRow>, finstack_ai_workflow_worker::WorkerError>
 pub fn finstack_ai_workflow_worker::SqliteWorkerStore::load_tenant(&self, &str) -> core::result::Result<alloc::vec::Vec<finstack_ai_workflow_worker::WakeRow>, finstack_ai_workflow_worker::WorkerError>
-pub fn finstack_ai_workflow_worker::SqliteWorkerStore::record_failure(&self, &str, finstack_ai_kernel::primitives::ids::SessionId, finstack_ai_kernel::primitives::time::Timestamp) -> core::result::Result<(), finstack_ai_workflow_worker::WorkerError>
-pub fn finstack_ai_workflow_worker::SqliteWorkerStore::release(&self, &str, finstack_ai_kernel::primitives::ids::SessionId, &str) -> core::result::Result<bool, finstack_ai_workflow_worker::WorkerError>
-pub fn finstack_ai_workflow_worker::SqliteWorkerStore::renew(&self, &str, finstack_ai_kernel::primitives::ids::SessionId, &str, finstack_ai_kernel::primitives::time::Timestamp, u64) -> core::result::Result<bool, finstack_ai_workflow_worker::WorkerError>
-pub fn finstack_ai_workflow_worker::SqliteWorkerStore::try_claim(&self, &str, finstack_ai_kernel::primitives::ids::SessionId, &str, finstack_ai_kernel::primitives::time::Timestamp, u64) -> core::result::Result<bool, finstack_ai_workflow_worker::WorkerError>
-pub fn finstack_ai_workflow_worker::SqliteWorkerStore::upsert(&self, &finstack_ai_workflow_worker::WakeRow) -> core::result::Result<(), finstack_ai_workflow_worker::WorkerError>
+pub fn finstack_ai_workflow_worker::SqliteWorkerStore::record_failure(&self, &finstack_ai_workflow_worker::WakeLease, finstack_ai_kernel::primitives::time::Timestamp) -> core::result::Result<(), finstack_ai_workflow_worker::WorkerError>
+pub fn finstack_ai_workflow_worker::SqliteWorkerStore::release(&self, &finstack_ai_workflow_worker::WakeLease) -> core::result::Result<bool, finstack_ai_workflow_worker::WorkerError>
+pub fn finstack_ai_workflow_worker::SqliteWorkerStore::renew(&self, &finstack_ai_workflow_worker::WakeLease, finstack_ai_kernel::primitives::time::Timestamp, u64) -> core::result::Result<bool, finstack_ai_workflow_worker::WorkerError>
+pub fn finstack_ai_workflow_worker::SqliteWorkerStore::try_claim(&self, &str, finstack_ai_kernel::primitives::ids::SessionId, &str, finstack_ai_kernel::primitives::time::Timestamp, u64) -> core::result::Result<core::option::Option<finstack_ai_workflow_worker::WakeLease>, finstack_ai_workflow_worker::WorkerError>
+pub fn finstack_ai_workflow_worker::SqliteWorkerStore::upsert(&self, &finstack_ai_workflow_worker::WakeRow, core::option::Option<&finstack_ai_workflow_worker::WakeLease>) -> core::result::Result<(), finstack_ai_workflow_worker::WorkerError>
 pub struct finstack_ai_workflow_worker::StartedRun
 pub finstack_ai_workflow_worker::StartedRun::session_id: finstack_ai_kernel::primitives::ids::SessionId
 impl core::clone::Clone for finstack_ai_workflow_worker::StartedRun
@@ -283,11 +286,26 @@ impl core::fmt::Debug for finstack_ai_workflow_worker::TickReport
 pub fn finstack_ai_workflow_worker::TickReport::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Copy for finstack_ai_workflow_worker::TickReport
 impl core::marker::StructuralPartialEq for finstack_ai_workflow_worker::TickReport
+pub struct finstack_ai_workflow_worker::WakeLease
+pub finstack_ai_workflow_worker::WakeLease::id: finstack_ai_workflow_worker::WakeLeaseId
+pub finstack_ai_workflow_worker::WakeLease::session_id: finstack_ai_kernel::primitives::ids::SessionId
+pub finstack_ai_workflow_worker::WakeLease::tenant_scope: alloc::sync::Arc<str>
+impl finstack_ai_workflow_worker::WakeLease
+pub fn finstack_ai_workflow_worker::WakeLease::try_new(&str, finstack_ai_kernel::primitives::ids::SessionId, finstack_ai_kernel::primitives::time::Timestamp) -> core::result::Result<Self, finstack_ai_workflow_worker::WorkerError>
+impl core::clone::Clone for finstack_ai_workflow_worker::WakeLease
+pub fn finstack_ai_workflow_worker::WakeLease::clone(&self) -> finstack_ai_workflow_worker::WakeLease
+impl core::cmp::Eq for finstack_ai_workflow_worker::WakeLease
+impl core::cmp::PartialEq for finstack_ai_workflow_worker::WakeLease
+pub fn finstack_ai_workflow_worker::WakeLease::eq(&self, &finstack_ai_workflow_worker::WakeLease) -> bool
+impl core::fmt::Debug for finstack_ai_workflow_worker::WakeLease
+pub fn finstack_ai_workflow_worker::WakeLease::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_workflow_worker::WakeLease
 pub struct finstack_ai_workflow_worker::WakeRow
 pub finstack_ai_workflow_worker::WakeRow::attempts: u32
 pub finstack_ai_workflow_worker::WakeRow::expires_at: core::option::Option<finstack_ai_kernel::primitives::time::Timestamp>
 pub finstack_ai_workflow_worker::WakeRow::lane_id: finstack_ai_kernel::primitives::ids::LaneId
 pub finstack_ai_workflow_worker::WakeRow::lease_expires_at: core::option::Option<finstack_ai_kernel::primitives::time::Timestamp>
+pub finstack_ai_workflow_worker::WakeRow::lease_id: core::option::Option<finstack_ai_workflow_worker::WakeLeaseId>
 pub finstack_ai_workflow_worker::WakeRow::leased_by: core::option::Option<alloc::sync::Arc<str>>
 pub finstack_ai_workflow_worker::WakeRow::pending_id: alloc::sync::Arc<str>
 pub finstack_ai_workflow_worker::WakeRow::reason: finstack_ai_workflow_worker::WakeReason
@@ -390,34 +408,34 @@ pub trait finstack_ai_workflow_worker::RunStarter: core::marker::Send + core::ma
 pub fn finstack_ai_workflow_worker::RunStarter::start<'a>(&'a self, &'a finstack_ai_workflow_local::cron::CronFire, &'a str) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::result::Result<finstack_ai_workflow_worker::StartedRun, finstack_ai_workflow_worker::WorkerError>> + core::marker::Send + 'a)>>
 pub trait finstack_ai_workflow_worker::WakeIndexStore: core::marker::Send + core::marker::Sync
 pub fn finstack_ai_workflow_worker::WakeIndexStore::contains_interaction(&self, &str, &str) -> core::result::Result<bool, finstack_ai_workflow_worker::WorkerError>
-pub fn finstack_ai_workflow_worker::WakeIndexStore::delete(&self, &str, finstack_ai_kernel::primitives::ids::SessionId) -> core::result::Result<(), finstack_ai_workflow_worker::WorkerError>
+pub fn finstack_ai_workflow_worker::WakeIndexStore::delete(&self, &str, finstack_ai_kernel::primitives::ids::SessionId, core::option::Option<&finstack_ai_workflow_worker::WakeLease>) -> core::result::Result<(), finstack_ai_workflow_worker::WorkerError>
 pub fn finstack_ai_workflow_worker::WakeIndexStore::load_due(&self, finstack_ai_kernel::primitives::time::Timestamp, usize) -> core::result::Result<alloc::vec::Vec<finstack_ai_workflow_worker::WakeRow>, finstack_ai_workflow_worker::WorkerError>
 pub fn finstack_ai_workflow_worker::WakeIndexStore::load_tenant(&self, &str) -> core::result::Result<alloc::vec::Vec<finstack_ai_workflow_worker::WakeRow>, finstack_ai_workflow_worker::WorkerError>
-pub fn finstack_ai_workflow_worker::WakeIndexStore::record_failure(&self, &str, finstack_ai_kernel::primitives::ids::SessionId, finstack_ai_kernel::primitives::time::Timestamp) -> core::result::Result<(), finstack_ai_workflow_worker::WorkerError>
-pub fn finstack_ai_workflow_worker::WakeIndexStore::release(&self, &str, finstack_ai_kernel::primitives::ids::SessionId, &str) -> core::result::Result<bool, finstack_ai_workflow_worker::WorkerError>
-pub fn finstack_ai_workflow_worker::WakeIndexStore::renew(&self, &str, finstack_ai_kernel::primitives::ids::SessionId, &str, finstack_ai_kernel::primitives::time::Timestamp, u64) -> core::result::Result<bool, finstack_ai_workflow_worker::WorkerError>
-pub fn finstack_ai_workflow_worker::WakeIndexStore::try_claim(&self, &str, finstack_ai_kernel::primitives::ids::SessionId, &str, finstack_ai_kernel::primitives::time::Timestamp, u64) -> core::result::Result<bool, finstack_ai_workflow_worker::WorkerError>
-pub fn finstack_ai_workflow_worker::WakeIndexStore::upsert(&self, &finstack_ai_workflow_worker::WakeRow) -> core::result::Result<(), finstack_ai_workflow_worker::WorkerError>
+pub fn finstack_ai_workflow_worker::WakeIndexStore::record_failure(&self, &finstack_ai_workflow_worker::WakeLease, finstack_ai_kernel::primitives::time::Timestamp) -> core::result::Result<(), finstack_ai_workflow_worker::WorkerError>
+pub fn finstack_ai_workflow_worker::WakeIndexStore::release(&self, &finstack_ai_workflow_worker::WakeLease) -> core::result::Result<bool, finstack_ai_workflow_worker::WorkerError>
+pub fn finstack_ai_workflow_worker::WakeIndexStore::renew(&self, &finstack_ai_workflow_worker::WakeLease, finstack_ai_kernel::primitives::time::Timestamp, u64) -> core::result::Result<bool, finstack_ai_workflow_worker::WorkerError>
+pub fn finstack_ai_workflow_worker::WakeIndexStore::try_claim(&self, &str, finstack_ai_kernel::primitives::ids::SessionId, &str, finstack_ai_kernel::primitives::time::Timestamp, u64) -> core::result::Result<core::option::Option<finstack_ai_workflow_worker::WakeLease>, finstack_ai_workflow_worker::WorkerError>
+pub fn finstack_ai_workflow_worker::WakeIndexStore::upsert(&self, &finstack_ai_workflow_worker::WakeRow, core::option::Option<&finstack_ai_workflow_worker::WakeLease>) -> core::result::Result<(), finstack_ai_workflow_worker::WorkerError>
 impl finstack_ai_workflow_worker::WakeIndexStore for finstack_ai_workflow_worker::MemoryWorkerStore
 pub fn finstack_ai_workflow_worker::MemoryWorkerStore::contains_interaction(&self, &str, &str) -> core::result::Result<bool, finstack_ai_workflow_worker::WorkerError>
-pub fn finstack_ai_workflow_worker::MemoryWorkerStore::delete(&self, &str, finstack_ai_kernel::primitives::ids::SessionId) -> core::result::Result<(), finstack_ai_workflow_worker::WorkerError>
+pub fn finstack_ai_workflow_worker::MemoryWorkerStore::delete(&self, &str, finstack_ai_kernel::primitives::ids::SessionId, core::option::Option<&finstack_ai_workflow_worker::WakeLease>) -> core::result::Result<(), finstack_ai_workflow_worker::WorkerError>
 pub fn finstack_ai_workflow_worker::MemoryWorkerStore::load_due(&self, finstack_ai_kernel::primitives::time::Timestamp, usize) -> core::result::Result<alloc::vec::Vec<finstack_ai_workflow_worker::WakeRow>, finstack_ai_workflow_worker::WorkerError>
 pub fn finstack_ai_workflow_worker::MemoryWorkerStore::load_tenant(&self, &str) -> core::result::Result<alloc::vec::Vec<finstack_ai_workflow_worker::WakeRow>, finstack_ai_workflow_worker::WorkerError>
-pub fn finstack_ai_workflow_worker::MemoryWorkerStore::record_failure(&self, &str, finstack_ai_kernel::primitives::ids::SessionId, finstack_ai_kernel::primitives::time::Timestamp) -> core::result::Result<(), finstack_ai_workflow_worker::WorkerError>
-pub fn finstack_ai_workflow_worker::MemoryWorkerStore::release(&self, &str, finstack_ai_kernel::primitives::ids::SessionId, &str) -> core::result::Result<bool, finstack_ai_workflow_worker::WorkerError>
-pub fn finstack_ai_workflow_worker::MemoryWorkerStore::renew(&self, &str, finstack_ai_kernel::primitives::ids::SessionId, &str, finstack_ai_kernel::primitives::time::Timestamp, u64) -> core::result::Result<bool, finstack_ai_workflow_worker::WorkerError>
-pub fn finstack_ai_workflow_worker::MemoryWorkerStore::try_claim(&self, &str, finstack_ai_kernel::primitives::ids::SessionId, &str, finstack_ai_kernel::primitives::time::Timestamp, u64) -> core::result::Result<bool, finstack_ai_workflow_worker::WorkerError>
-pub fn finstack_ai_workflow_worker::MemoryWorkerStore::upsert(&self, &finstack_ai_workflow_worker::WakeRow) -> core::result::Result<(), finstack_ai_workflow_worker::WorkerError>
+pub fn finstack_ai_workflow_worker::MemoryWorkerStore::record_failure(&self, &finstack_ai_workflow_worker::WakeLease, finstack_ai_kernel::primitives::time::Timestamp) -> core::result::Result<(), finstack_ai_workflow_worker::WorkerError>
+pub fn finstack_ai_workflow_worker::MemoryWorkerStore::release(&self, &finstack_ai_workflow_worker::WakeLease) -> core::result::Result<bool, finstack_ai_workflow_worker::WorkerError>
+pub fn finstack_ai_workflow_worker::MemoryWorkerStore::renew(&self, &finstack_ai_workflow_worker::WakeLease, finstack_ai_kernel::primitives::time::Timestamp, u64) -> core::result::Result<bool, finstack_ai_workflow_worker::WorkerError>
+pub fn finstack_ai_workflow_worker::MemoryWorkerStore::try_claim(&self, &str, finstack_ai_kernel::primitives::ids::SessionId, &str, finstack_ai_kernel::primitives::time::Timestamp, u64) -> core::result::Result<core::option::Option<finstack_ai_workflow_worker::WakeLease>, finstack_ai_workflow_worker::WorkerError>
+pub fn finstack_ai_workflow_worker::MemoryWorkerStore::upsert(&self, &finstack_ai_workflow_worker::WakeRow, core::option::Option<&finstack_ai_workflow_worker::WakeLease>) -> core::result::Result<(), finstack_ai_workflow_worker::WorkerError>
 impl finstack_ai_workflow_worker::WakeIndexStore for finstack_ai_workflow_worker::SqliteWorkerStore
 pub fn finstack_ai_workflow_worker::SqliteWorkerStore::contains_interaction(&self, &str, &str) -> core::result::Result<bool, finstack_ai_workflow_worker::WorkerError>
-pub fn finstack_ai_workflow_worker::SqliteWorkerStore::delete(&self, &str, finstack_ai_kernel::primitives::ids::SessionId) -> core::result::Result<(), finstack_ai_workflow_worker::WorkerError>
+pub fn finstack_ai_workflow_worker::SqliteWorkerStore::delete(&self, &str, finstack_ai_kernel::primitives::ids::SessionId, core::option::Option<&finstack_ai_workflow_worker::WakeLease>) -> core::result::Result<(), finstack_ai_workflow_worker::WorkerError>
 pub fn finstack_ai_workflow_worker::SqliteWorkerStore::load_due(&self, finstack_ai_kernel::primitives::time::Timestamp, usize) -> core::result::Result<alloc::vec::Vec<finstack_ai_workflow_worker::WakeRow>, finstack_ai_workflow_worker::WorkerError>
 pub fn finstack_ai_workflow_worker::SqliteWorkerStore::load_tenant(&self, &str) -> core::result::Result<alloc::vec::Vec<finstack_ai_workflow_worker::WakeRow>, finstack_ai_workflow_worker::WorkerError>
-pub fn finstack_ai_workflow_worker::SqliteWorkerStore::record_failure(&self, &str, finstack_ai_kernel::primitives::ids::SessionId, finstack_ai_kernel::primitives::time::Timestamp) -> core::result::Result<(), finstack_ai_workflow_worker::WorkerError>
-pub fn finstack_ai_workflow_worker::SqliteWorkerStore::release(&self, &str, finstack_ai_kernel::primitives::ids::SessionId, &str) -> core::result::Result<bool, finstack_ai_workflow_worker::WorkerError>
-pub fn finstack_ai_workflow_worker::SqliteWorkerStore::renew(&self, &str, finstack_ai_kernel::primitives::ids::SessionId, &str, finstack_ai_kernel::primitives::time::Timestamp, u64) -> core::result::Result<bool, finstack_ai_workflow_worker::WorkerError>
-pub fn finstack_ai_workflow_worker::SqliteWorkerStore::try_claim(&self, &str, finstack_ai_kernel::primitives::ids::SessionId, &str, finstack_ai_kernel::primitives::time::Timestamp, u64) -> core::result::Result<bool, finstack_ai_workflow_worker::WorkerError>
-pub fn finstack_ai_workflow_worker::SqliteWorkerStore::upsert(&self, &finstack_ai_workflow_worker::WakeRow) -> core::result::Result<(), finstack_ai_workflow_worker::WorkerError>
+pub fn finstack_ai_workflow_worker::SqliteWorkerStore::record_failure(&self, &finstack_ai_workflow_worker::WakeLease, finstack_ai_kernel::primitives::time::Timestamp) -> core::result::Result<(), finstack_ai_workflow_worker::WorkerError>
+pub fn finstack_ai_workflow_worker::SqliteWorkerStore::release(&self, &finstack_ai_workflow_worker::WakeLease) -> core::result::Result<bool, finstack_ai_workflow_worker::WorkerError>
+pub fn finstack_ai_workflow_worker::SqliteWorkerStore::renew(&self, &finstack_ai_workflow_worker::WakeLease, finstack_ai_kernel::primitives::time::Timestamp, u64) -> core::result::Result<bool, finstack_ai_workflow_worker::WorkerError>
+pub fn finstack_ai_workflow_worker::SqliteWorkerStore::try_claim(&self, &str, finstack_ai_kernel::primitives::ids::SessionId, &str, finstack_ai_kernel::primitives::time::Timestamp, u64) -> core::result::Result<core::option::Option<finstack_ai_workflow_worker::WakeLease>, finstack_ai_workflow_worker::WorkerError>
+pub fn finstack_ai_workflow_worker::SqliteWorkerStore::upsert(&self, &finstack_ai_workflow_worker::WakeRow, core::option::Option<&finstack_ai_workflow_worker::WakeLease>) -> core::result::Result<(), finstack_ai_workflow_worker::WorkerError>
 pub trait finstack_ai_workflow_worker::WorkflowExecution: core::marker::Send + core::marker::Sync
 pub fn finstack_ai_workflow_worker::WorkflowExecution::advance<'a>(&'a self, &'a mut finstack_ai_runtime::driver::workflow::WorkflowSession) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::result::Result<finstack_ai_runtime::driver::workflow::WorkflowWait, finstack_ai_workflow_worker::WorkerError>> + core::marker::Send + 'a)>>
 pub fn finstack_ai_workflow_worker::WorkflowExecution::prepare<'a>(&'a self, &'a finstack_ai_runtime::driver::workflow::WorkflowSession) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::result::Result<(), finstack_ai_workflow_worker::WorkerError>> + core::marker::Send + 'a)>>
@@ -427,3 +445,4 @@ pub fn finstack_ai_workflow_worker::lease_deadline(finstack_ai_kernel::primitive
 pub fn finstack_ai_workflow_worker::lease_open(&finstack_ai_workflow_worker::WakeRow, finstack_ai_kernel::primitives::time::Timestamp) -> bool
 pub fn finstack_ai_workflow_worker::park_for_wake(&mut finstack_ai_runtime::driver::workflow::WorkflowSession, &dyn finstack_ai_workflow_worker::WakeIndexStore, &str) -> core::result::Result<finstack_ai_runtime::driver::workflow::WorkflowCheckpoint, finstack_ai_workflow_worker::WorkerError>
 pub fn finstack_ai_workflow_worker::wake_due(&finstack_ai_workflow_worker::WakeRow, finstack_ai_kernel::primitives::time::Timestamp) -> bool
+pub type finstack_ai_workflow_worker::WakeLeaseId = finstack_ai_kernel::primitives::ids::Id<finstack_ai_workflow_worker::WakeLeaseTag>

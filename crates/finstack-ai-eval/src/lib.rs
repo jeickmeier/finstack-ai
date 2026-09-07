@@ -21,6 +21,8 @@
 // Allow expect() in doc tests (they are test code)
 #![doc(test(attr(allow(clippy::expect_used))))]
 
+#[cfg(feature = "native-tokio")]
+mod async_store;
 mod attempt;
 #[cfg(feature = "native-tokio")]
 mod budget;

@@ -28,8 +28,8 @@ use serde::Serialize;
 use crate::error::WorkerError;
 use crate::fires::{FireRow, FireStatus, FireStore, idempotency_key};
 use crate::inbox::{InboxInsertOutcome, InboxKind, InboxRow, InboxStore};
-use crate::park::park_for_wake;
-use crate::wake::{WakeIndexStore, WakeReason, WakeRow, lease_deadline};
+use crate::park::index_checkpoint;
+use crate::wake::{WakeIndexStore, WakeLease, WakeReason, WakeRow, lease_deadline};
 
 /// Binds host-owned ports onto a bare attached session.
 pub trait PortsFactory: Send + Sync {
@@ -528,58 +528,33 @@ impl WorkflowWorker {
     pub async fn tick(&self) -> Result<TickReport, WorkerError> {
         let now = self.clock.now().map_err(|_| WorkerError::TimeOverflow)?;
         let mut report = TickReport::default();
-        self.tick_cron(now, &mut report)?;
+        self.tick_cron(now, &mut report).await?;
         Box::pin(self.tick_bridge(now, &mut report)).await?;
         Box::pin(self.tick_wake(now, &mut report)).await?;
         Ok(report)
     }
 
-    /// Phase 2: claim every due schedule and record its fire.
-    fn tick_cron(&self, now: Timestamp, report: &mut TickReport) -> Result<(), WorkerError> {
-        for schedule in self.cron.load_due(now, self.batch_limit)? {
-            match self.claim_schedule(&schedule, now) {
-                Ok(true) => report.cron_fires += 1,
-                Ok(false) => {}
-                Err(_) => report.failures += 1,
+    /// Record a bounded batch of claimed fires before advancing their schedules.
+    async fn tick_cron(&self, now: Timestamp, report: &mut TickReport) -> Result<(), WorkerError> {
+        let cron = Arc::clone(&self.cron);
+        let fires = Arc::clone(&self.fires);
+        let limit = self.batch_limit;
+        let (claimed, failures) = crate::blocking::run(move || {
+            let mut claimed = 0;
+            let mut failures = 0;
+            for schedule in cron.load_due(now, limit)? {
+                match claim_schedule(cron.as_ref(), fires.as_ref(), &schedule, now) {
+                    Ok(true) => claimed += 1,
+                    Ok(false) => {}
+                    Err(_) => failures += 1,
+                }
             }
-        }
+            Ok((claimed, failures))
+        })
+        .await?;
+        report.cron_fires += claimed;
+        report.failures += failures;
         Ok(())
-    }
-
-    /// Claim one due schedule, mirroring `LocalWorkflowDriver::fire_due`.
-    ///
-    /// The fire is recorded *before* the schedule CAS. The CAS is the durable,
-    /// irreversible step: once it lands, `next_fire_at` has moved past this
-    /// tick and nothing will ever offer the schedule again, so a fire recorded
-    /// after it and lost to a store failure is lost for good. Recording first
-    /// cannot double-run instead, because the record is keyed by
-    /// `(tenant, schedule_id, fire_count)` and every worker racing for this
-    /// tick derives the same `fire_count` from the same observed row: the
-    /// key collides, `record_claimed` ignores the duplicate, and the bridge
-    /// still starts exactly one run. Losing the CAS therefore leaves the
-    /// winner's identical record in place, and crashing between the two
-    /// leaves a fire that the next successful CAS reconciles to the same key.
-    fn claim_schedule(&self, schedule: &CronSchedule, now: Timestamp) -> Result<bool, WorkerError> {
-        let expected_next = schedule.next_fire_at.as_unix_ms();
-        let mut claimed = schedule.clone();
-        claimed.last_fired_at = Some(now);
-        claimed.fire_count = claimed.fire_count.saturating_add(1);
-        claimed.next_fire_at = claimed.expression.next_after(claimed.origin, now)?;
-        self.fires.record_claimed(&FireRow {
-            tenant_scope: Arc::clone(&claimed.tenant_scope),
-            schedule_id: Arc::clone(&claimed.schedule_id),
-            fire_count: claimed.fire_count,
-            fired_at: now,
-            status: FireStatus::Claimed,
-            started_session: None,
-        })?;
-        Ok(self.cron.try_claim(
-            claimed.tenant_scope.as_ref(),
-            claimed.schedule_id.as_ref(),
-            expected_next,
-            now,
-            &claimed,
-        )?)
     }
 
     /// Phase 3: bridge claimed-but-unstarted fires into started runs.
@@ -600,7 +575,10 @@ impl WorkflowWorker {
         now: Timestamp,
         report: &mut TickReport,
     ) -> Result<(), WorkerError> {
-        for row in self.fires.load_unstarted(self.batch_limit)? {
+        let fires = Arc::clone(&self.fires);
+        let limit = self.batch_limit;
+        let rows = crate::blocking::run(move || fires.load_unstarted(limit)).await?;
+        for row in rows {
             let Some(starter) = self.starters.get(row.schedule_id.as_ref()) else {
                 report.failures += 1;
                 continue;
@@ -622,12 +600,17 @@ impl WorkflowWorker {
                 continue;
             };
             self.clear_start_backoff(key.as_str());
-            match self.fires.mark_started(
-                row.tenant_scope.as_ref(),
-                row.schedule_id.as_ref(),
-                row.fire_count,
-                run.session_id,
-            ) {
+            let fires = Arc::clone(&self.fires);
+            match crate::blocking::run(move || {
+                fires.mark_started(
+                    row.tenant_scope.as_ref(),
+                    row.schedule_id.as_ref(),
+                    row.fire_count,
+                    run.session_id,
+                )
+            })
+            .await
+            {
                 Ok(_) => report.runs_started += 1,
                 Err(_) => report.failures += 1,
             }
@@ -637,7 +620,9 @@ impl WorkflowWorker {
 
     /// Phase 4: claim and resume every due parked session.
     async fn tick_wake(&self, now: Timestamp, report: &mut TickReport) -> Result<(), WorkerError> {
-        let due = self.wake.load_due(now, self.batch_limit)?;
+        let wake = Arc::clone(&self.wake);
+        let limit = self.batch_limit;
+        let due = crate::blocking::run(move || wake.load_due(now, limit)).await?;
         for row in due {
             if self
                 .tenant_scope
@@ -646,11 +631,17 @@ impl WorkflowWorker {
             {
                 continue;
             }
-            let Ok(entry) = self.inbox.load(
-                row.tenant_scope.as_ref(),
-                row.session_id,
-                row.pending_id.as_ref(),
-            ) else {
+            let inbox = Arc::clone(&self.inbox);
+            let key = row.clone();
+            let Ok(entry) = crate::blocking::run(move || {
+                inbox.load(
+                    key.tenant_scope.as_ref(),
+                    key.session_id,
+                    key.pending_id.as_ref(),
+                )
+            })
+            .await
+            else {
                 report.failures += 1;
                 continue;
             };
@@ -670,23 +661,32 @@ impl WorkflowWorker {
             // deadlines measured from the moment they are written, so each
             // row reads the clock afresh rather than reusing the tick's.
             let claim_now = self.row_now(now);
-            let claim = self.wake.try_claim(
-                row.tenant_scope.as_ref(),
-                row.session_id,
-                self.worker_id.as_ref(),
-                claim_now,
-                self.lease_ttl_ms,
-            );
-            let Ok(won) = claim else {
-                report.failures += 1;
-                continue;
+            let wake = Arc::clone(&self.wake);
+            let key = row.clone();
+            let worker_id = Arc::clone(&self.worker_id);
+            let ttl = self.lease_ttl_ms;
+            let claim = crate::blocking::run(move || {
+                wake.try_claim(
+                    key.tenant_scope.as_ref(),
+                    key.session_id,
+                    worker_id.as_ref(),
+                    claim_now,
+                    ttl,
+                )
+            })
+            .await;
+            let lease = match claim {
+                Ok(Some(lease)) => lease,
+                Ok(None) => continue,
+                Err(_) => {
+                    report.failures += 1;
+                    continue;
+                }
             };
-            if !won {
-                continue;
-            }
             let mut expired = false;
             let outcome =
-                Box::pin(self.resume_row(&row, entry.as_ref(), claim_now, &mut expired)).await;
+                Box::pin(self.resume_row(&row, &lease, entry.as_ref(), claim_now, &mut expired))
+                    .await;
             match outcome {
                 Ok(resumed @ (ResumeOutcome::Terminal | ResumeOutcome::Reparked)) => {
                     if expired {
@@ -699,23 +699,19 @@ impl WorkflowWorker {
                 }
                 Ok(ResumeOutcome::Rejected) => {
                     report.responses_rejected += 1;
-                    drop(self.wake.release(
-                        row.tenant_scope.as_ref(),
-                        row.session_id,
-                        self.worker_id.as_ref(),
-                    ));
+                    drop(self.release_lease(&lease).await);
                 }
                 Err(WorkerError::LeaseLost) => report.failures += 1,
                 Err(_) => {
                     report.failures += 1;
                     // A store that cannot record the backoff keeps the stale
                     // lease unless the holder can explicitly release it.
-                    if self.back_off(&row, self.row_now(now)).is_err() {
-                        drop(self.wake.release(
-                            row.tenant_scope.as_ref(),
-                            row.session_id,
-                            self.worker_id.as_ref(),
-                        ));
+                    if self
+                        .back_off(&row, &lease, self.row_now(now))
+                        .await
+                        .is_err()
+                    {
+                        drop(self.release_lease(&lease).await);
                     }
                 }
             }
@@ -742,24 +738,30 @@ impl WorkflowWorker {
                 if entry.kind == InboxKind::Interaction
                     && let Some(lifecycle) = &self.interaction_lifecycle
                 {
-                    lifecycle.settled(
-                        entry.tenant_scope.as_ref(),
-                        entry.pending_id.as_ref(),
+                    settle_interaction(
+                        Arc::clone(lifecycle),
+                        entry,
                         InteractionDeliveryOutcome::Rejected { reason_code },
                         now,
-                    )?;
+                    )
+                    .await?;
                 }
                 reason_code
             }
         };
-        self.inbox.dead_letter(
-            entry.tenant_scope.as_ref(),
-            entry.session_id,
-            entry.pending_id.as_ref(),
-            entry.payload_digest,
-            reason_code,
-            now,
-        )?;
+        let inbox = Arc::clone(&self.inbox);
+        let entry = entry.clone();
+        crate::blocking::run(move || {
+            inbox.dead_letter(
+                entry.tenant_scope.as_ref(),
+                entry.session_id,
+                entry.pending_id.as_ref(),
+                entry.payload_digest,
+                reason_code,
+                now,
+            )
+        })
+        .await?;
         Ok(Some(ResumeOutcome::Rejected))
     }
 
@@ -774,6 +776,7 @@ impl WorkflowWorker {
     async fn resume_row(
         &self,
         row: &WakeRow,
+        lease: &WakeLease,
         inbox_entry: Option<&InboxRow>,
         now: Timestamp,
         expired: &mut bool,
@@ -799,13 +802,13 @@ impl WorkflowWorker {
         let mut session = factory
             .bind(session)?
             .with_drive_timeout(self.drive_timeout);
-        self.ensure_lease(row, now)?;
+        self.ensure_lease(lease, now).await?;
         if let Some(execution) = self.executions.get(row.workflow_kind.as_ref()) {
             tokio::time::timeout(self.drive_timeout, execution.prepare(&session))
                 .await
                 .map_err(|_| WorkerError::Driver(WorkflowDriverError::DriveTimeout))??;
         }
-        self.ensure_lease(row, self.row_now(now))?;
+        self.ensure_lease(lease, self.row_now(now)).await?;
         if let Some(entry) = inbox_entry
             && let Some(outcome) = self.apply_inbox_entry(&session, entry, now).await?
         {
@@ -831,7 +834,7 @@ impl WorkflowWorker {
         // this row. Gating on `inbox_entry.is_none()` here would *under*-report
         // exactly that case.
         let was_pending = expiry_due(row, now) && pending_matches_row(&session, row);
-        self.ensure_lease(row, self.row_now(now))?;
+        self.ensure_lease(lease, self.row_now(now)).await?;
         session.respawn_owner().await?;
         if was_pending {
             // `respawn_owner` refreshes *before* it spawns, so the state it
@@ -839,25 +842,34 @@ impl WorkflowWorker {
             session.ensure_owner().await?;
             *expired = !pending_matches_row(&session, row);
         }
-        let driven = self.drive_leased(&mut session, row, now).await;
+        let driven = self.drive_leased(&mut session, row, lease, now).await;
         // Always join local work before handing control back, including lease
         // loss and timeout. Shutdown cannot undo already dispatched effects.
         let shutdown = session.shutdown_owner().await;
         let wait = driven?;
         shutdown?;
-        self.ensure_lease(row, self.row_now(now))?;
+        self.ensure_lease(lease, self.row_now(now)).await?;
         let terminal = matches!(wait, WorkflowWait::Terminal { .. });
         let security = session
             .last_state()
             .accepted()
             .map(|accepted| accepted.security().clone());
-        let checkpoint =
-            park_for_wake(&mut session, self.wake.as_ref(), row.workflow_kind.as_ref())?;
-        if let (Some(lifecycle), Some(security), WorkflowWait::Interaction { request, .. }) =
-            (&self.interaction_lifecycle, security, &wait)
-        {
-            lifecycle.capture(&checkpoint, request, &security, now)?;
-        }
+        let checkpoint = session.persist_handoff()?;
+        let wake = Arc::clone(&self.wake);
+        let lifecycle = self.interaction_lifecycle.clone();
+        let kind = Arc::clone(&row.workflow_kind);
+        let claim = lease.clone();
+        crate::blocking::run(move || {
+            index_checkpoint(wake.as_ref(), &checkpoint, &wait, &kind, Some(&claim))?;
+            if let (Some(lifecycle), Some(security), WorkflowWait::Interaction { request, .. }) =
+                (lifecycle, security, &wait)
+            {
+                lifecycle.capture(&checkpoint, request, &security, now)?;
+            }
+            Ok(())
+        })
+        .await?;
+        session.abort_owner();
         // Only now is the response fully consumed. Dropping it earlier would
         // strand the row: a non-timer row is claimed only while its inbox
         // entry exists, so a resume that failed after the delete could never
@@ -872,12 +884,17 @@ impl WorkflowWorker {
         // Ordering matters more than atomicity here, and the order above is
         // the one that cannot lose work.
         if let Some(entry) = inbox_entry {
-            let deleted = self.inbox.delete_if_digest(
-                entry.tenant_scope.as_ref(),
-                entry.session_id,
-                entry.pending_id.as_ref(),
-                entry.payload_digest,
-            )?;
+            let inbox = Arc::clone(&self.inbox);
+            let entry = entry.clone();
+            let deleted = crate::blocking::run(move || {
+                inbox.delete_if_digest(
+                    entry.tenant_scope.as_ref(),
+                    entry.session_id,
+                    entry.pending_id.as_ref(),
+                    entry.payload_digest,
+                )
+            })
+            .await?;
             if !deleted {
                 return Err(WorkerError::Conflict {
                     code: "inbox_consumed_conflict",
@@ -895,6 +912,7 @@ impl WorkflowWorker {
         &self,
         session: &mut WorkflowSession,
         row: &WakeRow,
+        lease: &WakeLease,
         now: Timestamp,
     ) -> Result<WorkflowWait, WorkerError> {
         let drive = async {
@@ -905,9 +923,11 @@ impl WorkflowWorker {
             }
         };
         let lease = async {
+            // Renewal tracks the lease duration, independently of journal polling.
+            let renewal_interval = Duration::from_millis((self.lease_ttl_ms / 3).max(1));
             loop {
-                self.ensure_lease(row, self.row_now(now))?;
-                tokio::time::sleep(POLL_INTERVAL).await;
+                tokio::time::sleep(renewal_interval).await;
+                self.ensure_lease(lease, self.row_now(now)).await?;
             }
         };
         tokio::select! {
@@ -999,36 +1019,40 @@ impl WorkflowWorker {
         if entry.kind == InboxKind::Interaction
             && let Some(lifecycle) = &self.interaction_lifecycle
         {
-            lifecycle.settled(
-                entry.tenant_scope.as_ref(),
-                entry.pending_id.as_ref(),
-                outcome,
-                now,
-            )?;
+            settle_interaction(Arc::clone(lifecycle), entry, outcome, now).await?;
         }
         Ok(outcome)
     }
 
     /// Record a failed resume with exponential backoff.
-    fn back_off(&self, row: &WakeRow, now: Timestamp) -> Result<(), WorkerError> {
+    async fn back_off(
+        &self,
+        row: &WakeRow,
+        lease: &WakeLease,
+        now: Timestamp,
+    ) -> Result<(), WorkerError> {
         let retry_at = lease_deadline(now, backoff_ms(row.attempts))?;
-        self.wake
-            .record_failure(row.tenant_scope.as_ref(), row.session_id, retry_at)
+        let wake = Arc::clone(&self.wake);
+        let lease = lease.clone();
+        crate::blocking::run(move || wake.record_failure(&lease, retry_at)).await
     }
 
     /// Renew and verify ownership before journal-affecting resume work.
-    fn ensure_lease(&self, row: &WakeRow, now: Timestamp) -> Result<(), WorkerError> {
-        if self.wake.renew(
-            row.tenant_scope.as_ref(),
-            row.session_id,
-            self.worker_id.as_ref(),
-            now,
-            self.lease_ttl_ms,
-        )? {
+    async fn ensure_lease(&self, lease: &WakeLease, now: Timestamp) -> Result<(), WorkerError> {
+        let wake = Arc::clone(&self.wake);
+        let lease = lease.clone();
+        let ttl = self.lease_ttl_ms;
+        if crate::blocking::run(move || wake.renew(&lease, now, ttl)).await? {
             Ok(())
         } else {
             Err(WorkerError::LeaseLost)
         }
+    }
+
+    async fn release_lease(&self, lease: &WakeLease) -> Result<bool, WorkerError> {
+        let wake = Arc::clone(&self.wake);
+        let lease = lease.clone();
+        crate::blocking::run(move || wake.release(&lease)).await
     }
 
     /// Whether this fire's starter is still inside its backoff window.
@@ -1155,4 +1179,51 @@ impl Drop for WorkerHandle {
             join.abort();
         }
     }
+}
+
+// Fire intent precedes schedule CAS so a crash can reconcile the same fire key.
+fn claim_schedule(
+    cron: &dyn CronScheduleStore,
+    fires: &dyn FireStore,
+    schedule: &CronSchedule,
+    now: Timestamp,
+) -> Result<bool, WorkerError> {
+    let expected_next = schedule.next_fire_at.as_unix_ms();
+    let mut claimed = schedule.clone();
+    claimed.last_fired_at = Some(now);
+    claimed.fire_count = claimed.fire_count.saturating_add(1);
+    claimed.next_fire_at = claimed.expression.next_after(claimed.origin, now)?;
+    fires.record_claimed(&FireRow {
+        tenant_scope: Arc::clone(&claimed.tenant_scope),
+        schedule_id: Arc::clone(&claimed.schedule_id),
+        fire_count: claimed.fire_count,
+        fired_at: now,
+        status: FireStatus::Claimed,
+        started_session: None,
+    })?;
+    Ok(cron.try_claim(
+        claimed.tenant_scope.as_ref(),
+        claimed.schedule_id.as_ref(),
+        expected_next,
+        now,
+        &claimed,
+    )?)
+}
+
+async fn settle_interaction(
+    lifecycle: Arc<dyn InteractionLifecycle>,
+    entry: &InboxRow,
+    outcome: InteractionDeliveryOutcome,
+    now: Timestamp,
+) -> Result<(), WorkerError> {
+    let entry = entry.clone();
+    crate::blocking::run(move || {
+        lifecycle.settled(
+            entry.tenant_scope.as_ref(),
+            entry.pending_id.as_ref(),
+            outcome,
+            now,
+        )
+    })
+    .await
 }

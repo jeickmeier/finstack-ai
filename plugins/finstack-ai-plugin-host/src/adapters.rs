@@ -53,6 +53,24 @@ enum LiveContext {
     V100(Store<HostState>, ContextPluginV1),
 }
 
+trait LiveInstance {
+    fn store(&mut self) -> &mut Store<HostState>;
+}
+impl LiveInstance for LiveToolset {
+    fn store(&mut self) -> &mut Store<HostState> {
+        match self {
+            Self::V004(store, _) | Self::V100(store, _) => store,
+        }
+    }
+}
+impl LiveInstance for LiveContext {
+    fn store(&mut self) -> &mut Store<HostState> {
+        match self {
+            Self::V004(store, _) | Self::V100(store, _) => store,
+        }
+    }
+}
+
 type SerializedToolset = Arc<Mutex<Option<LiveToolset>>>;
 type SerializedContext = Arc<Mutex<Option<LiveContext>>>;
 
@@ -651,11 +669,18 @@ async fn collect_items_on(
 ///
 /// `Exclusive` instantiates a fresh store per call behind a permit;
 /// `Serialized` reuses one store behind a mutex and fails closed when it is
-/// already held. Both bound the call by `cancel` and `deadline`.
-async fn with_instance<L, T>(
+/// already held. Reuse replenishes fuel; only successful invocations retain the
+/// instance. Cancellation, timeout, failure and future drop discard it. Both
+/// policies bound the call by `cancel` and `deadline`.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "one boundary owns instance admission, budget, cancellation, construction and invocation"
+)]
+async fn with_instance<L: LiveInstance, T>(
     host: &PluginHost,
     exclusive: &Semaphore,
     serialized: &Mutex<Option<L>>,
+    fuel: u64,
     cancel: &finstack_ai_runtime::ports::model::CancellationSignal,
     deadline: Option<Timestamp>,
     instantiate: impl AsyncFnOnce() -> Result<L, PluginHostError>,
@@ -677,13 +702,20 @@ async fn with_instance<L, T>(
                 .try_lock()
                 .map_err(|_| PluginHostError::InstanceLimit)?;
             with_cancellation(cancel, deadline, async {
-                if slot.is_none() {
-                    *slot = Some(instantiate().await?);
-                }
-                let slot = slot.as_mut().ok_or_else(|| {
-                    PluginHostError::InstantiateFailed("serialized instance slot is empty".into())
-                })?;
-                op(slot).await
+                // Remove the instance before suspension: dropping this future or
+                // any failure drops the in-flight guest instead of caching it.
+                let mut live = match slot.take() {
+                    Some(mut live) => {
+                        live.store().set_fuel(fuel).map_err(|error| {
+                            PluginHostError::ResourceLimit(format!("fuel: {error}"))
+                        })?;
+                        live
+                    }
+                    None => instantiate().await?,
+                };
+                let result = op(&mut live).await?;
+                *slot = Some(live);
+                Ok(result)
             })
             .await
         }
@@ -702,6 +734,7 @@ async fn list_tools(
         host,
         exclusive,
         serialized,
+        effective_limits(&ready.manifest, host.default_limits()).fuel,
         cancel,
         deadline,
         async || instantiate_toolset(host, ready, cancel).await,
@@ -726,6 +759,7 @@ async fn call_tool(
         host,
         exclusive,
         serialized,
+        effective_limits(&ready.manifest, host.default_limits()).fuel,
         cancel,
         deadline,
         async || instantiate_toolset(host, ready, cancel).await,
@@ -747,6 +781,7 @@ async fn collect_items(
         host,
         exclusive,
         serialized,
+        effective_limits(&ready.manifest, host.default_limits()).fuel,
         cancel,
         deadline,
         async || instantiate_context(host, ready, cancel).await,

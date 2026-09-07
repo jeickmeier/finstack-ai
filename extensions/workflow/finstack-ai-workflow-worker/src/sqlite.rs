@@ -16,10 +16,10 @@ use crate::fires::{FireRow, FireStartOutcome, FireStatus, FireStore};
 use crate::inbox::{
     DeadLetterRow, InboxInsertOutcome, InboxKind, InboxRow, InboxStore, MAX_INBOX_PAYLOAD_BYTES,
 };
-use crate::wake::{WakeIndexStore, WakeReason, WakeRow, lease_deadline};
+use crate::wake::{WakeIndexStore, WakeLease, WakeReason, WakeRow, check_lease, lease_deadline};
 
 /// Current schema version owned by this adapter.
-const WORKER_SCHEMA_VERSION: i64 = 2;
+const WORKER_SCHEMA_VERSION: i64 = 3;
 
 /// Schema for the worker's adapter tables.
 ///
@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS finstack_workflow_worker_schema (
   singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
   version INTEGER NOT NULL
 );
-INSERT OR IGNORE INTO finstack_workflow_worker_schema (singleton, version) VALUES (1, 2);
+INSERT OR IGNORE INTO finstack_workflow_worker_schema (singleton, version) VALUES (1, 3);
 CREATE TABLE IF NOT EXISTS finstack_workflow_worker_wake (
   tenant_scope TEXT NOT NULL,
   session_id TEXT NOT NULL,
@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS finstack_workflow_worker_wake (
   expires_at_unix_ms INTEGER,
   pending_id TEXT NOT NULL,
   leased_by TEXT,
+  lease_id TEXT,
   lease_expires_unix_ms INTEGER,
   attempts INTEGER NOT NULL,
   PRIMARY KEY (tenant_scope, session_id)
@@ -137,11 +138,21 @@ impl SqliteWorkerStore {
             .map_err(|_| WorkerError::StoreIntegrity {
                 code: "workflow_schema_version",
             })?;
-        // v2 adds the runnable hint value without changing existing row
-        // meanings or columns. Old binaries reject v2 instead of misreading it.
-        if version == 1 {
-            conn.execute("UPDATE finstack_workflow_worker_schema SET version = 2 WHERE singleton = 1 AND version = 1", [])
+        // Upgrade only with all old workers stopped. v3 fences every acquisition;
+        // legacy leases cannot authorize a v3 mutation and become claimable hints.
+        if version == 1 || version == 2 {
+            let tx = conn
+                .unchecked_transaction()
+                .map_err(|_| WorkerError::StoreUnavailable {
+                    code: "sqlite_worker_schema_migration",
+                })?;
+            tx.execute_batch("ALTER TABLE finstack_workflow_worker_wake ADD COLUMN lease_id TEXT;
+                UPDATE finstack_workflow_worker_wake SET leased_by = NULL, lease_expires_unix_ms = NULL;
+                UPDATE finstack_workflow_worker_schema SET version = 3 WHERE singleton = 1;")
                 .map_err(|_| WorkerError::StoreUnavailable { code: "sqlite_worker_schema_migration" })?;
+            tx.commit().map_err(|_| WorkerError::StoreUnavailable {
+                code: "sqlite_worker_schema_migration",
+            })?;
         } else if version != WORKER_SCHEMA_VERSION {
             return Err(WorkerError::InvalidConfiguration {
                 code: "workflow_schema_version",
@@ -213,6 +224,7 @@ struct RawWakeRow {
     expires_at_unix_ms: Option<i64>,
     pending_id: String,
     leased_by: Option<String>,
+    lease_id: Option<String>,
     lease_expires_unix_ms: Option<i64>,
     attempts: i64,
 }
@@ -265,6 +277,14 @@ fn decode_wake_row(raw: RawWakeRow) -> Result<WakeRow, WorkerError> {
         expires_at,
         pending_id: raw.pending_id.into(),
         leased_by: raw.leased_by.map(Into::into),
+        lease_id: raw
+            .lease_id
+            .as_deref()
+            .map(Id::parse)
+            .transpose()
+            .map_err(|_| WorkerError::StoreIntegrity {
+                code: "sqlite_wake_lease_id",
+            })?,
         lease_expires_at,
         attempts,
     })
@@ -296,6 +316,7 @@ fn query_wake_rows(
                 leased_by: row.get(9)?,
                 lease_expires_unix_ms: row.get(10)?,
                 attempts: row.get(11)?,
+                lease_id: row.get(12)?,
             })
         })
         .map_err(|_| WorkerError::StoreUnavailable {
@@ -311,13 +332,36 @@ fn query_wake_rows(
 
 const WAKE_SELECT: &str = "SELECT tenant_scope, session_id, lane_id, run_id, workflow_kind, reason,
        wake_at_unix_ms, expires_at_unix_ms, pending_id, leased_by, lease_expires_unix_ms,
-       attempts
+       attempts, lease_id
 FROM finstack_workflow_worker_wake";
 
+fn check_sqlite_lease(
+    conn: &Connection,
+    tenant: &str,
+    session: SessionId,
+    lease: Option<&WakeLease>,
+) -> Result<(), WorkerError> {
+    let rows = query_wake_rows(
+        conn,
+        &format!("{WAKE_SELECT} WHERE tenant_scope = ?1 AND session_id = ?2"),
+        &[&tenant, &session.to_canonical_string()],
+    )?;
+    check_lease(tenant, session, rows.first(), lease)
+}
+
 impl WakeIndexStore for SqliteWorkerStore {
-    fn upsert(&self, row: &WakeRow) -> Result<(), WorkerError> {
+    fn upsert(&self, row: &WakeRow, lease: Option<&WakeLease>) -> Result<(), WorkerError> {
         self.with_conn(|conn| {
-            conn.execute(
+            let tx = conn
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .map_err(|_| WorkerError::StoreUnavailable {
+                    code: "sqlite_wake_begin_immediate",
+                })?;
+            check_sqlite_lease(&tx, &row.tenant_scope, row.session_id, lease)?;
+            if row.leased_by.is_some() || row.lease_id.is_some() || row.lease_expires_at.is_some() {
+                return Err(WorkerError::LeaseLost);
+            }
+            tx.execute(
                 "INSERT OR REPLACE INTO finstack_workflow_worker_wake (
                     tenant_scope, session_id, lane_id, run_id, workflow_kind, reason,
                     wake_at_unix_ms, expires_at_unix_ms, pending_id, leased_by,
@@ -341,19 +385,36 @@ impl WakeIndexStore for SqliteWorkerStore {
             .map_err(|_| WorkerError::StoreUnavailable {
                 code: "sqlite_wake_row",
             })?;
+            tx.commit().map_err(|_| WorkerError::StoreUnavailable {
+                code: "sqlite_wake_commit",
+            })?;
             Ok(())
         })
     }
 
-    fn delete(&self, tenant_scope: &str, session_id: SessionId) -> Result<(), WorkerError> {
+    fn delete(
+        &self,
+        tenant_scope: &str,
+        session_id: SessionId,
+        lease: Option<&WakeLease>,
+    ) -> Result<(), WorkerError> {
         self.with_conn(|conn| {
-            conn.execute(
+            let tx = conn
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .map_err(|_| WorkerError::StoreUnavailable {
+                    code: "sqlite_wake_begin_immediate",
+                })?;
+            check_sqlite_lease(&tx, tenant_scope, session_id, lease)?;
+            tx.execute(
                 "DELETE FROM finstack_workflow_worker_wake
                  WHERE tenant_scope = ?1 AND session_id = ?2",
                 params![tenant_scope, session_id.to_canonical_string()],
             )
             .map_err(|_| WorkerError::StoreUnavailable {
                 code: "sqlite_wake_row",
+            })?;
+            tx.commit().map_err(|_| WorkerError::StoreUnavailable {
+                code: "sqlite_wake_commit",
             })?;
             Ok(())
         })
@@ -431,119 +492,60 @@ impl WakeIndexStore for SqliteWorkerStore {
         worker_id: &str,
         now: Timestamp,
         lease_ttl_ms: u64,
-    ) -> Result<bool, WorkerError> {
+    ) -> Result<Option<WakeLease>, WorkerError> {
         let deadline = lease_deadline(now, lease_ttl_ms)?;
+        let lease = WakeLease::try_new(tenant_scope, session_id, now)?;
         self.with_conn(|conn| {
-            let tx = conn
-                .transaction_with_behavior(TransactionBehavior::Immediate)
-                .map_err(|_| WorkerError::StoreUnavailable {
-                    code: "sqlite_wake_begin_immediate",
-                })?;
-            tx.execute(
+            let changed = conn.execute(
                 "UPDATE finstack_workflow_worker_wake
-                 SET leased_by = ?1, lease_expires_unix_ms = ?2
+                 SET leased_by = ?1, lease_expires_unix_ms = ?2, lease_id = ?6
                  WHERE tenant_scope = ?3 AND session_id = ?4
-                   AND (leased_by IS NULL
-                        OR lease_expires_unix_ms IS NULL
-                        OR lease_expires_unix_ms <= ?5)",
-                params![
-                    worker_id,
-                    deadline.as_unix_ms(),
-                    tenant_scope,
-                    session_id.to_canonical_string(),
-                    now.as_unix_ms(),
-                ],
-            )
-            .map_err(|_| WorkerError::StoreUnavailable {
-                code: "sqlite_wake_claim",
-            })?;
-            let won = tx.changes() == 1;
-            tx.commit().map_err(|_| WorkerError::StoreUnavailable {
-                code: "sqlite_wake_commit",
-            })?;
-            Ok(won)
+                   AND (leased_by IS NULL OR lease_expires_unix_ms IS NULL OR lease_expires_unix_ms <= ?5)",
+                params![worker_id, deadline.as_unix_ms(), tenant_scope, session_id.to_canonical_string(), now.as_unix_ms(), lease.id.to_canonical_string()],
+            ).map_err(|_| WorkerError::StoreUnavailable { code: "sqlite_wake_claim" })?;
+            Ok((changed == 1).then_some(lease))
         })
     }
-
     fn renew(
         &self,
-        tenant_scope: &str,
-        session_id: SessionId,
-        worker_id: &str,
+        lease: &WakeLease,
         now: Timestamp,
         lease_ttl_ms: u64,
     ) -> Result<bool, WorkerError> {
         let deadline = lease_deadline(now, lease_ttl_ms)?;
         self.with_conn(|conn| {
-            let tx = conn
-                .transaction_with_behavior(TransactionBehavior::Immediate)
-                .map_err(|_| WorkerError::StoreUnavailable {
-                    code: "sqlite_wake_begin_immediate",
-                })?;
-            tx.execute(
-                "UPDATE finstack_workflow_worker_wake
-                 SET leased_by = ?1, lease_expires_unix_ms = ?2
-                 WHERE tenant_scope = ?3 AND session_id = ?4 AND leased_by = ?1",
-                params![
-                    worker_id,
-                    deadline.as_unix_ms(),
-                    tenant_scope,
-                    session_id.to_canonical_string(),
-                ],
-            )
-            .map_err(|_| WorkerError::StoreUnavailable {
-                code: "sqlite_wake_claim",
-            })?;
-            let won = tx.changes() == 1;
-            tx.commit().map_err(|_| WorkerError::StoreUnavailable {
-                code: "sqlite_wake_commit",
-            })?;
-            Ok(won)
+            let changed = conn.execute(
+                "UPDATE finstack_workflow_worker_wake SET lease_expires_unix_ms = ?1
+                 WHERE tenant_scope = ?2 AND session_id = ?3 AND lease_id = ?4 AND lease_expires_unix_ms > ?5",
+                params![deadline.as_unix_ms(), lease.tenant_scope.as_ref(), lease.session_id.to_canonical_string(), lease.id.to_canonical_string(), now.as_unix_ms()],
+            ).map_err(|_| WorkerError::StoreUnavailable { code: "sqlite_wake_claim" })?;
+            Ok(changed == 1)
         })
     }
-
-    fn release(
-        &self,
-        tenant_scope: &str,
-        session_id: SessionId,
-        worker_id: &str,
-    ) -> Result<bool, WorkerError> {
+    fn release(&self, lease: &WakeLease) -> Result<bool, WorkerError> {
         self.with_conn(|conn| {
-            conn.execute(
-                "UPDATE finstack_workflow_worker_wake
-                 SET leased_by = NULL, lease_expires_unix_ms = NULL
-                 WHERE tenant_scope = ?1 AND session_id = ?2 AND leased_by = ?3",
-                params![tenant_scope, session_id.to_canonical_string(), worker_id,],
-            )
-            .map_err(|_| WorkerError::StoreUnavailable {
-                code: "sqlite_wake_release",
-            })?;
-            Ok(conn.changes() == 1)
+            let changed = conn.execute(
+                "UPDATE finstack_workflow_worker_wake SET leased_by = NULL, lease_id = NULL, lease_expires_unix_ms = NULL
+                 WHERE tenant_scope = ?1 AND session_id = ?2 AND lease_id = ?3",
+                params![lease.tenant_scope.as_ref(), lease.session_id.to_canonical_string(), lease.id.to_canonical_string()],
+            ).map_err(|_| WorkerError::StoreUnavailable { code: "sqlite_wake_release" })?;
+            Ok(changed == 1)
         })
     }
-
-    fn record_failure(
-        &self,
-        tenant_scope: &str,
-        session_id: SessionId,
-        retry_at: Timestamp,
-    ) -> Result<(), WorkerError> {
+    fn record_failure(&self, lease: &WakeLease, retry_at: Timestamp) -> Result<(), WorkerError> {
         self.with_conn(|conn| {
-            conn.execute(
-                "UPDATE finstack_workflow_worker_wake
-                 SET attempts = attempts + 1, leased_by = NULL,
-                     lease_expires_unix_ms = NULL, wake_at_unix_ms = ?1
-                 WHERE tenant_scope = ?2 AND session_id = ?3",
-                params![
-                    retry_at.as_unix_ms(),
-                    tenant_scope,
-                    session_id.to_canonical_string(),
-                ],
-            )
-            .map_err(|_| WorkerError::StoreUnavailable {
-                code: "sqlite_wake_row",
-            })?;
-            Ok(())
+            let changed = conn.execute(
+                "UPDATE finstack_workflow_worker_wake SET attempts = attempts + 1,
+                 leased_by = NULL, lease_id = NULL, lease_expires_unix_ms = NULL, wake_at_unix_ms = ?1
+                 WHERE tenant_scope = ?2 AND session_id = ?3 AND lease_id = ?4 AND attempts < 4294967295",
+                params![retry_at.as_unix_ms(), lease.tenant_scope.as_ref(), lease.session_id.to_canonical_string(), lease.id.to_canonical_string()],
+            ).map_err(|_| WorkerError::StoreUnavailable { code: "sqlite_wake_row" })?;
+            if changed == 1 {
+                Ok(())
+            } else {
+                check_sqlite_lease(conn, &lease.tenant_scope, lease.session_id, Some(lease))?;
+                Err(WorkerError::StoreIntegrity { code: "wake_attempts_overflow" })
+            }
         })
     }
 }
@@ -1148,6 +1150,7 @@ mod tests {
             expires_at: None,
             pending_id: Arc::from("effect-1"),
             leased_by: None,
+            lease_id: None,
             lease_expires_at: None,
             attempts: 0,
         }
@@ -1160,7 +1163,7 @@ mod tests {
         let first = SqliteWorkerStore::try_open(&path).expect("first");
         let second = SqliteWorkerStore::try_open(&path).expect("second");
         first
-            .upsert(&timer_row("tenant-a", 1, 1_000))
+            .upsert(&timer_row("tenant-a", 1, 1_000), None)
             .expect("upsert");
         let won_first = first
             .try_claim("tenant-a", id(1), "worker-a", ts(1_500), 60_000)
@@ -1168,7 +1171,10 @@ mod tests {
         let won_second = second
             .try_claim("tenant-a", id(1), "worker-b", ts(1_500), 60_000)
             .expect("second");
-        assert_eq!(usize::from(won_first) + usize::from(won_second), 1);
+        assert_eq!(
+            usize::from(won_first.is_some()) + usize::from(won_second.is_some()),
+            1
+        );
     }
 
     #[test]
@@ -1177,7 +1183,7 @@ mod tests {
         let store = SqliteWorkerStore::try_open(dir.path().join("w.sqlite")).expect("open");
         let mut row = timer_row("tenant-a", 1, 2_000);
         row.attempts = 3;
-        store.upsert(&row).expect("upsert");
+        store.upsert(&row, None).expect("upsert");
         let loaded = store.load_tenant("tenant-a").expect("load");
         assert_eq!(loaded, vec![row]);
     }
@@ -1193,7 +1199,7 @@ mod tests {
         row.reason = WakeReason::Interaction;
         row.wake_at = None;
         row.expires_at = Some(ts(9_000));
-        store.upsert(&row).expect("upsert");
+        store.upsert(&row, None).expect("upsert");
 
         let due = store.load_due(ts(1_000), 10).expect("load_due");
         assert_eq!(
@@ -1227,6 +1233,7 @@ mod tests {
                    wake_at_unix_ms INTEGER,
                    pending_id TEXT NOT NULL,
                    leased_by TEXT,
+  lease_id TEXT,
                    lease_expires_unix_ms INTEGER,
                    attempts INTEGER NOT NULL,
                    PRIMARY KEY (tenant_scope, session_id)
@@ -1261,7 +1268,7 @@ mod tests {
         timerless.wake_at = None;
 
         for row in [&fresh, &backed_off, &due_timer, &timerless] {
-            store.upsert(row).expect("upsert");
+            store.upsert(row, None).expect("upsert");
         }
 
         let now = ts(2_000);
@@ -1288,27 +1295,24 @@ mod tests {
         let dir = tempfile::tempdir().expect("dir");
         let store = SqliteWorkerStore::try_open(dir.path().join("w.sqlite")).expect("open");
         store
-            .upsert(&timer_row("tenant-a", 1, 1_000))
+            .upsert(&timer_row("tenant-a", 1, 1_000), None)
             .expect("upsert");
-        assert!(
-            store
-                .try_claim("tenant-a", id(1), "worker-a", ts(1_000), 1_000)
-                .expect("claim")
-        );
-        assert!(
-            store
-                .renew("tenant-a", id(1), "worker-a", ts(1_500), 1_000)
-                .expect("holder renews")
-        );
-        assert!(
-            !store
-                .renew("tenant-a", id(1), "worker-b", ts(1_500), 1_000)
-                .expect("stranger cannot renew")
-        );
+        let lease = store
+            .try_claim("tenant-a", id(1), "worker-a", ts(1_000), 1_000)
+            .expect("claim")
+            .expect("won");
+        assert!(store.renew(&lease, ts(1_500), 1_000).expect("renew"));
+        let other = crate::WakeLease::try_new("tenant-a", id(1), ts(1_500)).expect("other");
+        assert!(!store.renew(&other, ts(1_500), 1_000).expect("stranger"));
         assert!(
             store
                 .try_claim("tenant-a", id(1), "worker-b", ts(9_000), 1_000)
-                .expect("expired lease reclaimed")
+                .expect("reclaim")
+                .is_some()
         );
     }
 }
+
+#[cfg(test)]
+#[path = "sqlite_executor_tests.rs"]
+mod executor_tests;
