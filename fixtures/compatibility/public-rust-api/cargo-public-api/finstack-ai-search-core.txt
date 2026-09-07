@@ -1,0 +1,550 @@
+pub mod finstack_ai_search_core
+pub enum finstack_ai_search_core::Fusion
+pub finstack_ai_search_core::Fusion::Rrf
+pub finstack_ai_search_core::Fusion::Rrf::k: u32
+pub finstack_ai_search_core::Fusion::WeightedSum
+impl core::clone::Clone for finstack_ai_search_core::Fusion
+pub fn finstack_ai_search_core::Fusion::clone(&self) -> finstack_ai_search_core::Fusion
+impl core::cmp::Eq for finstack_ai_search_core::Fusion
+impl core::cmp::PartialEq for finstack_ai_search_core::Fusion
+pub fn finstack_ai_search_core::Fusion::eq(&self, &finstack_ai_search_core::Fusion) -> bool
+impl core::default::Default for finstack_ai_search_core::Fusion
+pub fn finstack_ai_search_core::Fusion::default() -> Self
+impl core::fmt::Debug for finstack_ai_search_core::Fusion
+pub fn finstack_ai_search_core::Fusion::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_search_core::Fusion
+impl core::marker::StructuralPartialEq for finstack_ai_search_core::Fusion
+impl serde_core::ser::Serialize for finstack_ai_search_core::Fusion
+pub fn finstack_ai_search_core::Fusion::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_search_core::Fusion
+pub fn finstack_ai_search_core::Fusion::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub enum finstack_ai_search_core::GraphQuery
+pub finstack_ai_search_core::GraphQuery::Entity
+pub finstack_ai_search_core::GraphQuery::Neighborhood
+pub finstack_ai_search_core::GraphQuery::Neighborhood::depth: u8
+pub finstack_ai_search_core::GraphQuery::Neighborhood::max_edges: usize
+pub finstack_ai_search_core::GraphQuery::Neighborhood::max_nodes: usize
+pub finstack_ai_search_core::GraphQuery::Path
+pub finstack_ai_search_core::GraphQuery::Path::depth: u8
+pub finstack_ai_search_core::GraphQuery::Path::max_edges: usize
+pub finstack_ai_search_core::GraphQuery::Path::max_nodes: usize
+pub finstack_ai_search_core::GraphQuery::Path::target: alloc::sync::Arc<str>
+impl core::clone::Clone for finstack_ai_search_core::GraphQuery
+pub fn finstack_ai_search_core::GraphQuery::clone(&self) -> finstack_ai_search_core::GraphQuery
+impl core::cmp::Eq for finstack_ai_search_core::GraphQuery
+impl core::cmp::PartialEq for finstack_ai_search_core::GraphQuery
+pub fn finstack_ai_search_core::GraphQuery::eq(&self, &finstack_ai_search_core::GraphQuery) -> bool
+impl core::fmt::Debug for finstack_ai_search_core::GraphQuery
+pub fn finstack_ai_search_core::GraphQuery::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_search_core::GraphQuery
+impl serde_core::ser::Serialize for finstack_ai_search_core::GraphQuery
+pub fn finstack_ai_search_core::GraphQuery::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_search_core::GraphQuery
+pub fn finstack_ai_search_core::GraphQuery::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub enum finstack_ai_search_core::LexicalKind
+pub finstack_ai_search_core::LexicalKind::Bm25
+pub finstack_ai_search_core::LexicalKind::Keyword
+pub finstack_ai_search_core::LexicalKind::Literal
+pub finstack_ai_search_core::LexicalKind::Regex
+impl core::clone::Clone for finstack_ai_search_core::LexicalKind
+pub fn finstack_ai_search_core::LexicalKind::clone(&self) -> finstack_ai_search_core::LexicalKind
+impl core::cmp::Eq for finstack_ai_search_core::LexicalKind
+impl core::cmp::Ord for finstack_ai_search_core::LexicalKind
+pub fn finstack_ai_search_core::LexicalKind::cmp(&self, &finstack_ai_search_core::LexicalKind) -> core::cmp::Ordering
+impl core::cmp::PartialEq for finstack_ai_search_core::LexicalKind
+pub fn finstack_ai_search_core::LexicalKind::eq(&self, &finstack_ai_search_core::LexicalKind) -> bool
+impl core::cmp::PartialOrd for finstack_ai_search_core::LexicalKind
+pub fn finstack_ai_search_core::LexicalKind::partial_cmp(&self, &finstack_ai_search_core::LexicalKind) -> core::option::Option<core::cmp::Ordering>
+impl core::fmt::Debug for finstack_ai_search_core::LexicalKind
+pub fn finstack_ai_search_core::LexicalKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_search_core::LexicalKind
+impl core::marker::StructuralPartialEq for finstack_ai_search_core::LexicalKind
+impl serde_core::ser::Serialize for finstack_ai_search_core::LexicalKind
+pub fn finstack_ai_search_core::LexicalKind::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_search_core::LexicalKind
+pub fn finstack_ai_search_core::LexicalKind::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub enum finstack_ai_search_core::ScopeMapping
+pub finstack_ai_search_core::ScopeMapping::Exact
+pub finstack_ai_search_core::ScopeMapping::RestrictToBound
+impl finstack_ai_search_core::ScopeMapping
+pub fn finstack_ai_search_core::ScopeMapping::resolve(self, &finstack_ai_search_core::SearchScope, &finstack_ai_search_core::SearchScope) -> core::result::Result<finstack_ai_search_core::SearchScope, finstack_ai_search_core::SearchError>
+impl core::clone::Clone for finstack_ai_search_core::ScopeMapping
+pub fn finstack_ai_search_core::ScopeMapping::clone(&self) -> finstack_ai_search_core::ScopeMapping
+impl core::cmp::Eq for finstack_ai_search_core::ScopeMapping
+impl core::cmp::PartialEq for finstack_ai_search_core::ScopeMapping
+pub fn finstack_ai_search_core::ScopeMapping::eq(&self, &finstack_ai_search_core::ScopeMapping) -> bool
+impl core::default::Default for finstack_ai_search_core::ScopeMapping
+pub fn finstack_ai_search_core::ScopeMapping::default() -> finstack_ai_search_core::ScopeMapping
+impl core::fmt::Debug for finstack_ai_search_core::ScopeMapping
+pub fn finstack_ai_search_core::ScopeMapping::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_search_core::ScopeMapping
+impl core::marker::StructuralPartialEq for finstack_ai_search_core::ScopeMapping
+impl serde_core::ser::Serialize for finstack_ai_search_core::ScopeMapping
+pub fn finstack_ai_search_core::ScopeMapping::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_search_core::ScopeMapping
+pub fn finstack_ai_search_core::ScopeMapping::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub enum finstack_ai_search_core::SearchError
+pub finstack_ai_search_core::SearchError::SearchCapacityExceeded
+pub finstack_ai_search_core::SearchError::SearchCapacityExceeded::resource: alloc::sync::Arc<str>
+pub finstack_ai_search_core::SearchError::SearchInvalid
+pub finstack_ai_search_core::SearchError::SearchInvalid::reason: alloc::sync::Arc<str>
+pub finstack_ai_search_core::SearchError::SearchNoSuccessfulSources
+pub finstack_ai_search_core::SearchError::SearchNoSuccessfulSources::outcomes: alloc::vec::Vec<finstack_ai_search_core::SourceOutcome>
+pub finstack_ai_search_core::SearchError::SearchScopeDenied
+pub finstack_ai_search_core::SearchError::SearchUnavailable
+pub finstack_ai_search_core::SearchError::SearchUnsupported
+impl finstack_ai_search_core::SearchError
+pub const fn finstack_ai_search_core::SearchError::code(&self) -> &'static str
+pub fn finstack_ai_search_core::SearchError::invalid(&'static str) -> Self
+impl core::clone::Clone for finstack_ai_search_core::SearchError
+pub fn finstack_ai_search_core::SearchError::clone(&self) -> finstack_ai_search_core::SearchError
+impl core::cmp::Eq for finstack_ai_search_core::SearchError
+impl core::cmp::PartialEq for finstack_ai_search_core::SearchError
+pub fn finstack_ai_search_core::SearchError::eq(&self, &finstack_ai_search_core::SearchError) -> bool
+impl core::error::Error for finstack_ai_search_core::SearchError
+impl core::fmt::Debug for finstack_ai_search_core::SearchError
+pub fn finstack_ai_search_core::SearchError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai_search_core::SearchError
+pub fn finstack_ai_search_core::SearchError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_search_core::SearchError
+impl serde_core::ser::Serialize for finstack_ai_search_core::SearchError
+pub fn finstack_ai_search_core::SearchError::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_search_core::SearchError
+pub fn finstack_ai_search_core::SearchError::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+#[non_exhaustive] pub enum finstack_ai_search_core::SearchStrategy
+pub finstack_ai_search_core::SearchStrategy::Graph(finstack_ai_search_core::GraphQuery)
+pub finstack_ai_search_core::SearchStrategy::Lexical(finstack_ai_search_core::LexicalKind)
+pub finstack_ai_search_core::SearchStrategy::Semantic
+pub finstack_ai_search_core::SearchStrategy::Semantic::space: alloc::sync::Arc<str>
+impl core::clone::Clone for finstack_ai_search_core::SearchStrategy
+pub fn finstack_ai_search_core::SearchStrategy::clone(&self) -> finstack_ai_search_core::SearchStrategy
+impl core::cmp::Eq for finstack_ai_search_core::SearchStrategy
+impl core::cmp::PartialEq for finstack_ai_search_core::SearchStrategy
+pub fn finstack_ai_search_core::SearchStrategy::eq(&self, &finstack_ai_search_core::SearchStrategy) -> bool
+impl core::fmt::Debug for finstack_ai_search_core::SearchStrategy
+pub fn finstack_ai_search_core::SearchStrategy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_search_core::SearchStrategy
+impl serde_core::ser::Serialize for finstack_ai_search_core::SearchStrategy
+pub fn finstack_ai_search_core::SearchStrategy::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_search_core::SearchStrategy
+pub fn finstack_ai_search_core::SearchStrategy::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+#[non_exhaustive] pub enum finstack_ai_search_core::SourceRef
+pub finstack_ai_search_core::SourceRef::ArtifactChunk
+pub finstack_ai_search_core::SourceRef::ArtifactChunk::artifact: alloc::boxed::Box<finstack_ai_kernel::primitives::handles::ArtifactRef>
+pub finstack_ai_search_core::SourceRef::ArtifactChunk::chunker: finstack_ai_kernel::primitives::digest::Digest
+pub finstack_ai_search_core::SourceRef::ArtifactChunk::ordinal: u32
+pub finstack_ai_search_core::SourceRef::Entity
+pub finstack_ai_search_core::SourceRef::Entity::id: alloc::sync::Arc<str>
+pub finstack_ai_search_core::SourceRef::JournalSpan
+pub finstack_ai_search_core::SourceRef::JournalSpan::entry: finstack_ai_kernel::primitives::ids::EntryId
+pub finstack_ai_search_core::SourceRef::JournalSpan::first_record: core::option::Option<finstack_ai_kernel::primitives::ids::RecordId>
+pub finstack_ai_search_core::SourceRef::JournalSpan::lane: finstack_ai_kernel::primitives::ids::LaneId
+pub finstack_ai_search_core::SourceRef::JournalSpan::last_record: core::option::Option<finstack_ai_kernel::primitives::ids::RecordId>
+pub finstack_ai_search_core::SourceRef::JournalSpan::session: finstack_ai_kernel::primitives::ids::SessionId
+pub finstack_ai_search_core::SourceRef::Memory
+pub finstack_ai_search_core::SourceRef::Memory::id: alloc::sync::Arc<str>
+impl finstack_ai_search_core::SourceRef
+pub fn finstack_ai_search_core::SourceRef::key(&self) -> core::result::Result<alloc::string::String, finstack_ai_search_core::SearchError>
+impl core::clone::Clone for finstack_ai_search_core::SourceRef
+pub fn finstack_ai_search_core::SourceRef::clone(&self) -> finstack_ai_search_core::SourceRef
+impl core::cmp::Eq for finstack_ai_search_core::SourceRef
+impl core::cmp::PartialEq for finstack_ai_search_core::SourceRef
+pub fn finstack_ai_search_core::SourceRef::eq(&self, &finstack_ai_search_core::SourceRef) -> bool
+impl core::fmt::Debug for finstack_ai_search_core::SourceRef
+pub fn finstack_ai_search_core::SourceRef::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_search_core::SourceRef
+impl serde_core::ser::Serialize for finstack_ai_search_core::SourceRef
+pub fn finstack_ai_search_core::SourceRef::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_search_core::SourceRef
+pub fn finstack_ai_search_core::SourceRef::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub enum finstack_ai_search_core::SourceStatus
+pub finstack_ai_search_core::SourceStatus::Completed
+pub finstack_ai_search_core::SourceStatus::Truncated
+pub finstack_ai_search_core::SourceStatus::Unavailable
+pub finstack_ai_search_core::SourceStatus::Unsupported
+impl finstack_ai_search_core::SourceStatus
+pub const fn finstack_ai_search_core::SourceStatus::successful(self) -> bool
+impl core::clone::Clone for finstack_ai_search_core::SourceStatus
+pub fn finstack_ai_search_core::SourceStatus::clone(&self) -> finstack_ai_search_core::SourceStatus
+impl core::cmp::Eq for finstack_ai_search_core::SourceStatus
+impl core::cmp::PartialEq for finstack_ai_search_core::SourceStatus
+pub fn finstack_ai_search_core::SourceStatus::eq(&self, &finstack_ai_search_core::SourceStatus) -> bool
+impl core::fmt::Debug for finstack_ai_search_core::SourceStatus
+pub fn finstack_ai_search_core::SourceStatus::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_search_core::SourceStatus
+impl core::marker::StructuralPartialEq for finstack_ai_search_core::SourceStatus
+impl serde_core::ser::Serialize for finstack_ai_search_core::SourceStatus
+pub fn finstack_ai_search_core::SourceStatus::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_search_core::SourceStatus
+pub fn finstack_ai_search_core::SourceStatus::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_search_core::FusedEvidence
+pub finstack_ai_search_core::FusedEvidence::contribution: u64
+pub finstack_ai_search_core::FusedEvidence::provenance: finstack_ai_search_core::SearchProvenance
+pub finstack_ai_search_core::FusedEvidence::rank: u32
+pub finstack_ai_search_core::FusedEvidence::sensitivity: finstack_ai_kernel::primitives::diagnostic::Sensitivity
+pub finstack_ai_search_core::FusedEvidence::source_score: u32
+pub finstack_ai_search_core::FusedEvidence::strategy: finstack_ai_search_core::SearchStrategy
+pub finstack_ai_search_core::FusedEvidence::weight_micros: u32
+impl core::clone::Clone for finstack_ai_search_core::FusedEvidence
+pub fn finstack_ai_search_core::FusedEvidence::clone(&self) -> finstack_ai_search_core::FusedEvidence
+impl core::cmp::Eq for finstack_ai_search_core::FusedEvidence
+impl core::cmp::PartialEq for finstack_ai_search_core::FusedEvidence
+pub fn finstack_ai_search_core::FusedEvidence::eq(&self, &finstack_ai_search_core::FusedEvidence) -> bool
+impl core::fmt::Debug for finstack_ai_search_core::FusedEvidence
+pub fn finstack_ai_search_core::FusedEvidence::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_search_core::FusedEvidence
+impl serde_core::ser::Serialize for finstack_ai_search_core::FusedEvidence
+pub fn finstack_ai_search_core::FusedEvidence::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_search_core::FusedEvidence
+pub fn finstack_ai_search_core::FusedEvidence::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_search_core::FusedHit
+pub finstack_ai_search_core::FusedHit::entity_label: core::option::Option<alloc::sync::Arc<str>>
+pub finstack_ai_search_core::FusedHit::evidence: alloc::vec::Vec<finstack_ai_search_core::FusedEvidence>
+pub finstack_ai_search_core::FusedHit::preview: alloc::sync::Arc<str>
+pub finstack_ai_search_core::FusedHit::reference: finstack_ai_search_core::SourceRef
+pub finstack_ai_search_core::FusedHit::score: u64
+pub finstack_ai_search_core::FusedHit::sensitivity: finstack_ai_kernel::primitives::diagnostic::Sensitivity
+pub finstack_ai_search_core::FusedHit::source: alloc::sync::Arc<str>
+impl core::clone::Clone for finstack_ai_search_core::FusedHit
+pub fn finstack_ai_search_core::FusedHit::clone(&self) -> finstack_ai_search_core::FusedHit
+impl core::cmp::Eq for finstack_ai_search_core::FusedHit
+impl core::cmp::PartialEq for finstack_ai_search_core::FusedHit
+pub fn finstack_ai_search_core::FusedHit::eq(&self, &finstack_ai_search_core::FusedHit) -> bool
+impl core::fmt::Debug for finstack_ai_search_core::FusedHit
+pub fn finstack_ai_search_core::FusedHit::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_search_core::FusedHit
+impl serde_core::ser::Serialize for finstack_ai_search_core::FusedHit
+pub fn finstack_ai_search_core::FusedHit::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_search_core::FusedHit
+pub fn finstack_ai_search_core::FusedHit::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_search_core::HybridLeg
+pub finstack_ai_search_core::HybridLeg::source: alloc::sync::Arc<str>
+pub finstack_ai_search_core::HybridLeg::strategy: finstack_ai_search_core::SearchStrategy
+pub finstack_ai_search_core::HybridLeg::weight_micros: u32
+impl core::clone::Clone for finstack_ai_search_core::HybridLeg
+pub fn finstack_ai_search_core::HybridLeg::clone(&self) -> finstack_ai_search_core::HybridLeg
+impl core::cmp::Eq for finstack_ai_search_core::HybridLeg
+impl core::cmp::PartialEq for finstack_ai_search_core::HybridLeg
+pub fn finstack_ai_search_core::HybridLeg::eq(&self, &finstack_ai_search_core::HybridLeg) -> bool
+impl core::fmt::Debug for finstack_ai_search_core::HybridLeg
+pub fn finstack_ai_search_core::HybridLeg::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_search_core::HybridLeg
+impl serde_core::ser::Serialize for finstack_ai_search_core::HybridLeg
+pub fn finstack_ai_search_core::HybridLeg::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_search_core::HybridLeg
+pub fn finstack_ai_search_core::HybridLeg::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_search_core::HybridPlan
+pub finstack_ai_search_core::HybridPlan::fusion: finstack_ai_search_core::Fusion
+pub finstack_ai_search_core::HybridPlan::legs: alloc::vec::Vec<finstack_ai_search_core::HybridLeg>
+impl finstack_ai_search_core::HybridPlan
+pub fn finstack_ai_search_core::HybridPlan::validate(&self, &finstack_ai_search_core::SearchQuery, &finstack_ai_search_core::SearchLimits, usize) -> core::result::Result<alloc::vec::Vec<finstack_ai_search_core::HybridLeg>, finstack_ai_search_core::SearchError>
+impl core::clone::Clone for finstack_ai_search_core::HybridPlan
+pub fn finstack_ai_search_core::HybridPlan::clone(&self) -> finstack_ai_search_core::HybridPlan
+impl core::cmp::Eq for finstack_ai_search_core::HybridPlan
+impl core::cmp::PartialEq for finstack_ai_search_core::HybridPlan
+pub fn finstack_ai_search_core::HybridPlan::eq(&self, &finstack_ai_search_core::HybridPlan) -> bool
+impl core::fmt::Debug for finstack_ai_search_core::HybridPlan
+pub fn finstack_ai_search_core::HybridPlan::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_search_core::HybridPlan
+impl serde_core::ser::Serialize for finstack_ai_search_core::HybridPlan
+pub fn finstack_ai_search_core::HybridPlan::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_search_core::HybridPlan
+pub fn finstack_ai_search_core::HybridPlan::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_search_core::JournalFilter
+pub finstack_ai_search_core::JournalFilter::after: core::option::Option<finstack_ai_kernel::primitives::time::Timestamp>
+pub finstack_ai_search_core::JournalFilter::before: core::option::Option<finstack_ai_kernel::primitives::time::Timestamp>
+pub finstack_ai_search_core::JournalFilter::lanes: alloc::vec::Vec<finstack_ai_kernel::primitives::ids::LaneId>
+pub finstack_ai_search_core::JournalFilter::sessions: alloc::vec::Vec<finstack_ai_kernel::primitives::ids::SessionId>
+impl finstack_ai_search_core::JournalFilter
+pub fn finstack_ai_search_core::JournalFilter::is_empty(&self) -> bool
+impl core::clone::Clone for finstack_ai_search_core::JournalFilter
+pub fn finstack_ai_search_core::JournalFilter::clone(&self) -> finstack_ai_search_core::JournalFilter
+impl core::cmp::Eq for finstack_ai_search_core::JournalFilter
+impl core::cmp::PartialEq for finstack_ai_search_core::JournalFilter
+pub fn finstack_ai_search_core::JournalFilter::eq(&self, &finstack_ai_search_core::JournalFilter) -> bool
+impl core::default::Default for finstack_ai_search_core::JournalFilter
+pub fn finstack_ai_search_core::JournalFilter::default() -> finstack_ai_search_core::JournalFilter
+impl core::fmt::Debug for finstack_ai_search_core::JournalFilter
+pub fn finstack_ai_search_core::JournalFilter::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_search_core::JournalFilter
+impl serde_core::ser::Serialize for finstack_ai_search_core::JournalFilter
+pub fn finstack_ai_search_core::JournalFilter::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_search_core::JournalFilter
+pub fn finstack_ai_search_core::JournalFilter::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_search_core::LegResult
+pub finstack_ai_search_core::LegResult::leg: finstack_ai_search_core::HybridLeg
+pub finstack_ai_search_core::LegResult::result: finstack_ai_search_core::SourceResult
+impl finstack_ai_search_core::LegResult
+pub fn finstack_ai_search_core::LegResult::validate(&self, usize, &finstack_ai_search_core::SearchLimits) -> core::result::Result<(), finstack_ai_search_core::SearchError>
+impl core::clone::Clone for finstack_ai_search_core::LegResult
+pub fn finstack_ai_search_core::LegResult::clone(&self) -> finstack_ai_search_core::LegResult
+impl core::cmp::Eq for finstack_ai_search_core::LegResult
+impl core::cmp::PartialEq for finstack_ai_search_core::LegResult
+pub fn finstack_ai_search_core::LegResult::eq(&self, &finstack_ai_search_core::LegResult) -> bool
+impl core::fmt::Debug for finstack_ai_search_core::LegResult
+pub fn finstack_ai_search_core::LegResult::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_search_core::LegResult
+pub struct finstack_ai_search_core::SearchCitation
+pub finstack_ai_search_core::SearchCitation::content_digest: finstack_ai_kernel::primitives::digest::Digest
+pub finstack_ai_search_core::SearchCitation::reference: finstack_ai_search_core::SourceRef
+pub finstack_ai_search_core::SearchCitation::scope: finstack_ai_search_core::SearchScope
+pub finstack_ai_search_core::SearchCitation::source: alloc::sync::Arc<str>
+impl core::clone::Clone for finstack_ai_search_core::SearchCitation
+pub fn finstack_ai_search_core::SearchCitation::clone(&self) -> finstack_ai_search_core::SearchCitation
+impl core::cmp::Eq for finstack_ai_search_core::SearchCitation
+impl core::cmp::PartialEq for finstack_ai_search_core::SearchCitation
+pub fn finstack_ai_search_core::SearchCitation::eq(&self, &finstack_ai_search_core::SearchCitation) -> bool
+impl core::fmt::Debug for finstack_ai_search_core::SearchCitation
+pub fn finstack_ai_search_core::SearchCitation::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_search_core::SearchCitation
+impl serde_core::ser::Serialize for finstack_ai_search_core::SearchCitation
+pub fn finstack_ai_search_core::SearchCitation::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_search_core::SearchCitation
+pub fn finstack_ai_search_core::SearchCitation::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_search_core::SearchEvidence
+pub finstack_ai_search_core::SearchEvidence::complete: bool
+pub finstack_ai_search_core::SearchEvidence::hit: finstack_ai_search_core::SearchHit
+pub finstack_ai_search_core::SearchEvidence::text: alloc::sync::Arc<str>
+impl finstack_ai_search_core::SearchEvidence
+pub fn finstack_ai_search_core::SearchEvidence::validate(&self, &finstack_ai_search_core::SearchLimits) -> core::result::Result<(), finstack_ai_search_core::SearchError>
+impl core::clone::Clone for finstack_ai_search_core::SearchEvidence
+pub fn finstack_ai_search_core::SearchEvidence::clone(&self) -> finstack_ai_search_core::SearchEvidence
+impl core::cmp::Eq for finstack_ai_search_core::SearchEvidence
+impl core::cmp::PartialEq for finstack_ai_search_core::SearchEvidence
+pub fn finstack_ai_search_core::SearchEvidence::eq(&self, &finstack_ai_search_core::SearchEvidence) -> bool
+impl core::fmt::Debug for finstack_ai_search_core::SearchEvidence
+pub fn finstack_ai_search_core::SearchEvidence::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_search_core::SearchEvidence
+impl serde_core::ser::Serialize for finstack_ai_search_core::SearchEvidence
+pub fn finstack_ai_search_core::SearchEvidence::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_search_core::SearchEvidence
+pub fn finstack_ai_search_core::SearchEvidence::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_search_core::SearchHit
+pub finstack_ai_search_core::SearchHit::entity_label: core::option::Option<alloc::sync::Arc<str>>
+pub finstack_ai_search_core::SearchHit::preview: alloc::sync::Arc<str>
+pub finstack_ai_search_core::SearchHit::provenance: finstack_ai_search_core::SearchProvenance
+pub finstack_ai_search_core::SearchHit::reference: finstack_ai_search_core::SourceRef
+pub finstack_ai_search_core::SearchHit::score: u32
+pub finstack_ai_search_core::SearchHit::sensitivity: finstack_ai_kernel::primitives::diagnostic::Sensitivity
+pub finstack_ai_search_core::SearchHit::source: alloc::sync::Arc<str>
+impl finstack_ai_search_core::SearchHit
+pub fn finstack_ai_search_core::SearchHit::validate(&self, &finstack_ai_search_core::SearchLimits) -> core::result::Result<(), finstack_ai_search_core::SearchError>
+impl core::clone::Clone for finstack_ai_search_core::SearchHit
+pub fn finstack_ai_search_core::SearchHit::clone(&self) -> finstack_ai_search_core::SearchHit
+impl core::cmp::Eq for finstack_ai_search_core::SearchHit
+impl core::cmp::PartialEq for finstack_ai_search_core::SearchHit
+pub fn finstack_ai_search_core::SearchHit::eq(&self, &finstack_ai_search_core::SearchHit) -> bool
+impl core::fmt::Debug for finstack_ai_search_core::SearchHit
+pub fn finstack_ai_search_core::SearchHit::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_search_core::SearchHit
+impl serde_core::ser::Serialize for finstack_ai_search_core::SearchHit
+pub fn finstack_ai_search_core::SearchHit::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_search_core::SearchHit
+pub fn finstack_ai_search_core::SearchHit::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_search_core::SearchLimits
+pub finstack_ai_search_core::SearchLimits::max_embedding_bytes: u64
+pub finstack_ai_search_core::SearchLimits::max_graph_edges: usize
+pub finstack_ai_search_core::SearchLimits::max_graph_nodes: usize
+pub finstack_ai_search_core::SearchLimits::max_legs: usize
+pub finstack_ai_search_core::SearchLimits::max_pattern_bytes: usize
+pub finstack_ai_search_core::SearchLimits::max_preview_chars: usize
+pub finstack_ai_search_core::SearchLimits::max_query_bytes: usize
+pub finstack_ai_search_core::SearchLimits::max_results: usize
+pub finstack_ai_search_core::SearchLimits::max_scan_records: usize
+impl finstack_ai_search_core::SearchLimits
+pub fn finstack_ai_search_core::SearchLimits::validate(&self) -> core::result::Result<(), finstack_ai_search_core::SearchError>
+impl core::clone::Clone for finstack_ai_search_core::SearchLimits
+pub fn finstack_ai_search_core::SearchLimits::clone(&self) -> finstack_ai_search_core::SearchLimits
+impl core::cmp::Eq for finstack_ai_search_core::SearchLimits
+impl core::cmp::PartialEq for finstack_ai_search_core::SearchLimits
+pub fn finstack_ai_search_core::SearchLimits::eq(&self, &finstack_ai_search_core::SearchLimits) -> bool
+impl core::default::Default for finstack_ai_search_core::SearchLimits
+pub fn finstack_ai_search_core::SearchLimits::default() -> Self
+impl core::fmt::Debug for finstack_ai_search_core::SearchLimits
+pub fn finstack_ai_search_core::SearchLimits::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_search_core::SearchLimits
+impl core::marker::StructuralPartialEq for finstack_ai_search_core::SearchLimits
+impl serde_core::ser::Serialize for finstack_ai_search_core::SearchLimits
+pub fn finstack_ai_search_core::SearchLimits::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_search_core::SearchLimits
+pub fn finstack_ai_search_core::SearchLimits::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_search_core::SearchProvenance
+pub finstack_ai_search_core::SearchProvenance::citations: alloc::vec::Vec<finstack_ai_search_core::SearchCitation>
+pub finstack_ai_search_core::SearchProvenance::content_digest: finstack_ai_kernel::primitives::digest::Digest
+pub finstack_ai_search_core::SearchProvenance::locators: alloc::vec::Vec<alloc::sync::Arc<str>>
+pub finstack_ai_search_core::SearchProvenance::scope: finstack_ai_search_core::SearchScope
+impl core::clone::Clone for finstack_ai_search_core::SearchProvenance
+pub fn finstack_ai_search_core::SearchProvenance::clone(&self) -> finstack_ai_search_core::SearchProvenance
+impl core::cmp::Eq for finstack_ai_search_core::SearchProvenance
+impl core::cmp::PartialEq for finstack_ai_search_core::SearchProvenance
+pub fn finstack_ai_search_core::SearchProvenance::eq(&self, &finstack_ai_search_core::SearchProvenance) -> bool
+impl core::fmt::Debug for finstack_ai_search_core::SearchProvenance
+pub fn finstack_ai_search_core::SearchProvenance::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_search_core::SearchProvenance
+impl serde_core::ser::Serialize for finstack_ai_search_core::SearchProvenance
+pub fn finstack_ai_search_core::SearchProvenance::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_search_core::SearchProvenance
+pub fn finstack_ai_search_core::SearchProvenance::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_search_core::SearchQuery
+pub finstack_ai_search_core::SearchQuery::journal: finstack_ai_search_core::JournalFilter
+pub finstack_ai_search_core::SearchQuery::strategy: finstack_ai_search_core::SearchStrategy
+pub finstack_ai_search_core::SearchQuery::text: alloc::sync::Arc<str>
+impl finstack_ai_search_core::SearchQuery
+pub fn finstack_ai_search_core::SearchQuery::lexical(impl core::convert::Into<alloc::sync::Arc<str>>, finstack_ai_search_core::LexicalKind) -> Self
+pub fn finstack_ai_search_core::SearchQuery::regex(&self, &finstack_ai_search_core::SearchLimits) -> core::result::Result<regex::regex::string::Regex, finstack_ai_search_core::SearchError>
+pub fn finstack_ai_search_core::SearchQuery::validate(&self, &finstack_ai_search_core::SearchLimits, usize) -> core::result::Result<(), finstack_ai_search_core::SearchError>
+impl core::clone::Clone for finstack_ai_search_core::SearchQuery
+pub fn finstack_ai_search_core::SearchQuery::clone(&self) -> finstack_ai_search_core::SearchQuery
+impl core::cmp::Eq for finstack_ai_search_core::SearchQuery
+impl core::cmp::PartialEq for finstack_ai_search_core::SearchQuery
+pub fn finstack_ai_search_core::SearchQuery::eq(&self, &finstack_ai_search_core::SearchQuery) -> bool
+impl core::fmt::Debug for finstack_ai_search_core::SearchQuery
+pub fn finstack_ai_search_core::SearchQuery::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_search_core::SearchQuery
+impl serde_core::ser::Serialize for finstack_ai_search_core::SearchQuery
+pub fn finstack_ai_search_core::SearchQuery::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_search_core::SearchQuery
+pub fn finstack_ai_search_core::SearchQuery::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_search_core::SearchResponse
+pub finstack_ai_search_core::SearchResponse::hits: alloc::vec::Vec<finstack_ai_search_core::FusedHit>
+pub finstack_ai_search_core::SearchResponse::outcomes: alloc::vec::Vec<finstack_ai_search_core::SourceOutcome>
+pub finstack_ai_search_core::SearchResponse::results_truncated: bool
+impl core::clone::Clone for finstack_ai_search_core::SearchResponse
+pub fn finstack_ai_search_core::SearchResponse::clone(&self) -> finstack_ai_search_core::SearchResponse
+impl core::cmp::Eq for finstack_ai_search_core::SearchResponse
+impl core::cmp::PartialEq for finstack_ai_search_core::SearchResponse
+pub fn finstack_ai_search_core::SearchResponse::eq(&self, &finstack_ai_search_core::SearchResponse) -> bool
+impl core::fmt::Debug for finstack_ai_search_core::SearchResponse
+pub fn finstack_ai_search_core::SearchResponse::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_search_core::SearchResponse
+impl serde_core::ser::Serialize for finstack_ai_search_core::SearchResponse
+pub fn finstack_ai_search_core::SearchResponse::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_search_core::SearchResponse
+pub fn finstack_ai_search_core::SearchResponse::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_search_core::SearchScope
+pub finstack_ai_search_core::SearchScope::agent: core::option::Option<alloc::sync::Arc<str>>
+pub finstack_ai_search_core::SearchScope::tenant: alloc::sync::Arc<str>
+pub finstack_ai_search_core::SearchScope::user: core::option::Option<alloc::sync::Arc<str>>
+pub finstack_ai_search_core::SearchScope::workspace: core::option::Option<alloc::sync::Arc<str>>
+impl finstack_ai_search_core::SearchScope
+pub fn finstack_ai_search_core::SearchScope::digest(&self) -> core::result::Result<finstack_ai_kernel::primitives::digest::Digest, finstack_ai_search_core::SearchError>
+pub fn finstack_ai_search_core::SearchScope::try_new(&str) -> core::result::Result<Self, finstack_ai_search_core::SearchError>
+pub fn finstack_ai_search_core::SearchScope::validate(&self) -> core::result::Result<(), finstack_ai_search_core::SearchError>
+impl core::clone::Clone for finstack_ai_search_core::SearchScope
+pub fn finstack_ai_search_core::SearchScope::clone(&self) -> finstack_ai_search_core::SearchScope
+impl core::cmp::Eq for finstack_ai_search_core::SearchScope
+impl core::cmp::Ord for finstack_ai_search_core::SearchScope
+pub fn finstack_ai_search_core::SearchScope::cmp(&self, &finstack_ai_search_core::SearchScope) -> core::cmp::Ordering
+impl core::cmp::PartialEq for finstack_ai_search_core::SearchScope
+pub fn finstack_ai_search_core::SearchScope::eq(&self, &finstack_ai_search_core::SearchScope) -> bool
+impl core::cmp::PartialOrd for finstack_ai_search_core::SearchScope
+pub fn finstack_ai_search_core::SearchScope::partial_cmp(&self, &finstack_ai_search_core::SearchScope) -> core::option::Option<core::cmp::Ordering>
+impl core::fmt::Debug for finstack_ai_search_core::SearchScope
+pub fn finstack_ai_search_core::SearchScope::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_search_core::SearchScope
+impl serde_core::ser::Serialize for finstack_ai_search_core::SearchScope
+pub fn finstack_ai_search_core::SearchScope::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_search_core::SearchScope
+pub fn finstack_ai_search_core::SearchScope::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_search_core::SearchSourceDescriptor
+pub finstack_ai_search_core::SearchSourceDescriptor::configuration_digest: finstack_ai_kernel::primitives::digest::Digest
+pub finstack_ai_search_core::SearchSourceDescriptor::durable: bool
+pub finstack_ai_search_core::SearchSourceDescriptor::evidence_lookup: bool
+pub finstack_ai_search_core::SearchSourceDescriptor::graph: bool
+pub finstack_ai_search_core::SearchSourceDescriptor::kind: alloc::sync::Arc<str>
+pub finstack_ai_search_core::SearchSourceDescriptor::lexical: alloc::vec::Vec<finstack_ai_search_core::LexicalKind>
+pub finstack_ai_search_core::SearchSourceDescriptor::limits: finstack_ai_search_core::SearchLimits
+pub finstack_ai_search_core::SearchSourceDescriptor::scope_mapping: finstack_ai_search_core::ScopeMapping
+pub finstack_ai_search_core::SearchSourceDescriptor::semantic_spaces: alloc::vec::Vec<alloc::sync::Arc<str>>
+pub finstack_ai_search_core::SearchSourceDescriptor::source_id: alloc::sync::Arc<str>
+impl finstack_ai_search_core::SearchSourceDescriptor
+pub fn finstack_ai_search_core::SearchSourceDescriptor::supports(&self, &finstack_ai_search_core::SearchStrategy) -> bool
+impl core::clone::Clone for finstack_ai_search_core::SearchSourceDescriptor
+pub fn finstack_ai_search_core::SearchSourceDescriptor::clone(&self) -> finstack_ai_search_core::SearchSourceDescriptor
+impl core::cmp::Eq for finstack_ai_search_core::SearchSourceDescriptor
+impl core::cmp::PartialEq for finstack_ai_search_core::SearchSourceDescriptor
+pub fn finstack_ai_search_core::SearchSourceDescriptor::eq(&self, &finstack_ai_search_core::SearchSourceDescriptor) -> bool
+impl core::fmt::Debug for finstack_ai_search_core::SearchSourceDescriptor
+pub fn finstack_ai_search_core::SearchSourceDescriptor::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_search_core::SearchSourceDescriptor
+impl serde_core::ser::Serialize for finstack_ai_search_core::SearchSourceDescriptor
+pub fn finstack_ai_search_core::SearchSourceDescriptor::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_search_core::SearchSourceDescriptor
+pub fn finstack_ai_search_core::SearchSourceDescriptor::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_search_core::SourceOutcome
+pub finstack_ai_search_core::SourceOutcome::examined: u64
+pub finstack_ai_search_core::SourceOutcome::historical_complete: bool
+pub finstack_ai_search_core::SourceOutcome::reasons: alloc::vec::Vec<alloc::sync::Arc<str>>
+pub finstack_ai_search_core::SourceOutcome::source: alloc::sync::Arc<str>
+pub finstack_ai_search_core::SourceOutcome::status: finstack_ai_search_core::SourceStatus
+pub finstack_ai_search_core::SourceOutcome::strategy: finstack_ai_search_core::SearchStrategy
+impl core::clone::Clone for finstack_ai_search_core::SourceOutcome
+pub fn finstack_ai_search_core::SourceOutcome::clone(&self) -> finstack_ai_search_core::SourceOutcome
+impl core::cmp::Eq for finstack_ai_search_core::SourceOutcome
+impl core::cmp::PartialEq for finstack_ai_search_core::SourceOutcome
+pub fn finstack_ai_search_core::SourceOutcome::eq(&self, &finstack_ai_search_core::SourceOutcome) -> bool
+impl core::fmt::Debug for finstack_ai_search_core::SourceOutcome
+pub fn finstack_ai_search_core::SourceOutcome::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_search_core::SourceOutcome
+impl serde_core::ser::Serialize for finstack_ai_search_core::SourceOutcome
+pub fn finstack_ai_search_core::SourceOutcome::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_search_core::SourceOutcome
+pub fn finstack_ai_search_core::SourceOutcome::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_search_core::SourceReferencePage
+pub finstack_ai_search_core::SourceReferencePage::next_cursor: core::option::Option<alloc::string::String>
+pub finstack_ai_search_core::SourceReferencePage::references: alloc::vec::Vec<finstack_ai_search_core::SourceRef>
+impl core::clone::Clone for finstack_ai_search_core::SourceReferencePage
+pub fn finstack_ai_search_core::SourceReferencePage::clone(&self) -> finstack_ai_search_core::SourceReferencePage
+impl core::cmp::Eq for finstack_ai_search_core::SourceReferencePage
+impl core::cmp::PartialEq for finstack_ai_search_core::SourceReferencePage
+pub fn finstack_ai_search_core::SourceReferencePage::eq(&self, &finstack_ai_search_core::SourceReferencePage) -> bool
+impl core::fmt::Debug for finstack_ai_search_core::SourceReferencePage
+pub fn finstack_ai_search_core::SourceReferencePage::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_search_core::SourceReferencePage
+impl serde_core::ser::Serialize for finstack_ai_search_core::SourceReferencePage
+pub fn finstack_ai_search_core::SourceReferencePage::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_search_core::SourceReferencePage
+pub fn finstack_ai_search_core::SourceReferencePage::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_search_core::SourceResult
+pub finstack_ai_search_core::SourceResult::examined: u64
+pub finstack_ai_search_core::SourceResult::historical_complete: bool
+pub finstack_ai_search_core::SourceResult::hits: alloc::vec::Vec<finstack_ai_search_core::SearchHit>
+pub finstack_ai_search_core::SourceResult::reasons: alloc::vec::Vec<alloc::sync::Arc<str>>
+pub finstack_ai_search_core::SourceResult::status: finstack_ai_search_core::SourceStatus
+impl finstack_ai_search_core::SourceResult
+pub fn finstack_ai_search_core::SourceResult::completed(alloc::vec::Vec<finstack_ai_search_core::SearchHit>, u64) -> Self
+pub fn finstack_ai_search_core::SourceResult::truncate(&mut self, &'static str)
+impl core::clone::Clone for finstack_ai_search_core::SourceResult
+pub fn finstack_ai_search_core::SourceResult::clone(&self) -> finstack_ai_search_core::SourceResult
+impl core::cmp::Eq for finstack_ai_search_core::SourceResult
+impl core::cmp::PartialEq for finstack_ai_search_core::SourceResult
+pub fn finstack_ai_search_core::SourceResult::eq(&self, &finstack_ai_search_core::SourceResult) -> bool
+impl core::fmt::Debug for finstack_ai_search_core::SourceResult
+pub fn finstack_ai_search_core::SourceResult::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_search_core::SourceResult
+impl serde_core::ser::Serialize for finstack_ai_search_core::SourceResult
+pub fn finstack_ai_search_core::SourceResult::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_search_core::SourceResult
+pub fn finstack_ai_search_core::SourceResult::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub const finstack_ai_search_core::MAX_EVIDENCE_BYTES: usize
+pub const finstack_ai_search_core::MAX_LEXICAL_TERMS: usize
+pub const finstack_ai_search_core::SEARCH_CAPACITY_EXCEEDED: &str
+pub const finstack_ai_search_core::SEARCH_INVALID: &str
+pub const finstack_ai_search_core::SEARCH_NO_SUCCESSFUL_SOURCES: &str
+pub const finstack_ai_search_core::SEARCH_SCOPE_DENIED: &str
+pub const finstack_ai_search_core::SEARCH_UNAVAILABLE: &str
+pub const finstack_ai_search_core::SEARCH_UNSUPPORTED: &str
+pub trait finstack_ai_search_core::SearchSource: finstack_ai_runtime::ports::PortObject
+pub fn finstack_ai_search_core::SearchSource::authorize(&self, &finstack_ai_search_core::SearchScope, &finstack_ai_search_core::SearchQuery) -> core::result::Result<(), finstack_ai_search_core::SearchError>
+pub fn finstack_ai_search_core::SearchSource::descriptor(&self) -> finstack_ai_search_core::SearchSourceDescriptor
+pub fn finstack_ai_search_core::SearchSource::read_evidence(&self, finstack_ai_search_core::SearchScope, finstack_ai_search_core::SourceRef) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<core::option::Option<finstack_ai_search_core::SearchEvidence>, finstack_ai_search_core::SearchError>>
+pub fn finstack_ai_search_core::SearchSource::references(&self, finstack_ai_search_core::SearchScope, core::option::Option<alloc::string::String>, usize) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_search_core::SourceReferencePage, finstack_ai_search_core::SearchError>>
+pub fn finstack_ai_search_core::SearchSource::search(&self, finstack_ai_search_core::SearchScope, finstack_ai_search_core::SearchQuery, usize) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_search_core::SourceResult, finstack_ai_search_core::SearchError>>
+pub fn finstack_ai_search_core::configuration_digest<T: serde_core::ser::Serialize>(&str, &T) -> core::result::Result<finstack_ai_kernel::primitives::digest::Digest, finstack_ai_search_core::SearchError>
+pub fn finstack_ai_search_core::fts_expression(&str) -> core::result::Result<alloc::string::String, finstack_ai_search_core::SearchError>
+pub fn finstack_ai_search_core::fuse(alloc::vec::Vec<finstack_ai_search_core::LegResult>, finstack_ai_search_core::Fusion, usize, &finstack_ai_search_core::SearchLimits) -> core::result::Result<finstack_ai_search_core::SearchResponse, finstack_ai_search_core::SearchError>
+pub const fn finstack_ai_search_core::highest_sensitivity(finstack_ai_kernel::primitives::diagnostic::Sensitivity, finstack_ai_kernel::primitives::diagnostic::Sensitivity) -> finstack_ai_kernel::primitives::diagnostic::Sensitivity
+pub fn finstack_ai_search_core::lexical_terms(&str) -> core::result::Result<alloc::vec::Vec<&str>, finstack_ai_search_core::SearchError>
+pub fn finstack_ai_search_core::preview(&str, usize) -> alloc::sync::Arc<str>
+pub fn finstack_ai_search_core::validate_catalog_request(core::option::Option<&str>, usize) -> core::result::Result<(), finstack_ai_search_core::SearchError>
+pub fn finstack_ai_search_core::validate_id(&str) -> core::result::Result<(), finstack_ai_search_core::SearchError>

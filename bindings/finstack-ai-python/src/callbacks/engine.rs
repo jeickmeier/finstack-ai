@@ -11,7 +11,7 @@ use futures_util::future::{Either, select};
 use futures_util::{FutureExt, pin_mut};
 use pyo3::exceptions::{PyRuntimeError as PyBuiltinRuntimeError, PyTypeError};
 use pyo3::prelude::*;
-use pyo3::types::PyBytes;
+use pyo3::types::{PyBytes, PyDict};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
@@ -64,7 +64,7 @@ fn start_callback_loop(py: Python<'_>) -> Result<pyo3_async_runtimes::TaskLocals
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(super) enum CallbackFailure {
+pub(crate) enum CallbackFailure {
     Cancelled,
     Exception,
     InvalidResult,
@@ -145,7 +145,7 @@ fn call_python(
     }
 }
 
-pub(super) struct PythonCallback {
+pub(crate) struct PythonCallback {
     callable: Py<PyAny>,
     json_loads: Py<PyAny>,
     json_dumps: Py<PyAny>,
@@ -155,7 +155,7 @@ pub(super) struct PythonCallback {
 }
 
 impl PythonCallback {
-    pub(super) fn try_new(
+    pub(crate) fn try_new(
         py: Python<'_>,
         callable: Py<PyAny>,
         timeout_seconds: f64,
@@ -217,11 +217,22 @@ impl PythonCallback {
                     &request_bytes,
                     context,
                 )?;
-                pyo3_async_runtimes::into_future_with_locals(task_locals, awaitable.into_bound(py))
+                let asyncio = py.import("asyncio")?;
+                let task = asyncio.call_method1(
+                    "run_coroutine_threadsafe",
+                    (awaitable, task_locals.event_loop(py)),
+                )?;
+                let kwargs = PyDict::new(py);
+                kwargs.set_item("loop", task_locals.event_loop(py))?;
+                let future = asyncio.call_method("wrap_future", (&task,), Some(&kwargs))?;
+                let future = pyo3_async_runtimes::into_future_with_locals(task_locals, future)?;
+                Ok::<_, PyErr>((future, CancelPythonCall(task.unbind())))
             })
             .map_err(|_| CallbackFailure::Exception)?;
             return Ok(Box::pin(async move {
-                callback.await.map_err(|_| CallbackFailure::Exception)
+                // Own cancellation even when an outer Rust deadline drops this future.
+                let (future, _cancel_on_drop) = callback;
+                future.await.map_err(|_| CallbackFailure::Exception)
             }));
         }
         let (callable, json_loads) =
@@ -291,5 +302,43 @@ impl PythonCallback {
             Ok(Err(failure)) => Err(failure),
             Err(_) => Err(CallbackFailure::Timeout),
         }
+    }
+
+    /// Data-only coarse evaluation callbacks carry no fabricated runtime authority.
+    /// Async calls are cancelled when this future drops; synchronous trusted Python
+    /// work cannot be forcibly interrupted and its late result is discarded.
+    pub(crate) async fn invoke_data<Request: Serialize, Response: DeserializeOwned>(
+        &self,
+        request: &Request,
+    ) -> Result<Response, CallbackFailure> {
+        let bytes = serde_json::to_vec(request).map_err(|_| CallbackFailure::InvalidResult)?;
+        if bytes.len() > 1_048_576 {
+            return Err(CallbackFailure::InvalidResult);
+        }
+        let callback = self.call(bytes, None)?;
+        let value = match finstack_ai::runtime::native_driver::timeout(self.timeout, callback).await
+        {
+            Ok(result) => result?,
+            Err(_) => return Err(CallbackFailure::Timeout),
+        };
+        Python::attach(|py| {
+            let encoded = self.json_dumps.call1(py, (value,))?.extract::<String>(py)?;
+            if encoded.len() > 1_048_576 {
+                return Err(PyTypeError::new_err("callback result exceeds bound"));
+            }
+            serde_json::from_str(&encoded)
+                .map_err(|_| PyTypeError::new_err("invalid callback result"))
+        })
+        .map_err(|_| CallbackFailure::InvalidResult)
+    }
+}
+
+/// concurrent.futures.Future.cancel is thread-safe and cancels its asyncio task.
+struct CancelPythonCall(Py<PyAny>);
+impl Drop for CancelPythonCall {
+    fn drop(&mut self) {
+        Python::attach(|py| {
+            let _ = self.0.call_method0(py, "cancel");
+        });
     }
 }

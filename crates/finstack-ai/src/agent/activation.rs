@@ -151,6 +151,14 @@ impl NativeCapabilityHost {
         Some(merged.into_values().collect())
     }
 
+    /// Whether this process still holds an uncommitted activation proposal.
+    #[cfg(feature = "durable-host")]
+    pub(super) fn has_pending(&self, run_id: RunId) -> bool {
+        self.pending
+            .lock()
+            .is_ok_and(|pending| pending.get(&run_id).is_some_and(|sets| !sets.is_empty()))
+    }
+
     /// Lock fingerprint used as the submitted `resolved_plan_digest`.
     #[must_use]
     pub fn lock_digest(&self) -> Option<Digest> {

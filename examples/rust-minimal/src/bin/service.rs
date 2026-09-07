@@ -21,15 +21,12 @@
 #![doc(test(attr(allow(clippy::expect_used))))]
 
 use finstack_ai::AgentRunRequest;
-use finstack_ai_native_examples::{BoxError, build_agent, security};
+use finstack_ai_native_examples::{BoxError, build_agent, security, text_response};
 
 #[tokio::main]
 async fn main() -> Result<(), BoxError> {
-    let (agent, model, server) = build_agent(
-        vec!["data: {\"id\":\"service\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"service ready\"},\"finish_reason\":\"stop\"}],\"usage\":null}\n\ndata: [DONE]\n\n".to_owned()],
-        false,
-    )
-    .await?;
+    let (agent, model, server) =
+        build_agent(vec![text_response("service ready", "service")], false).await?;
     let health = agent.resolved().health().await;
     println!("resolved components with lifecycle hooks: {}", health.len());
     let output = agent

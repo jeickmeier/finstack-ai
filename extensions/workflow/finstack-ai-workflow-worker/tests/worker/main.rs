@@ -5,6 +5,7 @@
     reason = "contract tests keep driver setup inline for readable state-machine scenarios"
 )]
 
+mod execution;
 mod expiry;
 mod hardening;
 mod helpers;

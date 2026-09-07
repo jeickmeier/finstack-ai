@@ -14,11 +14,13 @@ publish = false
 [features]
 default = []
 sqlite = ["dep:rusqlite", "dep:tokio"]
+search = ["dep:finstack-ai-search-core"]
 
 [dependencies]
 finstack-ai-embeddings = { workspace = true }
 finstack-ai-kernel = { workspace = true }
 finstack-ai-runtime = { workspace = true }
+finstack-ai-search-core = { workspace = true, optional = true }
 futures-util = { workspace = true }
 rusqlite = { workspace = true, optional = true }
 serde = { workspace = true }

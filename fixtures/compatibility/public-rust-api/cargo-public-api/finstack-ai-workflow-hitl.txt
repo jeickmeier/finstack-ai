@@ -135,6 +135,10 @@ impl core::clone::Clone for finstack_ai_workflow_hitl::ResolutionInput
 pub fn finstack_ai_workflow_hitl::ResolutionInput::clone(&self) -> finstack_ai_workflow_hitl::ResolutionInput
 impl core::fmt::Debug for finstack_ai_workflow_hitl::ResolutionInput
 pub fn finstack_ai_workflow_hitl::ResolutionInput::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl serde_core::ser::Serialize for finstack_ai_workflow_hitl::ResolutionInput
+pub fn finstack_ai_workflow_hitl::ResolutionInput::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_workflow_hitl::ResolutionInput
+pub fn finstack_ai_workflow_hitl::ResolutionInput::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 pub struct finstack_ai_workflow_hitl::SqliteHitlStore
 impl finstack_ai_workflow_hitl::SqliteHitlStore
 pub fn finstack_ai_workflow_hitl::SqliteHitlStore::path(&self) -> &std::path::Path

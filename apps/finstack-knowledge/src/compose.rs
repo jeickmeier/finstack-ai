@@ -19,9 +19,8 @@ use finstack_ai_embeddings::embedder::TextEmbedder;
 use finstack_ai_kernel::{CapabilityId, ComponentId, ComponentRef, Version};
 use finstack_ai_memory::extract::RuleBasedExtractor;
 use finstack_ai_memory::observer::MemoryObserver;
-use finstack_ai_memory::provider::{MemoryContextProvider, RecallConfig};
 use finstack_ai_memory::record::{MemoryScope, system_clock};
-use finstack_ai_memory::store::{MemoryStore, SqliteMemoryStore, reconcile_memory_embeddings};
+use finstack_ai_memory::store::{MemoryStore, SqliteMemoryStore};
 use finstack_ai_memory::toolset::{MemoryPolicy, MemoryToolset};
 use finstack_ai_middleware_compaction::{CompactionConfig, CompactionMiddleware};
 use finstack_ai_middleware_document_ingest::DocumentIngestMiddleware;
@@ -45,8 +44,11 @@ use crate::config::{
     EmbedderChoice, KnowledgeConfig, KnowledgeError, ProviderChoice, compose_error,
 };
 use crate::docs::materialize_self_docs;
+use crate::search::{KnowledgeSearch, SearchMaintenanceReport};
+use finstack_ai_index_documents::DocumentIndexToolset;
+use finstack_ai_search::{SearchContextProvider, SearchToolset};
 
-/// Exact component version for every `finstack.know.*` registration.
+/// Exact version for application-owned model, toolset, and store registrations.
 const KNOW_VERSION: Version = Version {
     major: 1,
     minor: 0,
@@ -64,11 +66,23 @@ const BASE_INSTRUCTION: &str = "You are the finstack knowledge assistant. Answer
 ingested documents, remembered facts, and the bundled self-docs; say when you do not \
 know. Prefer citing sources by name. Use registered tools when they help.";
 
+/// Complete application composition with explicit host-owned search maintenance.
+/// Use `agent` for SDK execution, and `search.maintain` between turns. Dropping
+/// this value releases the component handles; it creates no background task.
+pub struct KnowledgeAgent {
+    /// Resolved SDK agent shared by all application recipes.
+    pub agent: Agent,
+    /// Four-source search and explicit bounded maintenance handles.
+    pub search: KnowledgeSearch,
+    /// Startup maintenance failures/coverage, available for host reporting.
+    pub initial_maintenance: SearchMaintenanceReport,
+}
+
 /// Provider-neutral model context bounds (bytes, context, output, reserve, overhead).
 const MODEL_BOUNDS: (u64, u64, u64, u64, u64) = (1_048_576, 131_072, 8_192, 8_192, 64);
 
 /// Records drained by the one best-effort embedding backfill at startup.
-const EMBEDDING_BACKFILL_LIMIT: usize = 64;
+const STARTUP_MAINTENANCE_LIMIT: usize = 64;
 
 /// Sliding-window compaction thresholds in tokens (threshold, hysteresis).
 const COMPACTION_TOKENS: (u64, u64) = (120_000, 24_000);
@@ -99,9 +113,36 @@ pub fn model_name(config: &KnowledgeConfig) -> Result<ModelName, KnowledgeError>
 /// Returns [`KnowledgeError`] when the data directory is unusable, a fetch
 /// allowlist pattern is invalid, or a released component rejects its
 /// composition inputs.
-pub async fn build_agent(config: &KnowledgeConfig) -> Result<Agent, KnowledgeError> {
-    let journal = open_journal(config)?;
-    build_agent_with_journal(config, journal).await
+pub async fn build_agent(config: &KnowledgeConfig) -> Result<KnowledgeAgent, KnowledgeError> {
+    let config = local_search_config(config).await?;
+    let journal = open_journal(&config)?;
+    build_agent_with_journal(&config, journal).await
+}
+
+/// Populate journal search authority from this application's local database.
+/// Explicit nonempty `search_sessions` is honored. More than 256 sessions requires
+/// the host to select a subset; the app never silently drops the rest.
+///
+/// # Errors
+/// Rejects unavailable storage or a catalog exceeding the configured source envelope.
+pub async fn local_search_config(
+    config: &KnowledgeConfig,
+) -> Result<KnowledgeConfig, KnowledgeError> {
+    if !config.search_sessions.is_empty() {
+        return Ok(config.clone());
+    }
+    let sessions = open_journal_sqlite(config)?
+        .list_sessions(257)
+        .await
+        .map_err(compose_error)?;
+    if sessions.len() > 256 {
+        return Err(KnowledgeError::Config {
+            reason: "search_session_selection_required",
+        });
+    }
+    Ok(config
+        .clone()
+        .with_search_sessions(sessions.into_iter().map(|row| row.session_id).collect()))
 }
 
 /// Open the shared sqlite journal at `<data_dir>/journal.sqlite3`.
@@ -150,7 +191,7 @@ pub fn open_journal_sqlite(
 pub async fn build_agent_with_journal(
     config: &KnowledgeConfig,
     journal: Arc<dyn JournalStore>,
-) -> Result<Agent, KnowledgeError> {
+) -> Result<KnowledgeAgent, KnowledgeError> {
     let artifact_store = open_artifact_store(config)?;
     build_agent_with_stores(config, journal, artifact_store).await
 }
@@ -191,7 +232,7 @@ pub async fn build_agent_with_stores(
     config: &KnowledgeConfig,
     journal: Arc<dyn JournalStore>,
     artifact_store: Arc<dyn finstack_ai::runtime::artifact::ArtifactStore>,
-) -> Result<Agent, KnowledgeError> {
+) -> Result<KnowledgeAgent, KnowledgeError> {
     std::fs::create_dir_all(&config.data_dir).map_err(|_| KnowledgeError::Config {
         reason: "data_dir_unwritable",
     })?;
@@ -200,9 +241,15 @@ pub async fn build_agent_with_stores(
     let provider = provider(config)?;
 
     let memory = memory_components(config, &artifact_store)?;
-    backfill_memory_embeddings(&memory).await;
+    let mut search = KnowledgeSearch::open(
+        config,
+        memory.store.clone(),
+        memory.embedder.as_ref(),
+        journal.clone(),
+        artifact_store.clone(),
+    )?;
+    let initial_maintenance = search.maintain(STARTUP_MAINTENANCE_LIMIT).await?;
     let MemoryComponents {
-        provider: memory_provider,
         toolset: memory_toolset,
         observer: memory_observer,
         ..
@@ -227,37 +274,21 @@ pub async fn build_agent_with_stores(
     .artifact_store(Arc::clone(&artifact_store))
     // Port extensions with self-identifying descriptors must be registered
     // under their declared identity, not a finstack.know.* alias.
-    .context_provider(
-        versioned("finstack.context.repository", 0, 0, 4)?,
-        Arc::new(self_docs_provider(&self_docs_root)?),
-    )
-    .context_provider(
-        // 0.2.0: the recall contract gained the optional semantic leg
-        // (spec §6.1), whether or not this composition configures one.
-        versioned("finstack.context.memory", 0, 2, 0)?,
-        Arc::new(memory_provider),
-    )
-    .middleware(
-        versioned("finstack.middleware.instructions", 1, 0, 0)?,
-        Arc::new(instructions_middleware()?),
-    )
-    .middleware(
-        versioned("finstack.middleware.document-ingest", 1, 0, 0)?,
-        Arc::new(
-            DocumentIngestMiddleware::try_new(Arc::clone(&artifact_store))
-                .map_err(compose_error)?,
-        ),
-    )
-    .middleware(
-        versioned("finstack.middleware.compaction", 0, 0, 4)?,
-        Arc::new(
-            CompactionMiddleware::try_new(CompactionConfig::sliding_window(
-                COMPACTION_TOKENS.0,
-                COMPACTION_TOKENS.1,
-            ))
-            .map_err(compose_error)?,
-        ),
-    )
+    .context_provider(Arc::new(self_docs_provider(&self_docs_root)?))
+    .context_provider(Arc::new(
+        SearchContextProvider::try_new(search.engine.clone(), 8).map_err(compose_error)?,
+    ))
+    .middleware(Arc::new(instructions_middleware()?))
+    .middleware(Arc::new(
+        DocumentIngestMiddleware::try_new(Arc::clone(&artifact_store)).map_err(compose_error)?,
+    ))
+    .middleware(Arc::new(
+        CompactionMiddleware::try_new(CompactionConfig::sliding_window(
+            COMPACTION_TOKENS.0,
+            COMPACTION_TOKENS.1,
+        ))
+        .map_err(compose_error)?,
+    ))
     .toolset(
         component("finstack.know.tools.document")?,
         Arc::new(DocumentToolset::try_new(Arc::clone(&artifact_store)).map_err(compose_error)?),
@@ -265,6 +296,14 @@ pub async fn build_agent_with_stores(
     .toolset(
         component("finstack.know.tools.memory")?,
         Arc::new(memory_toolset),
+    )
+    .toolset(
+        component("finstack.know.tools.search")?,
+        Arc::new(SearchToolset::try_new(search.engine.clone()).map_err(compose_error)?),
+    )
+    .toolset(
+        component("finstack.know.tools.document-index")?,
+        Arc::new(DocumentIndexToolset::try_new(search.documents.clone()).map_err(compose_error)?),
     )
     .toolset(component("finstack.know.tools.skills")?, Arc::new(skills))
     // The repl resolves ask_user interactions; spec §8 names elicitation as
@@ -278,22 +317,14 @@ pub async fn build_agent_with_stores(
                 .map_err(compose_error)?,
         ),
     )
-    .observer(
-        versioned("finstack.observer.log", 0, 0, 4)?,
-        Arc::new(log_observer()?),
-    )
-    .observer(
-        versioned("finstack.observer.memory", 0, 1, 0)?,
-        Arc::new(memory_observer),
-    )
+    .observer(Arc::new(log_observer()?))
+    .observer(Arc::new(memory_observer))
+    .observer(search.observer.clone())
     .capability(citations)
     .capability_activation_host(capability_host);
 
     if let Some(project_root) = &config.project_root {
-        builder = builder.context_provider(
-            versioned("finstack.context.repository", 0, 0, 4)?,
-            Arc::new(repository_provider(project_root)?),
-        );
+        builder = builder.context_provider(Arc::new(repository_provider(project_root)?));
     }
 
     if !config.fetch_allowlist.is_empty() {
@@ -303,31 +334,16 @@ pub async fn build_agent_with_stores(
         );
     }
 
-    builder.build().await.map_err(compose_error)
-}
-
-/// One bounded startup backfill of the embedding index, when an embedder
-/// is configured.
-///
-/// Drains records that predate the embedder configuration. The embedding
-/// index is derived, best-effort data (spec §6.1): a down embedder must
-/// never block startup, so the result — including its error — is ignored
-/// and unindexed records stay pending for the next drain.
-async fn backfill_memory_embeddings(memory: &MemoryComponents) {
-    if let Some(embedder) = &memory.embedder {
-        let _ = reconcile_memory_embeddings(
-            memory.store.as_ref(),
-            embedder.as_ref(),
-            EMBEDDING_BACKFILL_LIMIT,
-        )
-        .await;
-    }
+    Ok(KnowledgeAgent {
+        agent: builder.build().await.map_err(compose_error)?,
+        search,
+        initial_maintenance,
+    })
 }
 
 /// The assembled memory surfaces plus the store and embedder they share,
 /// kept for the startup embedding backfill.
 struct MemoryComponents {
-    provider: MemoryContextProvider,
     toolset: MemoryToolset,
     observer: MemoryObserver,
     store: Arc<dyn MemoryStore>,
@@ -345,14 +361,13 @@ fn memory_components(
             .map_err(compose_error)?,
     );
     let scope = MemoryScope::try_new("local").map_err(compose_error)?;
-    let embedder = memory_embedder(config)?;
-    let (provider, toolset, observer) = if let Some(embedder) = &embedder {
+    let embedder = embedder(config)?;
+    let (toolset, observer) = if let Some(embedder) = &embedder {
         memory_surfaces_with_embedder(&memory_store, artifact_store, scope, embedder)?
     } else {
         memory_surfaces_lexical(&memory_store, artifact_store, scope)?
     };
     Ok(MemoryComponents {
-        provider,
         toolset,
         observer,
         store: memory_store,
@@ -366,20 +381,16 @@ fn memory_surfaces_with_embedder(
     artifact_store: &Arc<dyn finstack_ai::runtime::artifact::ArtifactStore>,
     scope: MemoryScope,
     embedder: &Arc<dyn TextEmbedder>,
-) -> Result<(MemoryContextProvider, MemoryToolset, MemoryObserver), KnowledgeError> {
-    let provider = MemoryContextProvider::try_new_with_embedder(
-        Arc::clone(memory_store),
-        artifact_store.as_ref(),
-        scope.clone(),
-        RecallConfig::default(),
-        Arc::clone(embedder),
-    )
-    .map_err(compose_error)?;
+) -> Result<(MemoryToolset, MemoryObserver), KnowledgeError> {
     let toolset = MemoryToolset::try_new_with_embedder(
         Arc::clone(memory_store),
         Arc::clone(artifact_store),
         scope.clone(),
-        MemoryPolicy::default(),
+        MemoryPolicy {
+            read: false,
+            write: true,
+            manage: true,
+        },
         system_clock(),
         Arc::clone(embedder),
     )
@@ -392,7 +403,7 @@ fn memory_surfaces_with_embedder(
         Arc::clone(embedder),
     )
     .map_err(compose_error)?;
-    Ok((provider, toolset, observer))
+    Ok((toolset, observer))
 }
 
 /// The three memory surfaces with lexical recall only.
@@ -400,19 +411,16 @@ fn memory_surfaces_lexical(
     memory_store: &Arc<dyn MemoryStore>,
     artifact_store: &Arc<dyn finstack_ai::runtime::artifact::ArtifactStore>,
     scope: MemoryScope,
-) -> Result<(MemoryContextProvider, MemoryToolset, MemoryObserver), KnowledgeError> {
-    let provider = MemoryContextProvider::try_new(
-        Arc::clone(memory_store),
-        artifact_store.as_ref(),
-        scope.clone(),
-        RecallConfig::default(),
-    )
-    .map_err(compose_error)?;
+) -> Result<(MemoryToolset, MemoryObserver), KnowledgeError> {
     let toolset = MemoryToolset::try_new(
         Arc::clone(memory_store),
         Arc::clone(artifact_store),
         scope.clone(),
-        MemoryPolicy::default(),
+        MemoryPolicy {
+            read: false,
+            write: true,
+            manage: true,
+        },
         system_clock(),
     )
     .map_err(compose_error)?;
@@ -423,7 +431,7 @@ fn memory_surfaces_lexical(
         system_clock(),
     )
     .map_err(compose_error)?;
-    Ok((provider, toolset, observer))
+    Ok((toolset, observer))
 }
 
 /// Build the configured text embedder, if any.
@@ -431,10 +439,8 @@ fn memory_surfaces_lexical(
 /// The embedder endpoint is an operator-configured fixed URL: the embedder
 /// crate validates it once at construction (plaintext HTTP only toward a
 /// loopback IP; no credentials, query, or fragment).
-fn memory_embedder(
-    config: &KnowledgeConfig,
-) -> Result<Option<Arc<dyn TextEmbedder>>, KnowledgeError> {
-    match &config.memory_embedder {
+fn embedder(config: &KnowledgeConfig) -> Result<Option<Arc<dyn TextEmbedder>>, KnowledgeError> {
+    match &config.embedder {
         None => Ok(None),
         Some(EmbedderChoice::Ollama {
             base_url,
@@ -620,17 +626,5 @@ fn component(id: &str) -> Result<ComponentRef, KnowledgeError> {
     Ok(ComponentRef::new(
         ComponentId::parse(id).map_err(compose_error)?,
         Some(KNOW_VERSION),
-    ))
-}
-
-/// Reference a component under the exact identity its descriptor declares.
-fn versioned(id: &str, major: u16, minor: u16, patch: u16) -> Result<ComponentRef, KnowledgeError> {
-    Ok(ComponentRef::new(
-        ComponentId::parse(id).map_err(compose_error)?,
-        Some(Version {
-            major,
-            minor,
-            patch,
-        }),
     ))
 }

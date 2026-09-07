@@ -30,6 +30,8 @@ pub mod extract;
 pub mod observer;
 pub mod provider;
 pub mod record;
+#[cfg(feature = "search")]
+pub mod search;
 pub mod store;
 pub mod toolset;
 

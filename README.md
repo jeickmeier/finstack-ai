@@ -9,6 +9,10 @@ Workspace manifests are staged at **2.0.0**. No `v2.0.0` tag exists; the latest
 local release tag is `v1.0.0`. Build from this repository until a 2.0 release is
 published.
 
+See the [task-oriented capability matrix](docs/capabilities.md),
+[staged 2.0 migration guide](docs/migration-2.0.md), and
+[offline application recipes](docs/application-recipes.md).
+
 ## Quick start
 
 All starters are deterministic and run without external credentials.

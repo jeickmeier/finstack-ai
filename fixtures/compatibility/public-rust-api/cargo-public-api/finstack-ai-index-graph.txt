@@ -1,0 +1,179 @@
+pub mod finstack_ai_index_graph
+pub struct finstack_ai_index_graph::EdgeKind
+pub finstack_ai_index_graph::EdgeKind::kind: alloc::sync::Arc<str>
+pub finstack_ai_index_graph::EdgeKind::source_kind: alloc::sync::Arc<str>
+pub finstack_ai_index_graph::EdgeKind::target_kind: alloc::sync::Arc<str>
+impl core::clone::Clone for finstack_ai_index_graph::EdgeKind
+pub fn finstack_ai_index_graph::EdgeKind::clone(&self) -> finstack_ai_index_graph::EdgeKind
+impl core::cmp::Eq for finstack_ai_index_graph::EdgeKind
+impl core::cmp::PartialEq for finstack_ai_index_graph::EdgeKind
+pub fn finstack_ai_index_graph::EdgeKind::eq(&self, &finstack_ai_index_graph::EdgeKind) -> bool
+impl core::fmt::Debug for finstack_ai_index_graph::EdgeKind
+pub fn finstack_ai_index_graph::EdgeKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_index_graph::EdgeKind
+impl serde_core::ser::Serialize for finstack_ai_index_graph::EdgeKind
+pub fn finstack_ai_index_graph::EdgeKind::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_index_graph::EdgeKind
+pub fn finstack_ai_index_graph::EdgeKind::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_index_graph::EdgeRule
+pub finstack_ai_index_graph::EdgeRule::kind: alloc::sync::Arc<str>
+pub finstack_ai_index_graph::EdgeRule::pattern: alloc::sync::Arc<str>
+impl core::clone::Clone for finstack_ai_index_graph::EdgeRule
+pub fn finstack_ai_index_graph::EdgeRule::clone(&self) -> finstack_ai_index_graph::EdgeRule
+impl core::cmp::Eq for finstack_ai_index_graph::EdgeRule
+impl core::cmp::PartialEq for finstack_ai_index_graph::EdgeRule
+pub fn finstack_ai_index_graph::EdgeRule::eq(&self, &finstack_ai_index_graph::EdgeRule) -> bool
+impl core::fmt::Debug for finstack_ai_index_graph::EdgeRule
+pub fn finstack_ai_index_graph::EdgeRule::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_index_graph::EdgeRule
+impl serde_core::ser::Serialize for finstack_ai_index_graph::EdgeRule
+pub fn finstack_ai_index_graph::EdgeRule::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_index_graph::EdgeRule
+pub fn finstack_ai_index_graph::EdgeRule::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_index_graph::EntityRule
+pub finstack_ai_index_graph::EntityRule::canonical_label: core::option::Option<alloc::sync::Arc<str>>
+pub finstack_ai_index_graph::EntityRule::kind: alloc::sync::Arc<str>
+pub finstack_ai_index_graph::EntityRule::pattern: alloc::sync::Arc<str>
+impl core::clone::Clone for finstack_ai_index_graph::EntityRule
+pub fn finstack_ai_index_graph::EntityRule::clone(&self) -> finstack_ai_index_graph::EntityRule
+impl core::cmp::Eq for finstack_ai_index_graph::EntityRule
+impl core::cmp::PartialEq for finstack_ai_index_graph::EntityRule
+pub fn finstack_ai_index_graph::EntityRule::eq(&self, &finstack_ai_index_graph::EntityRule) -> bool
+impl core::fmt::Debug for finstack_ai_index_graph::EntityRule
+pub fn finstack_ai_index_graph::EntityRule::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_index_graph::EntityRule
+impl serde_core::ser::Serialize for finstack_ai_index_graph::EntityRule
+pub fn finstack_ai_index_graph::EntityRule::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_index_graph::EntityRule
+pub fn finstack_ai_index_graph::EntityRule::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_index_graph::GraphBuildCursor
+pub finstack_ai_index_graph::GraphBuildCursor::reference: core::option::Option<alloc::string::String>
+pub finstack_ai_index_graph::GraphBuildCursor::source: alloc::sync::Arc<str>
+impl core::clone::Clone for finstack_ai_index_graph::GraphBuildCursor
+pub fn finstack_ai_index_graph::GraphBuildCursor::clone(&self) -> finstack_ai_index_graph::GraphBuildCursor
+impl core::cmp::Eq for finstack_ai_index_graph::GraphBuildCursor
+impl core::cmp::PartialEq for finstack_ai_index_graph::GraphBuildCursor
+pub fn finstack_ai_index_graph::GraphBuildCursor::eq(&self, &finstack_ai_index_graph::GraphBuildCursor) -> bool
+impl core::fmt::Debug for finstack_ai_index_graph::GraphBuildCursor
+pub fn finstack_ai_index_graph::GraphBuildCursor::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_index_graph::GraphBuildCursor
+impl serde_core::ser::Serialize for finstack_ai_index_graph::GraphBuildCursor
+pub fn finstack_ai_index_graph::GraphBuildCursor::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_index_graph::GraphBuildCursor
+pub fn finstack_ai_index_graph::GraphBuildCursor::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_index_graph::GraphBuildReport
+pub finstack_ai_index_graph::GraphBuildReport::indexed: usize
+pub finstack_ai_index_graph::GraphBuildReport::next_cursor: core::option::Option<finstack_ai_index_graph::GraphBuildCursor>
+pub finstack_ai_index_graph::GraphBuildReport::removed: usize
+pub finstack_ai_index_graph::GraphBuildReport::unavailable: usize
+impl core::clone::Clone for finstack_ai_index_graph::GraphBuildReport
+pub fn finstack_ai_index_graph::GraphBuildReport::clone(&self) -> finstack_ai_index_graph::GraphBuildReport
+impl core::cmp::Eq for finstack_ai_index_graph::GraphBuildReport
+impl core::cmp::PartialEq for finstack_ai_index_graph::GraphBuildReport
+pub fn finstack_ai_index_graph::GraphBuildReport::eq(&self, &finstack_ai_index_graph::GraphBuildReport) -> bool
+impl core::fmt::Debug for finstack_ai_index_graph::GraphBuildReport
+pub fn finstack_ai_index_graph::GraphBuildReport::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_index_graph::GraphBuildReport
+impl serde_core::ser::Serialize for finstack_ai_index_graph::GraphBuildReport
+pub fn finstack_ai_index_graph::GraphBuildReport::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_index_graph::GraphBuildReport
+pub fn finstack_ai_index_graph::GraphBuildReport::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_index_graph::GraphIndexConfig
+pub finstack_ai_index_graph::GraphIndexConfig::limits: finstack_ai_search_core::query::SearchLimits
+pub finstack_ai_index_graph::GraphIndexConfig::max_edges: usize
+pub finstack_ai_index_graph::GraphIndexConfig::max_edges_per_source: usize
+pub finstack_ai_index_graph::GraphIndexConfig::max_entities: usize
+pub finstack_ai_index_graph::GraphIndexConfig::max_entities_per_source: usize
+pub finstack_ai_index_graph::GraphIndexConfig::max_evidence_reads: usize
+pub finstack_ai_index_graph::GraphIndexConfig::max_sources: usize
+pub finstack_ai_index_graph::GraphIndexConfig::max_support_per_item: usize
+pub finstack_ai_index_graph::GraphIndexConfig::scope: finstack_ai_search_core::scope::SearchScope
+pub finstack_ai_index_graph::GraphIndexConfig::scope_mapping: finstack_ai_search_core::scope::ScopeMapping
+pub finstack_ai_index_graph::GraphIndexConfig::source_id: alloc::sync::Arc<str>
+pub finstack_ai_index_graph::GraphIndexConfig::source_timeout_ms: u64
+pub finstack_ai_index_graph::GraphIndexConfig::vocabulary: finstack_ai_index_graph::GraphVocabulary
+impl finstack_ai_index_graph::GraphIndexConfig
+pub fn finstack_ai_index_graph::GraphIndexConfig::new(impl core::convert::Into<alloc::sync::Arc<str>>, finstack_ai_search_core::scope::SearchScope, finstack_ai_index_graph::GraphVocabulary) -> Self
+pub fn finstack_ai_index_graph::GraphIndexConfig::validate(&self) -> core::result::Result<(), finstack_ai_search_core::SearchError>
+impl core::clone::Clone for finstack_ai_index_graph::GraphIndexConfig
+pub fn finstack_ai_index_graph::GraphIndexConfig::clone(&self) -> finstack_ai_index_graph::GraphIndexConfig
+impl core::cmp::Eq for finstack_ai_index_graph::GraphIndexConfig
+impl core::cmp::PartialEq for finstack_ai_index_graph::GraphIndexConfig
+pub fn finstack_ai_index_graph::GraphIndexConfig::eq(&self, &finstack_ai_index_graph::GraphIndexConfig) -> bool
+impl core::fmt::Debug for finstack_ai_index_graph::GraphIndexConfig
+pub fn finstack_ai_index_graph::GraphIndexConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_index_graph::GraphIndexConfig
+impl serde_core::ser::Serialize for finstack_ai_index_graph::GraphIndexConfig
+pub fn finstack_ai_index_graph::GraphIndexConfig::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_index_graph::GraphIndexConfig
+pub fn finstack_ai_index_graph::GraphIndexConfig::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_index_graph::GraphIndexReport
+pub finstack_ai_index_graph::GraphIndexReport::complete: bool
+pub finstack_ai_index_graph::GraphIndexReport::edges: usize
+pub finstack_ai_index_graph::GraphIndexReport::entities: usize
+pub finstack_ai_index_graph::GraphIndexReport::removed: bool
+pub finstack_ai_index_graph::GraphIndexReport::source_key: alloc::string::String
+impl core::clone::Clone for finstack_ai_index_graph::GraphIndexReport
+pub fn finstack_ai_index_graph::GraphIndexReport::clone(&self) -> finstack_ai_index_graph::GraphIndexReport
+impl core::cmp::Eq for finstack_ai_index_graph::GraphIndexReport
+impl core::cmp::PartialEq for finstack_ai_index_graph::GraphIndexReport
+pub fn finstack_ai_index_graph::GraphIndexReport::eq(&self, &finstack_ai_index_graph::GraphIndexReport) -> bool
+impl core::fmt::Debug for finstack_ai_index_graph::GraphIndexReport
+pub fn finstack_ai_index_graph::GraphIndexReport::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_index_graph::GraphIndexReport
+impl serde_core::ser::Serialize for finstack_ai_index_graph::GraphIndexReport
+pub fn finstack_ai_index_graph::GraphIndexReport::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_index_graph::GraphIndexReport
+pub fn finstack_ai_index_graph::GraphIndexReport::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_index_graph::GraphReconcileReport
+pub finstack_ai_index_graph::GraphReconcileReport::examined: usize
+pub finstack_ai_index_graph::GraphReconcileReport::next_cursor: core::option::Option<alloc::string::String>
+pub finstack_ai_index_graph::GraphReconcileReport::removed: usize
+pub finstack_ai_index_graph::GraphReconcileReport::unavailable: usize
+impl core::clone::Clone for finstack_ai_index_graph::GraphReconcileReport
+pub fn finstack_ai_index_graph::GraphReconcileReport::clone(&self) -> finstack_ai_index_graph::GraphReconcileReport
+impl core::cmp::Eq for finstack_ai_index_graph::GraphReconcileReport
+impl core::cmp::PartialEq for finstack_ai_index_graph::GraphReconcileReport
+pub fn finstack_ai_index_graph::GraphReconcileReport::eq(&self, &finstack_ai_index_graph::GraphReconcileReport) -> bool
+impl core::fmt::Debug for finstack_ai_index_graph::GraphReconcileReport
+pub fn finstack_ai_index_graph::GraphReconcileReport::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_index_graph::GraphReconcileReport
+impl serde_core::ser::Serialize for finstack_ai_index_graph::GraphReconcileReport
+pub fn finstack_ai_index_graph::GraphReconcileReport::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_index_graph::GraphReconcileReport
+pub fn finstack_ai_index_graph::GraphReconcileReport::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_index_graph::GraphSearchSource
+impl finstack_ai_index_graph::GraphSearchSource
+pub const fn finstack_ai_index_graph::GraphSearchSource::config(&self) -> &finstack_ai_index_graph::GraphIndexConfig
+pub fn finstack_ai_index_graph::GraphSearchSource::try_open(&std::path::Path, finstack_ai_index_graph::GraphIndexConfig, alloc::vec::Vec<alloc::sync::Arc<dyn finstack_ai_search_core::SearchSource>>) -> core::result::Result<Self, finstack_ai_search_core::SearchError>
+impl finstack_ai_index_graph::GraphSearchSource
+pub async fn finstack_ai_index_graph::GraphSearchSource::index_reference(&self, &str, finstack_ai_search_core::hit::SourceRef) -> core::result::Result<finstack_ai_index_graph::GraphIndexReport, finstack_ai_search_core::SearchError>
+pub async fn finstack_ai_index_graph::GraphSearchSource::reconcile(&self, core::option::Option<alloc::string::String>, usize) -> core::result::Result<finstack_ai_index_graph::GraphReconcileReport, finstack_ai_search_core::SearchError>
+impl finstack_ai_index_graph::GraphSearchSource
+pub async fn finstack_ai_index_graph::GraphSearchSource::rebuild_step(&self, core::option::Option<finstack_ai_index_graph::GraphBuildCursor>, usize) -> core::result::Result<finstack_ai_index_graph::GraphBuildReport, finstack_ai_search_core::SearchError>
+impl core::clone::Clone for finstack_ai_index_graph::GraphSearchSource
+pub fn finstack_ai_index_graph::GraphSearchSource::clone(&self) -> finstack_ai_index_graph::GraphSearchSource
+impl finstack_ai_search_core::SearchSource for finstack_ai_index_graph::GraphSearchSource
+pub fn finstack_ai_index_graph::GraphSearchSource::authorize(&self, &finstack_ai_search_core::scope::SearchScope, &finstack_ai_search_core::query::SearchQuery) -> core::result::Result<(), finstack_ai_search_core::SearchError>
+pub fn finstack_ai_index_graph::GraphSearchSource::descriptor(&self) -> finstack_ai_search_core::SearchSourceDescriptor
+pub fn finstack_ai_index_graph::GraphSearchSource::search(&self, finstack_ai_search_core::scope::SearchScope, finstack_ai_search_core::query::SearchQuery, usize) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_search_core::hit::SourceResult, finstack_ai_search_core::SearchError>>
+pub struct finstack_ai_index_graph::GraphVocabulary
+pub finstack_ai_index_graph::GraphVocabulary::edge_kinds: alloc::vec::Vec<finstack_ai_index_graph::EdgeKind>
+pub finstack_ai_index_graph::GraphVocabulary::edge_rules: alloc::vec::Vec<finstack_ai_index_graph::EdgeRule>
+pub finstack_ai_index_graph::GraphVocabulary::entity_kinds: alloc::vec::Vec<alloc::sync::Arc<str>>
+pub finstack_ai_index_graph::GraphVocabulary::entity_rules: alloc::vec::Vec<finstack_ai_index_graph::EntityRule>
+pub finstack_ai_index_graph::GraphVocabulary::version: u16
+impl finstack_ai_index_graph::GraphVocabulary
+pub fn finstack_ai_index_graph::GraphVocabulary::validate(&self) -> core::result::Result<(), finstack_ai_search_core::SearchError>
+impl core::clone::Clone for finstack_ai_index_graph::GraphVocabulary
+pub fn finstack_ai_index_graph::GraphVocabulary::clone(&self) -> finstack_ai_index_graph::GraphVocabulary
+impl core::cmp::Eq for finstack_ai_index_graph::GraphVocabulary
+impl core::cmp::PartialEq for finstack_ai_index_graph::GraphVocabulary
+pub fn finstack_ai_index_graph::GraphVocabulary::eq(&self, &finstack_ai_index_graph::GraphVocabulary) -> bool
+impl core::fmt::Debug for finstack_ai_index_graph::GraphVocabulary
+pub fn finstack_ai_index_graph::GraphVocabulary::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_index_graph::GraphVocabulary
+impl serde_core::ser::Serialize for finstack_ai_index_graph::GraphVocabulary
+pub fn finstack_ai_index_graph::GraphVocabulary::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_index_graph::GraphVocabulary
+pub fn finstack_ai_index_graph::GraphVocabulary::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>

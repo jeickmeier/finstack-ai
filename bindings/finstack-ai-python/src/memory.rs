@@ -235,12 +235,16 @@ impl PyMemoryExtension {
     }
 
     /// Memory toolset handle for `toolsets=[...]`.
-    fn toolset(&self) -> PyResult<PyMemoryToolset> {
+    #[pyo3(signature = (*, read = true))]
+    fn toolset(&self, read: bool) -> PyResult<PyMemoryToolset> {
         Ok(PyMemoryToolset {
             component: component_ref(MEMORY_TOOLSET_COMPONENT, MEMORY_TOOLSET_VERSION)?,
             store: Arc::clone(&self.store),
             scope: self.scope.clone(),
-            policy: self.policy,
+            policy: MemoryPolicy {
+                read: self.policy.read && read,
+                ..self.policy
+            },
         })
     }
 
@@ -376,5 +380,23 @@ impl PyMemoryObserver {
 impl PyMemoryObserver {
     pub(crate) fn registration(&self) -> (ComponentRef, Arc<dyn Observer>) {
         (self.inner.descriptor().component, self.inner.clone())
+    }
+}
+
+impl PyMemoryExtension {
+    pub(crate) fn search_store(
+        &self,
+        scope: &finstack_ai_search_core::SearchScope,
+    ) -> PyResult<Arc<dyn MemoryStore>> {
+        let bound = serde_json::to_value(&self.scope)
+            .map_err(|_| memory_py_error(&"invalid memory scope"))?;
+        let requested =
+            serde_json::to_value(scope).map_err(|_| memory_py_error(&"invalid search scope"))?;
+        if !self.policy.read || bound != requested {
+            return Err(crate::search::error(
+                finstack_ai_search_core::SearchError::SearchScopeDenied,
+            ));
+        }
+        Ok(self.store.clone())
     }
 }

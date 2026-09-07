@@ -14,6 +14,8 @@ pub struct AskOutcome {
     pub session_id: String,
     /// Whether this call created the session.
     pub created: bool,
+    /// Separate host maintenance reports; never inserted into the `RunEvent` stream.
+    pub maintenance: Vec<crate::SearchMaintenanceReport>,
 }
 
 /// Ask one question, streaming events into `sink`.
@@ -46,15 +48,19 @@ async fn run_ask_inner(
     sink: &mut dyn EventSink,
 ) -> Result<AskOutcome, KnowledgeError> {
     let journal = open_journal(config)?;
-    let agent = build_agent_with_journal(config, journal.clone()).await?;
-    let (session, lane, created) = super::session_lane(journal, session).await?;
+    let (session, lane, created) = super::session_lane(journal.clone(), session).await?;
+    let config = crate::local_search_config(config).await?;
+    let mut composition = build_agent_with_journal(&config, journal).await?;
 
-    let request = AgentRunRequest::try_new(model_name(config)?, question, security(os_user)?)
+    let request = AgentRunRequest::try_new(model_name(&config)?, question, security(os_user)?)
         .map_err(compose_error)?;
-    super::run_to_sink(&lane, &agent, request, sink).await?;
+    let result = super::run_to_sink(&lane, &composition.agent, request, sink).await;
+    let maintenance = composition.search.maintain(256).await?;
+    result?;
 
     Ok(AskOutcome {
         session_id: session.session_id().to_string(),
         created,
+        maintenance: vec![composition.initial_maintenance, maintenance],
     })
 }

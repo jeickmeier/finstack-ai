@@ -8,7 +8,7 @@ use finstack_ai_kernel::{
     RawJson, ReducerStageOutcome, RetryClassification, RetryDirective, RetrySafety, RunAccepted,
     RunId, RunPhase, SessionId, Stage, TerminalState,
 };
-use finstack_ai_runtime::ports::model::LockedModelContextProfile;
+use finstack_ai_runtime::ports::model::{LockedModelContextProfile, ModelName, ModelSettings};
 use finstack_ai_runtime::run::RunHandle;
 use finstack_ai_runtime::session::LaneRunContext;
 
@@ -21,10 +21,29 @@ use super::types::{
     AGENT_RUN_INVALID_CONFIGURATION, AgentRunError, AgentRunOutput, AgentRunRequest,
 };
 
+/// Non-authority reconstruction inputs for the shared stage driver.
+/// Authority, deadline, effect state and budgets remain in the accepted journal.
+pub(super) struct StageDriverConfig {
+    pub(super) model: ModelName,
+    pub(super) settings: ModelSettings,
+    pub(super) timeout: std::time::Duration,
+    pub(super) max_cycles: u64,
+}
+
+impl From<&AgentRunRequest> for StageDriverConfig {
+    fn from(request: &AgentRunRequest) -> Self {
+        Self {
+            model: request.model.clone(),
+            settings: request.settings.clone(),
+            timeout: request.timeout,
+            max_cycles: request.max_cycles,
+        }
+    }
+}
+
 impl Agent {
     #[expect(
         clippy::too_many_arguments,
-        clippy::too_many_lines,
         reason = "the preview driver keeps the complete aggregate-stage sequence auditable"
     )]
     pub(super) async fn drive(
@@ -49,6 +68,35 @@ impl Agent {
                 }),
             )
             .await?;
+        }
+        self.drive_existing(
+            handle,
+            StageDriverConfig::from(&request),
+            profile,
+            locator,
+            context_seed,
+        )
+        .await
+    }
+
+    /// Advance an already accepted run using the same decisions on initial
+    /// execution and recovery. This entrypoint never accepts a run or appends input.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one stage driver owns ordinary and recovered decisions"
+    )]
+    pub(super) async fn drive_existing(
+        &self,
+        handle: &RunHandle,
+        request: StageDriverConfig,
+        profile: LockedModelContextProfile,
+        locator: OperationLocator,
+        context_seed: LaneRunContext,
+    ) -> Result<AgentRunOutput, AgentRunError> {
+        if handle.live_state().phase.is_none() {
+            return Err(AgentRunError::runtime_message(
+                "stage driver requires an accepted run",
+            ));
         }
         if handle.live_state().phase == Some(RunPhase::BeforeRun) {
             let lock = self.resolved.lock().ok_or_else(|| {

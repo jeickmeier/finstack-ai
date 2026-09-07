@@ -9,6 +9,9 @@ use finstack_ai_kernel::{
 };
 use finstack_ai_runtime::artifact::ArtifactStore;
 use finstack_ai_runtime::ports::model::Model;
+use finstack_ai_runtime::ports::model::{
+    ApprovalMetadata, ApprovalRequirement, SideEffectClass, ToolDeferralSupport, ToolSpec,
+};
 use finstack_ai_runtime::ports::tool::{
     JsonSchemaToolValidatorCompiler, ResolvedToolCatalog, ToolExecutionPolicy, ToolPolicyDecision,
     ToolValidator, ToolValidatorCompiler, ToolsetRegistration,
@@ -61,6 +64,7 @@ pub struct Agent {
 pub(super) struct StructuredOutputConfig {
     pub(super) schema_ref: SchemaRef,
     pub(super) validator: Arc<dyn ToolValidator>,
+    pub(super) tool: ToolSpec,
 }
 
 fn prepare_tool_catalog(resolved: &ResolvedAgent) -> Result<ResolvedToolCatalog, AgentRunError> {
@@ -292,6 +296,36 @@ impl Agent {
         Ok(rebuilt)
     }
 
+    /// Rebuild this immutable composition with explicit accepted run limits.
+    /// Existing runs retain their original lock and limits. The same resolved
+    /// native components, journal, artifact store and output schema are retained.
+    ///
+    /// # Errors
+    /// Returns a configuration error for agents without a retained builder, or
+    /// when the new limits fail canonical bundle resolution.
+    pub async fn with_limits(
+        &self,
+        limits: finstack_ai_kernel::RunLimits,
+    ) -> Result<Self, AgentRunError> {
+        let builder = self
+            .rebuild
+            .as_ref()
+            .ok_or_else(|| {
+                AgentRunError::configuration(
+                    AGENT_RUN_INVALID_CONFIGURATION,
+                    "with_limits requires a builder-built agent",
+                )
+            })?
+            .as_ref()
+            .clone()
+            .limits(limits);
+        let mut rebuilt = builder.build().await?;
+        rebuilt
+            .structured_output
+            .clone_from(&self.structured_output);
+        Ok(rebuilt)
+    }
+
     /// Return an immutable composition with a fresh bounded history cache.
     #[must_use]
     pub fn with_history_cache_policy(mut self, policy: HistoryCachePolicy) -> Self {
@@ -387,7 +421,8 @@ impl Agent {
         &self,
         active: &[finstack_ai_kernel::ActiveCapability],
     ) -> Vec<finstack_ai_runtime::ports::model::ToolSpec> {
-        self.tools
+        let mut tools: Vec<_> = self
+            .tools
             .tools()
             .filter(|tool| {
                 match tool
@@ -400,7 +435,11 @@ impl Agent {
                 }
             })
             .map(|tool| tool.spec.clone())
-            .collect()
+            .collect();
+        if let Some(output) = &self.structured_output {
+            tools.push(output.tool.clone());
+        }
+        tools
     }
 
     /// Return an agent configured for one compile-once Draft 2020-12 output schema.
@@ -414,6 +453,14 @@ impl Agent {
     /// Returns a stable configuration error when the schema cannot be compiled
     /// by the canonical offline Rust validator.
     pub fn try_with_output_schema(mut self, schema: &RawJson) -> Result<Self, AgentRunError> {
+        if self.tools.tools().any(|tool| {
+            tool.spec.model_name.as_ref() == finstack_ai_kernel::SUBMIT_FINAL_OUTPUT_TOOL
+        }) {
+            return Err(AgentRunError::configuration(
+                AGENT_RUN_INVALID_CONFIGURATION,
+                "structured output reserves submit_final_output",
+            ));
+        }
         let validator = JsonSchemaToolValidatorCompiler
             .compile(schema, &BTreeMap::new())
             .map_err(|error| {
@@ -430,6 +477,35 @@ impl Agent {
         self.structured_output = Some(StructuredOutputConfig {
             schema_ref,
             validator,
+            // Native providers recover the full schema from this framework-only
+            // metadata. The kernel consumes the result; no external tool is dispatched.
+            tool: ToolSpec {
+                id: finstack_ai_kernel::ToolId::parse("finstack.internal.submit_final_output")
+                    .map_err(|error| {
+                        AgentRunError::configuration(
+                            AGENT_RUN_INVALID_CONFIGURATION,
+                            error.to_string(),
+                        )
+                    })?,
+                model_name: Arc::from(finstack_ai_kernel::SUBMIT_FINAL_OUTPUT_TOOL),
+                title: Arc::from("Submit final output"),
+                description: Arc::from(
+                    "Submit the final result matching the required output schema.",
+                ),
+                input_schema: schema.clone(),
+                output_schema: None,
+                execution: finstack_ai_kernel::ToolExecutionMode::Sequential,
+                side_effect: SideEffectClass::ReadOnly,
+                retry_safety: finstack_ai_kernel::RetrySafety::SafeToRetry,
+                approval: ApprovalMetadata {
+                    requirement: ApprovalRequirement::NotRequired,
+                    reason: None,
+                    attributes: finstack_ai_kernel::Metadata::empty(),
+                },
+                max_result_bytes: 1_048_576,
+                metadata: finstack_ai_kernel::Metadata::empty(),
+                deferral: ToolDeferralSupport::Never,
+            },
         });
         Ok(self)
     }

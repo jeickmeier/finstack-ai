@@ -108,7 +108,10 @@
 
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
 mod agent;
+#[cfg(feature = "durable-host")]
+pub use agent::durable;
 mod bundle;
+pub mod media;
 pub mod registry;
 mod result;
 #[cfg(any(feature = "native-tokio", feature = "wasm-host"))]
@@ -123,9 +126,8 @@ pub use agent::{
     DEFAULT_MAX_CYCLES, DEFAULT_MAX_OUTPUT_RETRIES, DEFAULT_RUN_TIMEOUT, GatewayAgentSpec,
     GeminiAgentSpec, HistoryCachePolicy, LinkedAgent, LinkedAgentPorts, LinkedCommon,
     LinkedProviderSpec, MAX_CONCURRENT_CAPABILITY_ACTIVATIONS, MAX_CONFIGURED_CYCLES,
-    MAX_CONFIGURED_OUTPUT_RETRIES, MAX_RUN_ATTACHMENTS, MediaPipelineSpec, NativeAgentBuilder,
-    NativeCapabilityHost, OllamaAgentSpec, OpenAiAgentSpec, OpenRouterAgentSpec,
-    OpenRouterMediaToolsSpec, RemoteChildRouteSpec, VideoComposeSpec,
+    MAX_CONFIGURED_OUTPUT_RETRIES, MAX_RUN_ATTACHMENTS, NativeAgentBuilder, NativeCapabilityHost,
+    OllamaAgentSpec, OpenAiAgentSpec, OpenRouterAgentSpec, RemoteChildRouteSpec,
 };
 #[cfg(feature = "native-tokio")]
 pub use agent::{

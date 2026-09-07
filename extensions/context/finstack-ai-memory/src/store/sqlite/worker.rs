@@ -14,8 +14,9 @@ use crate::record::{MemoryClock, MemoryId, MemoryRecord, MemoryScope, system_clo
 use finstack_ai_runtime::ports::PortFuture;
 
 use super::super::{
-    EmbeddingSource, MemoryArtifactAction, MemoryHit, MemoryListing, MemoryPage, MemoryQuery,
-    MemoryStore, MemoryStoreDescriptor, MemoryStoreError, MemoryStoreLimits, PutOutcome,
+    EmbeddingCoverage, EmbeddingSource, MemoryArtifactAction, MemoryHit, MemoryListing, MemoryPage,
+    MemoryQuery, MemoryStore, MemoryStoreDescriptor, MemoryStoreError, MemoryStoreLimits,
+    PutOutcome,
 };
 use super::queries::{
     EmbeddingWrite, acknowledge_artifact_action, forget_embedding_space, pending_artifact_actions,
@@ -143,6 +144,18 @@ impl MemoryStore for SqliteMemoryStore {
         self.dispatch(move |reply| Command::AcknowledgeArtifactAction { action_id, reply })
     }
 
+    fn embedding_coverage(
+        &self,
+        scope: MemoryScope,
+        embedder_id: Arc<str>,
+    ) -> PortFuture<Result<Option<EmbeddingCoverage>, MemoryStoreError>> {
+        self.dispatch(move |reply| Command::EmbeddingCoverage {
+            scope,
+            embedder_id,
+            reply,
+        })
+    }
+
     fn pending_embedding_sources(
         &self,
         embedder_id: Arc<str>,
@@ -223,6 +236,11 @@ enum Command {
     AcknowledgeArtifactAction {
         action_id: Digest,
         reply: oneshot::Sender<Result<(), MemoryStoreError>>,
+    },
+    EmbeddingCoverage {
+        scope: MemoryScope,
+        embedder_id: Arc<str>,
+        reply: oneshot::Sender<Result<Option<EmbeddingCoverage>, MemoryStoreError>>,
     },
     PendingEmbeddingSources {
         embedder_id: Arc<str>,
@@ -428,6 +446,18 @@ fn run_worker(
             }
             Command::AcknowledgeArtifactAction { action_id, reply } => {
                 let _ = reply.send(acknowledge_artifact_action(&connection, action_id));
+            }
+            Command::EmbeddingCoverage {
+                scope,
+                embedder_id,
+                reply,
+            } => {
+                let _ = reply.send(super::coverage::embedding_coverage(
+                    &connection,
+                    &scope,
+                    &embedder_id,
+                    now,
+                ));
             }
             Command::PendingEmbeddingSources {
                 embedder_id,

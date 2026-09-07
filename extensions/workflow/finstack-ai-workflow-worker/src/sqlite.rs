@@ -19,7 +19,7 @@ use crate::inbox::{
 use crate::wake::{WakeIndexStore, WakeReason, WakeRow, lease_deadline};
 
 /// Current schema version owned by this adapter.
-const WORKER_SCHEMA_VERSION: i64 = 1;
+const WORKER_SCHEMA_VERSION: i64 = 2;
 
 /// Schema for the worker's adapter tables.
 ///
@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS finstack_workflow_worker_schema (
   singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
   version INTEGER NOT NULL
 );
-INSERT OR IGNORE INTO finstack_workflow_worker_schema (singleton, version) VALUES (1, 1);
+INSERT OR IGNORE INTO finstack_workflow_worker_schema (singleton, version) VALUES (1, 2);
 CREATE TABLE IF NOT EXISTS finstack_workflow_worker_wake (
   tenant_scope TEXT NOT NULL,
   session_id TEXT NOT NULL,
@@ -137,11 +137,17 @@ impl SqliteWorkerStore {
             .map_err(|_| WorkerError::StoreIntegrity {
                 code: "workflow_schema_version",
             })?;
-        if version != WORKER_SCHEMA_VERSION {
+        // v2 adds the runnable hint value without changing existing row
+        // meanings or columns. Old binaries reject v2 instead of misreading it.
+        if version == 1 {
+            conn.execute("UPDATE finstack_workflow_worker_schema SET version = 2 WHERE singleton = 1 AND version = 1", [])
+                .map_err(|_| WorkerError::StoreUnavailable { code: "sqlite_worker_schema_migration" })?;
+        } else if version != WORKER_SCHEMA_VERSION {
             return Err(WorkerError::InvalidConfiguration {
                 code: "workflow_schema_version",
             });
         }
+        crate::recovery_sqlite::initialize(&conn)?;
         Ok(Self {
             path,
             conn: Mutex::new(conn),
@@ -155,7 +161,7 @@ impl SqliteWorkerStore {
         &self.path
     }
 
-    fn with_conn<T>(
+    pub(super) fn with_conn<T>(
         &self,
         body: impl FnOnce(&mut Connection) -> Result<T, WorkerError>,
     ) -> Result<T, WorkerError> {

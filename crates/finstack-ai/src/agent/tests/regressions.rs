@@ -192,13 +192,7 @@ async fn blocking_middleware_agent() -> (Agent, Arc<AtomicBool>) {
             Arc::clone(&store) as Arc<dyn JournalStore>,
         ),
     )
-    .middleware(
-        ComponentRef::new(
-            ComponentId::parse("test.middleware.review-blocking").expect("component"),
-            Some(VERSION),
-        ),
-        middleware,
-    )
+    .middleware(middleware)
     .build()
     .await
     .expect("agent");
@@ -555,13 +549,10 @@ async fn cancellation_drops_noncooperative_context_after_signalling() {
         (component("test.model.context-cancel"), model),
         (component("test.store.context-cancel"), store),
     )
-    .context_provider(
-        component("test.context.blocking"),
-        Arc::new(BlockingContext {
-            entered: Arc::clone(&entered),
-            dropped_after_signal: Arc::clone(&dropped),
-        }),
-    )
+    .context_provider(Arc::new(BlockingContext {
+        entered: Arc::clone(&entered),
+        dropped_after_signal: Arc::clone(&dropped),
+    }))
     .build()
     .await
     .unwrap();

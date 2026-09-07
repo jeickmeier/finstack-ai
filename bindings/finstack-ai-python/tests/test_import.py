@@ -2,14 +2,25 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import os
+import re
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
+
+
+def test_documented_provider_inventory_matches_runtime() -> None:
+    import finstack_ai
+
+    readme = Path(__file__).resolve().parents[1] / "README.md"
+    match = re.search(r"`linked_providers\(\)` reports `([^`]+)`", readme.read_text())
+    assert match is not None, "README must document linked provider availability"
+    assert ast.literal_eval(match.group(1)) == finstack_ai.linked_providers()
 
 
 def test_import_finstack_ai() -> None:
@@ -40,7 +51,7 @@ def test_provider_namespace_is_lazy() -> None:
     import finstack_ai
 
     assert "finstack_ai.providers" not in sys.modules
-    import finstack_ai.providers as providers
+    from finstack_ai import providers
 
     assert providers.openai.is_available()
     assert providers.anthropic.is_available()

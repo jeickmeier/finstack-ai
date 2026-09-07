@@ -148,3 +148,27 @@ silently re-executing effects.
 `CallbackContext` is invocation-scoped. Copy required identity fields with
 `to_dict()` before the callback returns; retained contexts deliberately reject
 later access.
+
+## Native evaluation and search
+
+`finstack_ai.eval` contains frozen `EvalSpec`/`TaskSample` configuration,
+`SubjectBinding`, memory/SQLite stores, typed built-in and Python scorers,
+`EvalRunner.run/resume/rescore`, `EvalReport` and threshold gates. Rust owns
+reservation, reconciliation, scheduling, measurement and statistics. The
+[comparison notebook](../../../examples/python-notebooks/12_evaluation.ipynb)
+executes the complete API offline, including failure cases and rescoring.
+
+`finstack_ai.search` contains `SearchScope`, `SearchLimits`, `SearchConfig`,
+`SearchRequest`, the four native source classes, `SearchEngine`, and typed
+source/evidence/coverage reports. Document indexing runs through the explicit
+`DocumentIndexToolset`; journal observers only enqueue hints. Graph and semantic
+retrieval require explicit configuration. `sqlite_session_ids(path, limit=256)`
+reads IDs from an application-owned SQLite journal without adding discovery to
+the journal port. See the [search guide](../../../extensions/search/README.md)
+and [knowledge composition](../../../apps/finstack-knowledge/README.md).
+
+The new module wrappers carry typed signatures and IDE documentation; their data
+contracts are re-exported through module `__all__`. Browser execution limitations
+and staged constructor changes are in the
+[capability matrix](../../../docs/capabilities.md) and
+[migration guide](../../../docs/migration-2.0.md).

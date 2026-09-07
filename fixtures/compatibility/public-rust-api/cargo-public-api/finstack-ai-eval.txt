@@ -1,0 +1,1101 @@
+pub mod finstack_ai_eval
+pub mod finstack_ai_eval::numeric
+pub enum finstack_ai_eval::numeric::NumberUnit
+pub finstack_ai_eval::numeric::NumberUnit::Currency(alloc::sync::Arc<str>)
+pub finstack_ai_eval::numeric::NumberUnit::Scalar
+impl core::clone::Clone for finstack_ai_eval::numeric::NumberUnit
+pub fn finstack_ai_eval::numeric::NumberUnit::clone(&self) -> finstack_ai_eval::numeric::NumberUnit
+impl core::cmp::Eq for finstack_ai_eval::numeric::NumberUnit
+impl core::cmp::PartialEq for finstack_ai_eval::numeric::NumberUnit
+pub fn finstack_ai_eval::numeric::NumberUnit::eq(&self, &finstack_ai_eval::numeric::NumberUnit) -> bool
+impl core::fmt::Debug for finstack_ai_eval::numeric::NumberUnit
+pub fn finstack_ai_eval::numeric::NumberUnit::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_eval::numeric::NumberUnit
+impl serde_core::ser::Serialize for finstack_ai_eval::numeric::NumberUnit
+pub fn finstack_ai_eval::numeric::NumberUnit::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_eval::numeric::NumberUnit
+pub fn finstack_ai_eval::numeric::NumberUnit::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_eval::numeric::ParsedNumber
+pub finstack_ai_eval::numeric::ParsedNumber::exponent: i32
+pub finstack_ai_eval::numeric::ParsedNumber::mantissa: i128
+pub finstack_ai_eval::numeric::ParsedNumber::unit: finstack_ai_eval::numeric::NumberUnit
+impl finstack_ai_eval::numeric::ParsedNumber
+pub fn finstack_ai_eval::numeric::ParsedNumber::equivalent(&self, &Self) -> core::result::Result<bool, finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::numeric::ParsedNumber::parse(&str) -> core::result::Result<Self, finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::numeric::ParsedNumber::try_new(i128, i32, finstack_ai_eval::numeric::NumberUnit) -> core::result::Result<Self, finstack_ai_eval::EvalError>
+impl core::clone::Clone for finstack_ai_eval::numeric::ParsedNumber
+pub fn finstack_ai_eval::numeric::ParsedNumber::clone(&self) -> finstack_ai_eval::numeric::ParsedNumber
+impl core::cmp::Eq for finstack_ai_eval::numeric::ParsedNumber
+impl core::cmp::PartialEq for finstack_ai_eval::numeric::ParsedNumber
+pub fn finstack_ai_eval::numeric::ParsedNumber::eq(&self, &finstack_ai_eval::numeric::ParsedNumber) -> bool
+impl core::fmt::Debug for finstack_ai_eval::numeric::ParsedNumber
+pub fn finstack_ai_eval::numeric::ParsedNumber::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_eval::numeric::ParsedNumber
+impl serde_core::ser::Serialize for finstack_ai_eval::numeric::ParsedNumber
+pub fn finstack_ai_eval::numeric::ParsedNumber::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_eval::numeric::ParsedNumber
+pub fn finstack_ai_eval::numeric::ParsedNumber::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_eval::numeric::ToleranceBands
+pub finstack_ai_eval::numeric::ToleranceBands::absolute: core::option::Option<finstack_ai_eval::numeric::ParsedNumber>
+pub finstack_ai_eval::numeric::ToleranceBands::full_within_ppm: u64
+pub finstack_ai_eval::numeric::ToleranceBands::partial_micros: finstack_ai_eval::ScoreMicros
+pub finstack_ai_eval::numeric::ToleranceBands::partial_within_ppm: core::option::Option<u64>
+impl finstack_ai_eval::numeric::ToleranceBands
+pub fn finstack_ai_eval::numeric::ToleranceBands::grade(&self, &finstack_ai_eval::numeric::ParsedNumber, &finstack_ai_eval::numeric::ParsedNumber) -> core::result::Result<finstack_ai_eval::ScoreMicros, finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::numeric::ToleranceBands::relative(u64) -> Self
+pub fn finstack_ai_eval::numeric::ToleranceBands::validate(&self) -> core::result::Result<(), finstack_ai_eval::EvalError>
+impl core::clone::Clone for finstack_ai_eval::numeric::ToleranceBands
+pub fn finstack_ai_eval::numeric::ToleranceBands::clone(&self) -> finstack_ai_eval::numeric::ToleranceBands
+impl core::cmp::Eq for finstack_ai_eval::numeric::ToleranceBands
+impl core::cmp::PartialEq for finstack_ai_eval::numeric::ToleranceBands
+pub fn finstack_ai_eval::numeric::ToleranceBands::eq(&self, &finstack_ai_eval::numeric::ToleranceBands) -> bool
+impl core::fmt::Debug for finstack_ai_eval::numeric::ToleranceBands
+pub fn finstack_ai_eval::numeric::ToleranceBands::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_eval::numeric::ToleranceBands
+impl serde_core::ser::Serialize for finstack_ai_eval::numeric::ToleranceBands
+pub fn finstack_ai_eval::numeric::ToleranceBands::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_eval::numeric::ToleranceBands
+pub fn finstack_ai_eval::numeric::ToleranceBands::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub mod finstack_ai_eval::report
+pub struct finstack_ai_eval::report::Aggregate
+pub finstack_ai_eval::report::Aggregate::complete_tasks: u32
+pub finstack_ai_eval::report::Aggregate::expected_cells: u32
+pub finstack_ai_eval::report::Aggregate::expected_tasks: u32
+pub finstack_ai_eval::report::Aggregate::metric: finstack_ai_eval::report::MetricKey
+pub finstack_ai_eval::report::Aggregate::scored_cells: u32
+pub finstack_ai_eval::report::Aggregate::statistics: finstack_ai_eval::Statistics
+pub finstack_ai_eval::report::Aggregate::subject: alloc::sync::Arc<str>
+impl core::clone::Clone for finstack_ai_eval::report::Aggregate
+pub fn finstack_ai_eval::report::Aggregate::clone(&self) -> finstack_ai_eval::report::Aggregate
+impl core::cmp::PartialEq for finstack_ai_eval::report::Aggregate
+pub fn finstack_ai_eval::report::Aggregate::eq(&self, &finstack_ai_eval::report::Aggregate) -> bool
+impl core::fmt::Debug for finstack_ai_eval::report::Aggregate
+pub fn finstack_ai_eval::report::Aggregate::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_eval::report::Aggregate
+impl serde_core::ser::Serialize for finstack_ai_eval::report::Aggregate
+pub fn finstack_ai_eval::report::Aggregate::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_eval::report::Aggregate
+pub fn finstack_ai_eval::report::Aggregate::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_eval::report::EvalReport
+pub finstack_ai_eval::report::EvalReport::aggregates: alloc::vec::Vec<finstack_ai_eval::report::Aggregate>
+pub finstack_ai_eval::report::EvalReport::comparisons: alloc::vec::Vec<finstack_ai_eval::PairedComparison>
+pub finstack_ai_eval::report::EvalReport::counts: finstack_ai_eval::report::OutcomeCounts
+pub finstack_ai_eval::report::EvalReport::engine_version: alloc::sync::Arc<str>
+pub finstack_ai_eval::report::EvalReport::spec_digest: finstack_ai_kernel::primitives::digest::Digest
+pub finstack_ai_eval::report::EvalReport::spending: finstack_ai_eval::report::Spending
+pub finstack_ai_eval::report::EvalReport::subject_locks: alloc::collections::btree::map::BTreeMap<alloc::sync::Arc<str>, finstack_ai_kernel::primitives::digest::Digest>
+impl finstack_ai_eval::report::EvalReport
+pub fn finstack_ai_eval::report::EvalReport::from_snapshot(&finstack_ai_eval::store::StoreSnapshot) -> core::result::Result<Self, finstack_ai_eval::EvalError>
+impl finstack_ai_eval::report::EvalReport
+pub fn finstack_ai_eval::report::EvalReport::write_json(&self, impl core::io::write::Write) -> core::result::Result<(), finstack_ai_eval::EvalError>
+impl core::clone::Clone for finstack_ai_eval::report::EvalReport
+pub fn finstack_ai_eval::report::EvalReport::clone(&self) -> finstack_ai_eval::report::EvalReport
+impl core::cmp::PartialEq for finstack_ai_eval::report::EvalReport
+pub fn finstack_ai_eval::report::EvalReport::eq(&self, &finstack_ai_eval::report::EvalReport) -> bool
+impl core::fmt::Debug for finstack_ai_eval::report::EvalReport
+pub fn finstack_ai_eval::report::EvalReport::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_eval::report::EvalReport
+impl serde_core::ser::Serialize for finstack_ai_eval::report::EvalReport
+pub fn finstack_ai_eval::report::EvalReport::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_eval::report::EvalReport
+pub fn finstack_ai_eval::report::EvalReport::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_eval::report::GateResult
+pub finstack_ai_eval::report::GateResult::incomplete: bool
+pub finstack_ai_eval::report::GateResult::infrastructure_failed: bool
+pub finstack_ai_eval::report::GateResult::passed: bool
+pub finstack_ai_eval::report::GateResult::quality_failed: bool
+pub finstack_ai_eval::report::GateResult::scoring_failed: bool
+impl core::clone::Clone for finstack_ai_eval::GateResult
+pub fn finstack_ai_eval::GateResult::clone(&self) -> finstack_ai_eval::GateResult
+impl core::cmp::Eq for finstack_ai_eval::GateResult
+impl core::cmp::PartialEq for finstack_ai_eval::GateResult
+pub fn finstack_ai_eval::GateResult::eq(&self, &finstack_ai_eval::GateResult) -> bool
+impl core::fmt::Debug for finstack_ai_eval::GateResult
+pub fn finstack_ai_eval::GateResult::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_eval::GateResult
+impl serde_core::ser::Serialize for finstack_ai_eval::GateResult
+pub fn finstack_ai_eval::GateResult::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_eval::GateResult
+pub fn finstack_ai_eval::GateResult::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_eval::report::MetricKey
+pub finstack_ai_eval::report::MetricKey::name: alloc::sync::Arc<str>
+pub finstack_ai_eval::report::MetricKey::scorer: alloc::sync::Arc<str>
+pub finstack_ai_eval::report::MetricKey::scorer_version: u32
+impl core::clone::Clone for finstack_ai_eval::report::MetricKey
+pub fn finstack_ai_eval::report::MetricKey::clone(&self) -> finstack_ai_eval::report::MetricKey
+impl core::cmp::Eq for finstack_ai_eval::report::MetricKey
+impl core::cmp::Ord for finstack_ai_eval::report::MetricKey
+pub fn finstack_ai_eval::report::MetricKey::cmp(&self, &finstack_ai_eval::report::MetricKey) -> core::cmp::Ordering
+impl core::cmp::PartialEq for finstack_ai_eval::report::MetricKey
+pub fn finstack_ai_eval::report::MetricKey::eq(&self, &finstack_ai_eval::report::MetricKey) -> bool
+impl core::cmp::PartialOrd for finstack_ai_eval::report::MetricKey
+pub fn finstack_ai_eval::report::MetricKey::partial_cmp(&self, &finstack_ai_eval::report::MetricKey) -> core::option::Option<core::cmp::Ordering>
+impl core::fmt::Debug for finstack_ai_eval::report::MetricKey
+pub fn finstack_ai_eval::report::MetricKey::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_eval::report::MetricKey
+impl serde_core::ser::Serialize for finstack_ai_eval::report::MetricKey
+pub fn finstack_ai_eval::report::MetricKey::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_eval::report::MetricKey
+pub fn finstack_ai_eval::report::MetricKey::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_eval::report::OutcomeCounts
+pub finstack_ai_eval::report::OutcomeCounts::attempts: u32
+pub finstack_ai_eval::report::OutcomeCounts::completed: u32
+pub finstack_ai_eval::report::OutcomeCounts::expected: u32
+pub finstack_ai_eval::report::OutcomeCounts::graders_pending: u32
+pub finstack_ai_eval::report::OutcomeCounts::indeterminate: u32
+pub finstack_ai_eval::report::OutcomeCounts::infrastructure_attempts: u32
+pub finstack_ai_eval::report::OutcomeCounts::infrastructure_failed: u32
+pub finstack_ai_eval::report::OutcomeCounts::pending: u32
+pub finstack_ai_eval::report::OutcomeCounts::scoring_failed: u32
+pub finstack_ai_eval::report::OutcomeCounts::scoring_pending: u32
+pub finstack_ai_eval::report::OutcomeCounts::subject_failed: u32
+pub finstack_ai_eval::report::OutcomeCounts::unattempted: u32
+impl core::clone::Clone for finstack_ai_eval::report::OutcomeCounts
+pub fn finstack_ai_eval::report::OutcomeCounts::clone(&self) -> finstack_ai_eval::report::OutcomeCounts
+impl core::cmp::Eq for finstack_ai_eval::report::OutcomeCounts
+impl core::cmp::PartialEq for finstack_ai_eval::report::OutcomeCounts
+pub fn finstack_ai_eval::report::OutcomeCounts::eq(&self, &finstack_ai_eval::report::OutcomeCounts) -> bool
+impl core::default::Default for finstack_ai_eval::report::OutcomeCounts
+pub fn finstack_ai_eval::report::OutcomeCounts::default() -> finstack_ai_eval::report::OutcomeCounts
+impl core::fmt::Debug for finstack_ai_eval::report::OutcomeCounts
+pub fn finstack_ai_eval::report::OutcomeCounts::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_eval::report::OutcomeCounts
+impl serde_core::ser::Serialize for finstack_ai_eval::report::OutcomeCounts
+pub fn finstack_ai_eval::report::OutcomeCounts::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_eval::report::OutcomeCounts
+pub fn finstack_ai_eval::report::OutcomeCounts::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_eval::report::PairedComparison
+pub finstack_ai_eval::report::PairedComparison::baseline: alloc::sync::Arc<str>
+pub finstack_ai_eval::report::PairedComparison::candidate: alloc::sync::Arc<str>
+pub finstack_ai_eval::report::PairedComparison::costs: alloc::vec::Vec<finstack_ai_eval::PairedCost>
+pub finstack_ai_eval::report::PairedComparison::execution_pairs: u32
+pub finstack_ai_eval::report::PairedComparison::expected_pairs: u32
+pub finstack_ai_eval::report::PairedComparison::input_token_delta: finstack_ai_eval::Statistics
+pub finstack_ai_eval::report::PairedComparison::metrics: alloc::vec::Vec<finstack_ai_eval::PairedMetric>
+pub finstack_ai_eval::report::PairedComparison::missing_cost_pairs: u32
+pub finstack_ai_eval::report::PairedComparison::output_token_delta: finstack_ai_eval::Statistics
+pub finstack_ai_eval::report::PairedComparison::total_token_delta: finstack_ai_eval::Statistics
+impl core::clone::Clone for finstack_ai_eval::PairedComparison
+pub fn finstack_ai_eval::PairedComparison::clone(&self) -> finstack_ai_eval::PairedComparison
+impl core::cmp::PartialEq for finstack_ai_eval::PairedComparison
+pub fn finstack_ai_eval::PairedComparison::eq(&self, &finstack_ai_eval::PairedComparison) -> bool
+impl core::fmt::Debug for finstack_ai_eval::PairedComparison
+pub fn finstack_ai_eval::PairedComparison::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_eval::PairedComparison
+impl serde_core::ser::Serialize for finstack_ai_eval::PairedComparison
+pub fn finstack_ai_eval::PairedComparison::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_eval::PairedComparison
+pub fn finstack_ai_eval::PairedComparison::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_eval::report::PairedCost
+pub finstack_ai_eval::report::PairedCost::delta_micros: finstack_ai_eval::Statistics
+pub finstack_ai_eval::report::PairedCost::total_delta_micros: alloc::string::String
+pub finstack_ai_eval::report::PairedCost::unit: alloc::sync::Arc<str>
+impl core::clone::Clone for finstack_ai_eval::PairedCost
+pub fn finstack_ai_eval::PairedCost::clone(&self) -> finstack_ai_eval::PairedCost
+impl core::cmp::PartialEq for finstack_ai_eval::PairedCost
+pub fn finstack_ai_eval::PairedCost::eq(&self, &finstack_ai_eval::PairedCost) -> bool
+impl core::fmt::Debug for finstack_ai_eval::PairedCost
+pub fn finstack_ai_eval::PairedCost::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_eval::PairedCost
+impl serde_core::ser::Serialize for finstack_ai_eval::PairedCost
+pub fn finstack_ai_eval::PairedCost::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_eval::PairedCost
+pub fn finstack_ai_eval::PairedCost::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_eval::report::PairedMetric
+pub finstack_ai_eval::report::PairedMetric::baseline_only: u32
+pub finstack_ai_eval::report::PairedMetric::candidate_only: u32
+pub finstack_ai_eval::report::PairedMetric::delta: finstack_ai_eval::Statistics
+pub finstack_ai_eval::report::PairedMetric::losses: u32
+pub finstack_ai_eval::report::PairedMetric::metric: finstack_ai_eval::report::MetricKey
+pub finstack_ai_eval::report::PairedMetric::missing_pairs: u32
+pub finstack_ai_eval::report::PairedMetric::ties: u32
+pub finstack_ai_eval::report::PairedMetric::wins: u32
+impl core::clone::Clone for finstack_ai_eval::PairedMetric
+pub fn finstack_ai_eval::PairedMetric::clone(&self) -> finstack_ai_eval::PairedMetric
+impl core::cmp::PartialEq for finstack_ai_eval::PairedMetric
+pub fn finstack_ai_eval::PairedMetric::eq(&self, &finstack_ai_eval::PairedMetric) -> bool
+impl core::fmt::Debug for finstack_ai_eval::PairedMetric
+pub fn finstack_ai_eval::PairedMetric::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_eval::PairedMetric
+impl serde_core::ser::Serialize for finstack_ai_eval::PairedMetric
+pub fn finstack_ai_eval::PairedMetric::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_eval::PairedMetric
+pub fn finstack_ai_eval::PairedMetric::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_eval::report::Spending
+pub finstack_ai_eval::report::Spending::grader_micros: alloc::collections::btree::map::BTreeMap<alloc::sync::Arc<str>, alloc::string::String>
+pub finstack_ai_eval::report::Spending::grader_unknown: u32
+pub finstack_ai_eval::report::Spending::subject_micros: alloc::collections::btree::map::BTreeMap<alloc::sync::Arc<str>, alloc::string::String>
+pub finstack_ai_eval::report::Spending::subject_unknown: u32
+pub finstack_ai_eval::report::Spending::total_micros: alloc::collections::btree::map::BTreeMap<alloc::sync::Arc<str>, alloc::string::String>
+impl core::clone::Clone for finstack_ai_eval::report::Spending
+pub fn finstack_ai_eval::report::Spending::clone(&self) -> finstack_ai_eval::report::Spending
+impl core::cmp::Eq for finstack_ai_eval::report::Spending
+impl core::cmp::PartialEq for finstack_ai_eval::report::Spending
+pub fn finstack_ai_eval::report::Spending::eq(&self, &finstack_ai_eval::report::Spending) -> bool
+impl core::default::Default for finstack_ai_eval::report::Spending
+pub fn finstack_ai_eval::report::Spending::default() -> finstack_ai_eval::report::Spending
+impl core::fmt::Debug for finstack_ai_eval::report::Spending
+pub fn finstack_ai_eval::report::Spending::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_eval::report::Spending
+impl serde_core::ser::Serialize for finstack_ai_eval::report::Spending
+pub fn finstack_ai_eval::report::Spending::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_eval::report::Spending
+pub fn finstack_ai_eval::report::Spending::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_eval::report::Statistics
+pub finstack_ai_eval::report::Statistics::mean: core::option::Option<f64>
+pub finstack_ai_eval::report::Statistics::n: u32
+pub finstack_ai_eval::report::Statistics::stderr: core::option::Option<f64>
+impl finstack_ai_eval::Statistics
+pub fn finstack_ai_eval::Statistics::from_values(impl core::iter::traits::collect::IntoIterator<Item = f64>) -> core::result::Result<Self, finstack_ai_eval::EvalError>
+impl core::clone::Clone for finstack_ai_eval::Statistics
+pub fn finstack_ai_eval::Statistics::clone(&self) -> finstack_ai_eval::Statistics
+impl core::cmp::PartialEq for finstack_ai_eval::Statistics
+pub fn finstack_ai_eval::Statistics::eq(&self, &finstack_ai_eval::Statistics) -> bool
+impl core::default::Default for finstack_ai_eval::Statistics
+pub fn finstack_ai_eval::Statistics::default() -> finstack_ai_eval::Statistics
+impl core::fmt::Debug for finstack_ai_eval::Statistics
+pub fn finstack_ai_eval::Statistics::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_eval::Statistics
+impl serde_core::ser::Serialize for finstack_ai_eval::Statistics
+pub fn finstack_ai_eval::Statistics::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_eval::Statistics
+pub fn finstack_ai_eval::Statistics::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_eval::report::ThresholdGate
+pub finstack_ai_eval::report::ThresholdGate::maximum_regression: core::option::Option<finstack_ai_eval::ScoreMicros>
+pub finstack_ai_eval::report::ThresholdGate::metric: finstack_ai_eval::report::MetricKey
+pub finstack_ai_eval::report::ThresholdGate::minimum_mean: core::option::Option<finstack_ai_eval::ScoreMicros>
+pub finstack_ai_eval::report::ThresholdGate::subject: alloc::sync::Arc<str>
+impl finstack_ai_eval::ThresholdGate
+pub fn finstack_ai_eval::ThresholdGate::evaluate(&self, &finstack_ai_eval::report::EvalReport) -> core::result::Result<finstack_ai_eval::GateResult, finstack_ai_eval::EvalError>
+impl core::clone::Clone for finstack_ai_eval::ThresholdGate
+pub fn finstack_ai_eval::ThresholdGate::clone(&self) -> finstack_ai_eval::ThresholdGate
+impl core::cmp::Eq for finstack_ai_eval::ThresholdGate
+impl core::cmp::PartialEq for finstack_ai_eval::ThresholdGate
+pub fn finstack_ai_eval::ThresholdGate::eq(&self, &finstack_ai_eval::ThresholdGate) -> bool
+impl core::fmt::Debug for finstack_ai_eval::ThresholdGate
+pub fn finstack_ai_eval::ThresholdGate::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_eval::ThresholdGate
+impl serde_core::ser::Serialize for finstack_ai_eval::ThresholdGate
+pub fn finstack_ai_eval::ThresholdGate::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_eval::ThresholdGate
+pub fn finstack_ai_eval::ThresholdGate::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub fn finstack_ai_eval::report::export_jsonl(&finstack_ai_eval::store::StoreSnapshot, impl core::io::write::Write) -> core::result::Result<(), finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::report::reduce_repetitions(&[finstack_ai_eval::ScoreMicros], &finstack_ai_eval::RepetitionReducer) -> core::result::Result<core::option::Option<f64>, finstack_ai_eval::EvalError>
+pub mod finstack_ai_eval::store
+pub struct finstack_ai_eval::store::FrozenExperiment
+pub finstack_ai_eval::store::FrozenExperiment::digest: finstack_ai_kernel::primitives::digest::Digest
+pub finstack_ai_eval::store::FrozenExperiment::engine_version: alloc::sync::Arc<str>
+pub finstack_ai_eval::store::FrozenExperiment::spec: finstack_ai_eval::EvalSpec
+impl core::clone::Clone for finstack_ai_eval::store::FrozenExperiment
+pub fn finstack_ai_eval::store::FrozenExperiment::clone(&self) -> finstack_ai_eval::store::FrozenExperiment
+impl core::cmp::Eq for finstack_ai_eval::store::FrozenExperiment
+impl core::cmp::PartialEq for finstack_ai_eval::store::FrozenExperiment
+pub fn finstack_ai_eval::store::FrozenExperiment::eq(&self, &finstack_ai_eval::store::FrozenExperiment) -> bool
+impl core::fmt::Debug for finstack_ai_eval::store::FrozenExperiment
+pub fn finstack_ai_eval::store::FrozenExperiment::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_eval::store::FrozenExperiment
+impl serde_core::ser::Serialize for finstack_ai_eval::store::FrozenExperiment
+pub fn finstack_ai_eval::store::FrozenExperiment::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_eval::store::FrozenExperiment
+pub fn finstack_ai_eval::store::FrozenExperiment::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_eval::store::MemoryEvalStore
+impl finstack_ai_eval::MemoryEvalStore
+pub fn finstack_ai_eval::MemoryEvalStore::new() -> Self
+impl core::default::Default for finstack_ai_eval::MemoryEvalStore
+pub fn finstack_ai_eval::MemoryEvalStore::default() -> finstack_ai_eval::MemoryEvalStore
+impl finstack_ai_eval::store::EvalStore for finstack_ai_eval::MemoryEvalStore
+pub fn finstack_ai_eval::MemoryEvalStore::acquire_runner(&self) -> core::result::Result<alloc::boxed::Box<dyn finstack_ai_eval::store::RunnerLease>, finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::MemoryEvalStore::append_scores(&self, &str, u32, &finstack_ai_eval::ScoreSet) -> core::result::Result<(), finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::MemoryEvalStore::bind_execution(&self, &str, u32, finstack_ai_eval::ExecutionIdentity) -> core::result::Result<(), finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::MemoryEvalStore::bind_grader_execution(&self, &str, finstack_ai_eval::ExecutionIdentity) -> core::result::Result<(), finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::MemoryEvalStore::bind_subject(&self, &str, finstack_ai_kernel::primitives::digest::Digest) -> core::result::Result<(), finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::MemoryEvalStore::freeze(&self, &finstack_ai_eval::EvalSpec) -> core::result::Result<finstack_ai_eval::store::FrozenExperiment, finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::MemoryEvalStore::reserve(&self, &finstack_ai_eval::Cell, u32, u64) -> core::result::Result<finstack_ai_eval::AttemptReservation, finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::MemoryEvalStore::reserve_grader(&self, &finstack_ai_eval::GraderReservation) -> core::result::Result<(), finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::MemoryEvalStore::settle(&self, &finstack_ai_eval::AttemptRecord) -> core::result::Result<(), finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::MemoryEvalStore::settle_grader(&self, &str, &finstack_ai_eval::GraderOutcome) -> core::result::Result<(), finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::MemoryEvalStore::snapshot(&self) -> core::result::Result<finstack_ai_eval::store::StoreSnapshot, finstack_ai_eval::EvalError>
+pub struct finstack_ai_eval::store::StoreSnapshot
+pub finstack_ai_eval::store::StoreSnapshot::attempts: alloc::collections::btree::map::BTreeMap<alloc::sync::Arc<str>, alloc::vec::Vec<finstack_ai_eval::AttemptRecord>>
+pub finstack_ai_eval::store::StoreSnapshot::frozen: core::option::Option<finstack_ai_eval::store::FrozenExperiment>
+pub finstack_ai_eval::store::StoreSnapshot::graders: alloc::collections::btree::map::BTreeMap<alloc::sync::Arc<str>, finstack_ai_eval::GraderRecord>
+pub finstack_ai_eval::store::StoreSnapshot::reservations: alloc::collections::btree::map::BTreeMap<alloc::sync::Arc<str>, alloc::vec::Vec<finstack_ai_eval::AttemptReservation>>
+pub finstack_ai_eval::store::StoreSnapshot::subject_locks: alloc::collections::btree::map::BTreeMap<alloc::sync::Arc<str>, finstack_ai_kernel::primitives::digest::Digest>
+impl core::clone::Clone for finstack_ai_eval::store::StoreSnapshot
+pub fn finstack_ai_eval::store::StoreSnapshot::clone(&self) -> finstack_ai_eval::store::StoreSnapshot
+impl core::cmp::Eq for finstack_ai_eval::store::StoreSnapshot
+impl core::cmp::PartialEq for finstack_ai_eval::store::StoreSnapshot
+pub fn finstack_ai_eval::store::StoreSnapshot::eq(&self, &finstack_ai_eval::store::StoreSnapshot) -> bool
+impl core::default::Default for finstack_ai_eval::store::StoreSnapshot
+pub fn finstack_ai_eval::store::StoreSnapshot::default() -> finstack_ai_eval::store::StoreSnapshot
+impl core::fmt::Debug for finstack_ai_eval::store::StoreSnapshot
+pub fn finstack_ai_eval::store::StoreSnapshot::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_eval::store::StoreSnapshot
+impl serde_core::ser::Serialize for finstack_ai_eval::store::StoreSnapshot
+pub fn finstack_ai_eval::store::StoreSnapshot::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_eval::store::StoreSnapshot
+pub fn finstack_ai_eval::store::StoreSnapshot::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub trait finstack_ai_eval::store::EvalStore: core::marker::Send + core::marker::Sync
+pub fn finstack_ai_eval::store::EvalStore::acquire_runner(&self) -> core::result::Result<alloc::boxed::Box<dyn finstack_ai_eval::store::RunnerLease>, finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::store::EvalStore::append_scores(&self, &str, u32, &finstack_ai_eval::ScoreSet) -> core::result::Result<(), finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::store::EvalStore::bind_execution(&self, &str, u32, finstack_ai_eval::ExecutionIdentity) -> core::result::Result<(), finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::store::EvalStore::bind_grader_execution(&self, &str, finstack_ai_eval::ExecutionIdentity) -> core::result::Result<(), finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::store::EvalStore::bind_subject(&self, &str, finstack_ai_kernel::primitives::digest::Digest) -> core::result::Result<(), finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::store::EvalStore::freeze(&self, &finstack_ai_eval::EvalSpec) -> core::result::Result<finstack_ai_eval::store::FrozenExperiment, finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::store::EvalStore::reserve(&self, &finstack_ai_eval::Cell, u32, u64) -> core::result::Result<finstack_ai_eval::AttemptReservation, finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::store::EvalStore::reserve_grader(&self, &finstack_ai_eval::GraderReservation) -> core::result::Result<(), finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::store::EvalStore::settle(&self, &finstack_ai_eval::AttemptRecord) -> core::result::Result<(), finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::store::EvalStore::settle_grader(&self, &str, &finstack_ai_eval::GraderOutcome) -> core::result::Result<(), finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::store::EvalStore::snapshot(&self) -> core::result::Result<finstack_ai_eval::store::StoreSnapshot, finstack_ai_eval::EvalError>
+impl finstack_ai_eval::store::EvalStore for finstack_ai_eval::MemoryEvalStore
+pub fn finstack_ai_eval::MemoryEvalStore::acquire_runner(&self) -> core::result::Result<alloc::boxed::Box<dyn finstack_ai_eval::store::RunnerLease>, finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::MemoryEvalStore::append_scores(&self, &str, u32, &finstack_ai_eval::ScoreSet) -> core::result::Result<(), finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::MemoryEvalStore::bind_execution(&self, &str, u32, finstack_ai_eval::ExecutionIdentity) -> core::result::Result<(), finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::MemoryEvalStore::bind_grader_execution(&self, &str, finstack_ai_eval::ExecutionIdentity) -> core::result::Result<(), finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::MemoryEvalStore::bind_subject(&self, &str, finstack_ai_kernel::primitives::digest::Digest) -> core::result::Result<(), finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::MemoryEvalStore::freeze(&self, &finstack_ai_eval::EvalSpec) -> core::result::Result<finstack_ai_eval::store::FrozenExperiment, finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::MemoryEvalStore::reserve(&self, &finstack_ai_eval::Cell, u32, u64) -> core::result::Result<finstack_ai_eval::AttemptReservation, finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::MemoryEvalStore::reserve_grader(&self, &finstack_ai_eval::GraderReservation) -> core::result::Result<(), finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::MemoryEvalStore::settle(&self, &finstack_ai_eval::AttemptRecord) -> core::result::Result<(), finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::MemoryEvalStore::settle_grader(&self, &str, &finstack_ai_eval::GraderOutcome) -> core::result::Result<(), finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::MemoryEvalStore::snapshot(&self) -> core::result::Result<finstack_ai_eval::store::StoreSnapshot, finstack_ai_eval::EvalError>
+pub trait finstack_ai_eval::store::RunnerLease: core::marker::Send
+pub enum finstack_ai_eval::AttemptStatus
+pub finstack_ai_eval::AttemptStatus::Completed
+pub finstack_ai_eval::AttemptStatus::Indeterminate
+pub finstack_ai_eval::AttemptStatus::InfraFailed
+pub finstack_ai_eval::AttemptStatus::SubjectFailed
+impl finstack_ai_eval::AttemptStatus
+pub const fn finstack_ai_eval::AttemptStatus::is_final(self) -> bool
+impl core::clone::Clone for finstack_ai_eval::AttemptStatus
+pub fn finstack_ai_eval::AttemptStatus::clone(&self) -> finstack_ai_eval::AttemptStatus
+impl core::cmp::Eq for finstack_ai_eval::AttemptStatus
+impl core::cmp::PartialEq for finstack_ai_eval::AttemptStatus
+pub fn finstack_ai_eval::AttemptStatus::eq(&self, &finstack_ai_eval::AttemptStatus) -> bool
+impl core::fmt::Debug for finstack_ai_eval::AttemptStatus
+pub fn finstack_ai_eval::AttemptStatus::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_eval::AttemptStatus
+impl core::marker::StructuralPartialEq for finstack_ai_eval::AttemptStatus
+impl serde_core::ser::Serialize for finstack_ai_eval::AttemptStatus
+pub fn finstack_ai_eval::AttemptStatus::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_eval::AttemptStatus
+pub fn finstack_ai_eval::AttemptStatus::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub enum finstack_ai_eval::Reconciliation
+pub finstack_ai_eval::Reconciliation::NoAdmission
+pub finstack_ai_eval::Reconciliation::Terminal
+pub finstack_ai_eval::Reconciliation::Unresolved
+impl core::clone::Clone for finstack_ai_eval::Reconciliation
+pub fn finstack_ai_eval::Reconciliation::clone(&self) -> finstack_ai_eval::Reconciliation
+impl core::cmp::Eq for finstack_ai_eval::Reconciliation
+impl core::cmp::PartialEq for finstack_ai_eval::Reconciliation
+pub fn finstack_ai_eval::Reconciliation::eq(&self, &finstack_ai_eval::Reconciliation) -> bool
+impl core::fmt::Debug for finstack_ai_eval::Reconciliation
+pub fn finstack_ai_eval::Reconciliation::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_eval::Reconciliation
+impl core::marker::StructuralPartialEq for finstack_ai_eval::Reconciliation
+impl serde_core::ser::Serialize for finstack_ai_eval::Reconciliation
+pub fn finstack_ai_eval::Reconciliation::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_eval::Reconciliation
+pub fn finstack_ai_eval::Reconciliation::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub enum finstack_ai_eval::RepetitionReducer
+pub finstack_ai_eval::RepetitionReducer::AtLeastK
+pub finstack_ai_eval::RepetitionReducer::AtLeastK::k: u32
+pub finstack_ai_eval::RepetitionReducer::AtLeastK::pass_threshold_micros: finstack_ai_eval::ScoreMicros
+pub finstack_ai_eval::RepetitionReducer::Mean
+pub finstack_ai_eval::RepetitionReducer::PassAtK
+pub finstack_ai_eval::RepetitionReducer::PassAtK::k: u32
+pub finstack_ai_eval::RepetitionReducer::PassAtK::pass_threshold_micros: finstack_ai_eval::ScoreMicros
+impl core::clone::Clone for finstack_ai_eval::RepetitionReducer
+pub fn finstack_ai_eval::RepetitionReducer::clone(&self) -> finstack_ai_eval::RepetitionReducer
+impl core::cmp::Eq for finstack_ai_eval::RepetitionReducer
+impl core::cmp::PartialEq for finstack_ai_eval::RepetitionReducer
+pub fn finstack_ai_eval::RepetitionReducer::eq(&self, &finstack_ai_eval::RepetitionReducer) -> bool
+impl core::fmt::Debug for finstack_ai_eval::RepetitionReducer
+pub fn finstack_ai_eval::RepetitionReducer::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_eval::RepetitionReducer
+impl serde_core::ser::Serialize for finstack_ai_eval::RepetitionReducer
+pub fn finstack_ai_eval::RepetitionReducer::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_eval::RepetitionReducer
+pub fn finstack_ai_eval::RepetitionReducer::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_eval::Aggregate
+pub finstack_ai_eval::Aggregate::complete_tasks: u32
+pub finstack_ai_eval::Aggregate::expected_cells: u32
+pub finstack_ai_eval::Aggregate::expected_tasks: u32
+pub finstack_ai_eval::Aggregate::metric: finstack_ai_eval::report::MetricKey
+pub finstack_ai_eval::Aggregate::scored_cells: u32
+pub finstack_ai_eval::Aggregate::statistics: finstack_ai_eval::Statistics
+pub finstack_ai_eval::Aggregate::subject: alloc::sync::Arc<str>
+impl core::clone::Clone for finstack_ai_eval::report::Aggregate
+pub fn finstack_ai_eval::report::Aggregate::clone(&self) -> finstack_ai_eval::report::Aggregate
+impl core::cmp::PartialEq for finstack_ai_eval::report::Aggregate
+pub fn finstack_ai_eval::report::Aggregate::eq(&self, &finstack_ai_eval::report::Aggregate) -> bool
+impl core::fmt::Debug for finstack_ai_eval::report::Aggregate
+pub fn finstack_ai_eval::report::Aggregate::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_eval::report::Aggregate
+impl serde_core::ser::Serialize for finstack_ai_eval::report::Aggregate
+pub fn finstack_ai_eval::report::Aggregate::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_eval::report::Aggregate
+pub fn finstack_ai_eval::report::Aggregate::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_eval::AttemptRecord
+pub finstack_ai_eval::AttemptRecord::artifacts: alloc::vec::Vec<finstack_ai_kernel::primitives::handles::ArtifactRef>
+pub finstack_ai_eval::AttemptRecord::cell: alloc::sync::Arc<str>
+pub finstack_ai_eval::AttemptRecord::completed_at_ms: u64
+pub finstack_ai_eval::AttemptRecord::duration_ms: core::option::Option<u64>
+pub finstack_ai_eval::AttemptRecord::failure_code: core::option::Option<alloc::sync::Arc<str>>
+pub finstack_ai_eval::AttemptRecord::locator: core::option::Option<finstack_ai_kernel::records::run::external::OperationLocator>
+pub finstack_ai_eval::AttemptRecord::reconciliation: finstack_ai_eval::Reconciliation
+pub finstack_ai_eval::AttemptRecord::record_kinds: alloc::vec::Vec<alloc::sync::Arc<str>>
+pub finstack_ai_eval::AttemptRecord::scores: alloc::vec::Vec<finstack_ai_eval::ScoreSet>
+pub finstack_ai_eval::AttemptRecord::sequence: finstack_ai_eval::AttemptSequence
+pub finstack_ai_eval::AttemptRecord::started_at_ms: u64
+pub finstack_ai_eval::AttemptRecord::status: finstack_ai_eval::AttemptStatus
+pub finstack_ai_eval::AttemptRecord::usage: finstack_ai_eval::MeasuredUsage
+impl core::clone::Clone for finstack_ai_eval::AttemptRecord
+pub fn finstack_ai_eval::AttemptRecord::clone(&self) -> finstack_ai_eval::AttemptRecord
+impl core::cmp::Eq for finstack_ai_eval::AttemptRecord
+impl core::cmp::PartialEq for finstack_ai_eval::AttemptRecord
+pub fn finstack_ai_eval::AttemptRecord::eq(&self, &finstack_ai_eval::AttemptRecord) -> bool
+impl core::convert::From<finstack_ai_eval::AttemptRecord> for finstack_ai_eval::GraderOutcome
+pub fn finstack_ai_eval::GraderOutcome::from(finstack_ai_eval::AttemptRecord) -> Self
+impl core::fmt::Debug for finstack_ai_eval::AttemptRecord
+pub fn finstack_ai_eval::AttemptRecord::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_eval::AttemptRecord
+impl serde_core::ser::Serialize for finstack_ai_eval::AttemptRecord
+pub fn finstack_ai_eval::AttemptRecord::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_eval::AttemptRecord
+pub fn finstack_ai_eval::AttemptRecord::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_eval::AttemptReservation
+pub finstack_ai_eval::AttemptReservation::cell: finstack_ai_eval::Cell
+pub finstack_ai_eval::AttemptReservation::execution: core::option::Option<finstack_ai_eval::ExecutionIdentity>
+pub finstack_ai_eval::AttemptReservation::sequence: finstack_ai_eval::AttemptSequence
+pub finstack_ai_eval::AttemptReservation::started_at_ms: u64
+impl core::clone::Clone for finstack_ai_eval::AttemptReservation
+pub fn finstack_ai_eval::AttemptReservation::clone(&self) -> finstack_ai_eval::AttemptReservation
+impl core::cmp::Eq for finstack_ai_eval::AttemptReservation
+impl core::cmp::PartialEq for finstack_ai_eval::AttemptReservation
+pub fn finstack_ai_eval::AttemptReservation::eq(&self, &finstack_ai_eval::AttemptReservation) -> bool
+impl core::fmt::Debug for finstack_ai_eval::AttemptReservation
+pub fn finstack_ai_eval::AttemptReservation::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_eval::AttemptReservation
+impl serde_core::ser::Serialize for finstack_ai_eval::AttemptReservation
+pub fn finstack_ai_eval::AttemptReservation::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_eval::AttemptReservation
+pub fn finstack_ai_eval::AttemptReservation::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_eval::Cell
+pub finstack_ai_eval::Cell::id: finstack_ai_eval::CellId
+pub finstack_ai_eval::Cell::repetition: u32
+pub finstack_ai_eval::Cell::subject_id: finstack_ai_eval::SubjectId
+pub finstack_ai_eval::Cell::task_id: alloc::sync::Arc<str>
+impl core::clone::Clone for finstack_ai_eval::Cell
+pub fn finstack_ai_eval::Cell::clone(&self) -> finstack_ai_eval::Cell
+impl core::cmp::Eq for finstack_ai_eval::Cell
+impl core::cmp::PartialEq for finstack_ai_eval::Cell
+pub fn finstack_ai_eval::Cell::eq(&self, &finstack_ai_eval::Cell) -> bool
+impl core::fmt::Debug for finstack_ai_eval::Cell
+pub fn finstack_ai_eval::Cell::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_eval::Cell
+impl serde_core::ser::Serialize for finstack_ai_eval::Cell
+pub fn finstack_ai_eval::Cell::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_eval::Cell
+pub fn finstack_ai_eval::Cell::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_eval::CellOutcome
+pub finstack_ai_eval::CellOutcome::authoritative_sequence: core::option::Option<finstack_ai_eval::AttemptSequence>
+pub finstack_ai_eval::CellOutcome::cell: alloc::sync::Arc<str>
+pub finstack_ai_eval::CellOutcome::latest_sequence: finstack_ai_eval::AttemptSequence
+impl core::clone::Clone for finstack_ai_eval::CellOutcome
+pub fn finstack_ai_eval::CellOutcome::clone(&self) -> finstack_ai_eval::CellOutcome
+impl core::cmp::Eq for finstack_ai_eval::CellOutcome
+impl core::cmp::PartialEq for finstack_ai_eval::CellOutcome
+pub fn finstack_ai_eval::CellOutcome::eq(&self, &finstack_ai_eval::CellOutcome) -> bool
+impl core::fmt::Debug for finstack_ai_eval::CellOutcome
+pub fn finstack_ai_eval::CellOutcome::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_eval::CellOutcome
+impl serde_core::ser::Serialize for finstack_ai_eval::CellOutcome
+pub fn finstack_ai_eval::CellOutcome::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_eval::CellOutcome
+pub fn finstack_ai_eval::CellOutcome::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_eval::EvalError
+impl finstack_ai_eval::EvalError
+pub const fn finstack_ai_eval::EvalError::code(&self) -> &'static str
+pub const fn finstack_ai_eval::EvalError::new(&'static str, &'static str) -> Self
+impl core::clone::Clone for finstack_ai_eval::EvalError
+pub fn finstack_ai_eval::EvalError::clone(&self) -> finstack_ai_eval::EvalError
+impl core::error::Error for finstack_ai_eval::EvalError
+impl core::fmt::Debug for finstack_ai_eval::EvalError
+pub fn finstack_ai_eval::EvalError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai_eval::EvalError
+pub fn finstack_ai_eval::EvalError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct finstack_ai_eval::EvalLimits
+pub finstack_ai_eval::EvalLimits::attempt_timeout_ms: u64
+pub finstack_ai_eval::EvalLimits::budget_micros: core::option::Option<u64>
+pub finstack_ai_eval::EvalLimits::budget_unit: core::option::Option<alloc::sync::Arc<str>>
+pub finstack_ai_eval::EvalLimits::max_concurrency: u32
+pub finstack_ai_eval::EvalLimits::max_replacement_attempts: u32
+impl core::clone::Clone for finstack_ai_eval::EvalLimits
+pub fn finstack_ai_eval::EvalLimits::clone(&self) -> finstack_ai_eval::EvalLimits
+impl core::cmp::Eq for finstack_ai_eval::EvalLimits
+impl core::cmp::PartialEq for finstack_ai_eval::EvalLimits
+pub fn finstack_ai_eval::EvalLimits::eq(&self, &finstack_ai_eval::EvalLimits) -> bool
+impl core::default::Default for finstack_ai_eval::EvalLimits
+pub fn finstack_ai_eval::EvalLimits::default() -> Self
+impl core::fmt::Debug for finstack_ai_eval::EvalLimits
+pub fn finstack_ai_eval::EvalLimits::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_eval::EvalLimits
+impl serde_core::ser::Serialize for finstack_ai_eval::EvalLimits
+pub fn finstack_ai_eval::EvalLimits::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_eval::EvalLimits
+pub fn finstack_ai_eval::EvalLimits::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_eval::EvalReport
+pub finstack_ai_eval::EvalReport::aggregates: alloc::vec::Vec<finstack_ai_eval::report::Aggregate>
+pub finstack_ai_eval::EvalReport::comparisons: alloc::vec::Vec<finstack_ai_eval::PairedComparison>
+pub finstack_ai_eval::EvalReport::counts: finstack_ai_eval::report::OutcomeCounts
+pub finstack_ai_eval::EvalReport::engine_version: alloc::sync::Arc<str>
+pub finstack_ai_eval::EvalReport::spec_digest: finstack_ai_kernel::primitives::digest::Digest
+pub finstack_ai_eval::EvalReport::spending: finstack_ai_eval::report::Spending
+pub finstack_ai_eval::EvalReport::subject_locks: alloc::collections::btree::map::BTreeMap<alloc::sync::Arc<str>, finstack_ai_kernel::primitives::digest::Digest>
+impl finstack_ai_eval::report::EvalReport
+pub fn finstack_ai_eval::report::EvalReport::from_snapshot(&finstack_ai_eval::store::StoreSnapshot) -> core::result::Result<Self, finstack_ai_eval::EvalError>
+impl finstack_ai_eval::report::EvalReport
+pub fn finstack_ai_eval::report::EvalReport::write_json(&self, impl core::io::write::Write) -> core::result::Result<(), finstack_ai_eval::EvalError>
+impl core::clone::Clone for finstack_ai_eval::report::EvalReport
+pub fn finstack_ai_eval::report::EvalReport::clone(&self) -> finstack_ai_eval::report::EvalReport
+impl core::cmp::PartialEq for finstack_ai_eval::report::EvalReport
+pub fn finstack_ai_eval::report::EvalReport::eq(&self, &finstack_ai_eval::report::EvalReport) -> bool
+impl core::fmt::Debug for finstack_ai_eval::report::EvalReport
+pub fn finstack_ai_eval::report::EvalReport::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_eval::report::EvalReport
+impl serde_core::ser::Serialize for finstack_ai_eval::report::EvalReport
+pub fn finstack_ai_eval::report::EvalReport::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_eval::report::EvalReport
+pub fn finstack_ai_eval::report::EvalReport::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_eval::EvalSpec
+pub finstack_ai_eval::EvalSpec::limits: finstack_ai_eval::EvalLimits
+pub finstack_ai_eval::EvalSpec::name: alloc::sync::Arc<str>
+pub finstack_ai_eval::EvalSpec::reducer: finstack_ai_eval::RepetitionReducer
+pub finstack_ai_eval::EvalSpec::repetitions: u32
+pub finstack_ai_eval::EvalSpec::schema_version: alloc::sync::Arc<str>
+pub finstack_ai_eval::EvalSpec::scorers: alloc::vec::Vec<alloc::sync::Arc<str>>
+pub finstack_ai_eval::EvalSpec::subjects: alloc::vec::Vec<finstack_ai_eval::SubjectDecl>
+pub finstack_ai_eval::EvalSpec::tasks: finstack_ai_eval::TaskSet
+impl finstack_ai_eval::EvalSpec
+pub fn finstack_ai_eval::EvalSpec::cells(&self) -> core::result::Result<alloc::vec::Vec<finstack_ai_eval::Cell>, finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::EvalSpec::digest(&self) -> core::result::Result<finstack_ai_kernel::primitives::digest::Digest, finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::EvalSpec::validate(&self) -> core::result::Result<(), finstack_ai_eval::EvalError>
+impl core::clone::Clone for finstack_ai_eval::EvalSpec
+pub fn finstack_ai_eval::EvalSpec::clone(&self) -> finstack_ai_eval::EvalSpec
+impl core::cmp::Eq for finstack_ai_eval::EvalSpec
+impl core::cmp::PartialEq for finstack_ai_eval::EvalSpec
+pub fn finstack_ai_eval::EvalSpec::eq(&self, &finstack_ai_eval::EvalSpec) -> bool
+impl core::fmt::Debug for finstack_ai_eval::EvalSpec
+pub fn finstack_ai_eval::EvalSpec::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_eval::EvalSpec
+impl serde_core::ser::Serialize for finstack_ai_eval::EvalSpec
+pub fn finstack_ai_eval::EvalSpec::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_eval::EvalSpec
+pub fn finstack_ai_eval::EvalSpec::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_eval::ExecutionIdentity
+pub finstack_ai_eval::ExecutionIdentity::lane_id: finstack_ai_kernel::primitives::ids::LaneId
+pub finstack_ai_eval::ExecutionIdentity::session_id: finstack_ai_kernel::primitives::ids::SessionId
+pub finstack_ai_eval::ExecutionIdentity::tenant_scope: alloc::sync::Arc<str>
+impl core::clone::Clone for finstack_ai_eval::ExecutionIdentity
+pub fn finstack_ai_eval::ExecutionIdentity::clone(&self) -> finstack_ai_eval::ExecutionIdentity
+impl core::cmp::Eq for finstack_ai_eval::ExecutionIdentity
+impl core::cmp::PartialEq for finstack_ai_eval::ExecutionIdentity
+pub fn finstack_ai_eval::ExecutionIdentity::eq(&self, &finstack_ai_eval::ExecutionIdentity) -> bool
+impl core::fmt::Debug for finstack_ai_eval::ExecutionIdentity
+pub fn finstack_ai_eval::ExecutionIdentity::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_eval::ExecutionIdentity
+impl serde_core::ser::Serialize for finstack_ai_eval::ExecutionIdentity
+pub fn finstack_ai_eval::ExecutionIdentity::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_eval::ExecutionIdentity
+pub fn finstack_ai_eval::ExecutionIdentity::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_eval::FrozenExperiment
+pub finstack_ai_eval::FrozenExperiment::digest: finstack_ai_kernel::primitives::digest::Digest
+pub finstack_ai_eval::FrozenExperiment::engine_version: alloc::sync::Arc<str>
+pub finstack_ai_eval::FrozenExperiment::spec: finstack_ai_eval::EvalSpec
+impl core::clone::Clone for finstack_ai_eval::store::FrozenExperiment
+pub fn finstack_ai_eval::store::FrozenExperiment::clone(&self) -> finstack_ai_eval::store::FrozenExperiment
+impl core::cmp::Eq for finstack_ai_eval::store::FrozenExperiment
+impl core::cmp::PartialEq for finstack_ai_eval::store::FrozenExperiment
+pub fn finstack_ai_eval::store::FrozenExperiment::eq(&self, &finstack_ai_eval::store::FrozenExperiment) -> bool
+impl core::fmt::Debug for finstack_ai_eval::store::FrozenExperiment
+pub fn finstack_ai_eval::store::FrozenExperiment::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_eval::store::FrozenExperiment
+impl serde_core::ser::Serialize for finstack_ai_eval::store::FrozenExperiment
+pub fn finstack_ai_eval::store::FrozenExperiment::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_eval::store::FrozenExperiment
+pub fn finstack_ai_eval::store::FrozenExperiment::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_eval::GateResult
+pub finstack_ai_eval::GateResult::incomplete: bool
+pub finstack_ai_eval::GateResult::infrastructure_failed: bool
+pub finstack_ai_eval::GateResult::passed: bool
+pub finstack_ai_eval::GateResult::quality_failed: bool
+pub finstack_ai_eval::GateResult::scoring_failed: bool
+impl core::clone::Clone for finstack_ai_eval::GateResult
+pub fn finstack_ai_eval::GateResult::clone(&self) -> finstack_ai_eval::GateResult
+impl core::cmp::Eq for finstack_ai_eval::GateResult
+impl core::cmp::PartialEq for finstack_ai_eval::GateResult
+pub fn finstack_ai_eval::GateResult::eq(&self, &finstack_ai_eval::GateResult) -> bool
+impl core::fmt::Debug for finstack_ai_eval::GateResult
+pub fn finstack_ai_eval::GateResult::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_eval::GateResult
+impl serde_core::ser::Serialize for finstack_ai_eval::GateResult
+pub fn finstack_ai_eval::GateResult::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_eval::GateResult
+pub fn finstack_ai_eval::GateResult::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_eval::GraderOutcome
+pub finstack_ai_eval::GraderOutcome::completed_at_ms: u64
+pub finstack_ai_eval::GraderOutcome::failure_code: core::option::Option<alloc::sync::Arc<str>>
+pub finstack_ai_eval::GraderOutcome::locator: core::option::Option<finstack_ai_kernel::records::run::external::OperationLocator>
+pub finstack_ai_eval::GraderOutcome::reconciliation: finstack_ai_eval::Reconciliation
+pub finstack_ai_eval::GraderOutcome::status: finstack_ai_eval::AttemptStatus
+pub finstack_ai_eval::GraderOutcome::usage: finstack_ai_eval::MeasuredUsage
+impl core::clone::Clone for finstack_ai_eval::GraderOutcome
+pub fn finstack_ai_eval::GraderOutcome::clone(&self) -> finstack_ai_eval::GraderOutcome
+impl core::cmp::Eq for finstack_ai_eval::GraderOutcome
+impl core::cmp::PartialEq for finstack_ai_eval::GraderOutcome
+pub fn finstack_ai_eval::GraderOutcome::eq(&self, &finstack_ai_eval::GraderOutcome) -> bool
+impl core::convert::From<finstack_ai_eval::AttemptRecord> for finstack_ai_eval::GraderOutcome
+pub fn finstack_ai_eval::GraderOutcome::from(finstack_ai_eval::AttemptRecord) -> Self
+impl core::fmt::Debug for finstack_ai_eval::GraderOutcome
+pub fn finstack_ai_eval::GraderOutcome::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_eval::GraderOutcome
+impl serde_core::ser::Serialize for finstack_ai_eval::GraderOutcome
+pub fn finstack_ai_eval::GraderOutcome::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_eval::GraderOutcome
+pub fn finstack_ai_eval::GraderOutcome::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_eval::GraderRecord
+pub finstack_ai_eval::GraderRecord::execution: core::option::Option<finstack_ai_eval::ExecutionIdentity>
+pub finstack_ai_eval::GraderRecord::outcome: core::option::Option<finstack_ai_eval::GraderOutcome>
+pub finstack_ai_eval::GraderRecord::reservation: finstack_ai_eval::GraderReservation
+impl finstack_ai_eval::GraderRecord
+pub fn finstack_ai_eval::GraderRecord::unresolved(&self) -> bool
+impl core::clone::Clone for finstack_ai_eval::GraderRecord
+pub fn finstack_ai_eval::GraderRecord::clone(&self) -> finstack_ai_eval::GraderRecord
+impl core::cmp::Eq for finstack_ai_eval::GraderRecord
+impl core::cmp::PartialEq for finstack_ai_eval::GraderRecord
+pub fn finstack_ai_eval::GraderRecord::eq(&self, &finstack_ai_eval::GraderRecord) -> bool
+impl core::fmt::Debug for finstack_ai_eval::GraderRecord
+pub fn finstack_ai_eval::GraderRecord::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_eval::GraderRecord
+impl serde_core::ser::Serialize for finstack_ai_eval::GraderRecord
+pub fn finstack_ai_eval::GraderRecord::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_eval::GraderRecord
+pub fn finstack_ai_eval::GraderRecord::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_eval::GraderReservation
+pub finstack_ai_eval::GraderReservation::attempt_sequence: u32
+pub finstack_ai_eval::GraderReservation::cell: alloc::sync::Arc<str>
+pub finstack_ai_eval::GraderReservation::lock_digest: finstack_ai_kernel::primitives::digest::Digest
+pub finstack_ai_eval::GraderReservation::pass: u32
+pub finstack_ai_eval::GraderReservation::request_digest: finstack_ai_kernel::primitives::digest::Digest
+pub finstack_ai_eval::GraderReservation::scorer: alloc::sync::Arc<str>
+pub finstack_ai_eval::GraderReservation::scorer_version: u32
+pub finstack_ai_eval::GraderReservation::started_at_ms: u64
+impl finstack_ai_eval::GraderReservation
+pub fn finstack_ai_eval::GraderReservation::key(&self) -> alloc::sync::Arc<str>
+impl core::clone::Clone for finstack_ai_eval::GraderReservation
+pub fn finstack_ai_eval::GraderReservation::clone(&self) -> finstack_ai_eval::GraderReservation
+impl core::cmp::Eq for finstack_ai_eval::GraderReservation
+impl core::cmp::PartialEq for finstack_ai_eval::GraderReservation
+pub fn finstack_ai_eval::GraderReservation::eq(&self, &finstack_ai_eval::GraderReservation) -> bool
+impl core::fmt::Debug for finstack_ai_eval::GraderReservation
+pub fn finstack_ai_eval::GraderReservation::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_eval::GraderReservation
+impl serde_core::ser::Serialize for finstack_ai_eval::GraderReservation
+pub fn finstack_ai_eval::GraderReservation::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_eval::GraderReservation
+pub fn finstack_ai_eval::GraderReservation::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_eval::MeasuredCost
+pub finstack_ai_eval::MeasuredCost::micros: u64
+pub finstack_ai_eval::MeasuredCost::unit: alloc::sync::Arc<str>
+impl core::clone::Clone for finstack_ai_eval::MeasuredCost
+pub fn finstack_ai_eval::MeasuredCost::clone(&self) -> finstack_ai_eval::MeasuredCost
+impl core::cmp::Eq for finstack_ai_eval::MeasuredCost
+impl core::cmp::PartialEq for finstack_ai_eval::MeasuredCost
+pub fn finstack_ai_eval::MeasuredCost::eq(&self, &finstack_ai_eval::MeasuredCost) -> bool
+impl core::fmt::Debug for finstack_ai_eval::MeasuredCost
+pub fn finstack_ai_eval::MeasuredCost::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_eval::MeasuredCost
+impl serde_core::ser::Serialize for finstack_ai_eval::MeasuredCost
+pub fn finstack_ai_eval::MeasuredCost::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_eval::MeasuredCost
+pub fn finstack_ai_eval::MeasuredCost::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_eval::MeasuredUsage
+pub finstack_ai_eval::MeasuredUsage::complete: bool
+pub finstack_ai_eval::MeasuredUsage::cost: core::option::Option<finstack_ai_eval::MeasuredCost>
+pub finstack_ai_eval::MeasuredUsage::cost_by_unit: alloc::collections::btree::map::BTreeMap<alloc::sync::Arc<str>, u64>
+pub finstack_ai_eval::MeasuredUsage::effects: u64
+pub finstack_ai_eval::MeasuredUsage::input_tokens: core::option::Option<u64>
+pub finstack_ai_eval::MeasuredUsage::model_effects: u64
+pub finstack_ai_eval::MeasuredUsage::output_tokens: core::option::Option<u64>
+pub finstack_ai_eval::MeasuredUsage::total_tokens: core::option::Option<u64>
+pub finstack_ai_eval::MeasuredUsage::uncosted_effects: u64
+impl finstack_ai_eval::MeasuredUsage
+pub fn finstack_ai_eval::MeasuredUsage::validate(&self) -> core::result::Result<(), finstack_ai_eval::EvalError>
+impl core::clone::Clone for finstack_ai_eval::MeasuredUsage
+pub fn finstack_ai_eval::MeasuredUsage::clone(&self) -> finstack_ai_eval::MeasuredUsage
+impl core::cmp::Eq for finstack_ai_eval::MeasuredUsage
+impl core::cmp::PartialEq for finstack_ai_eval::MeasuredUsage
+pub fn finstack_ai_eval::MeasuredUsage::eq(&self, &finstack_ai_eval::MeasuredUsage) -> bool
+impl core::default::Default for finstack_ai_eval::MeasuredUsage
+pub fn finstack_ai_eval::MeasuredUsage::default() -> finstack_ai_eval::MeasuredUsage
+impl core::fmt::Debug for finstack_ai_eval::MeasuredUsage
+pub fn finstack_ai_eval::MeasuredUsage::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_eval::MeasuredUsage
+impl serde_core::ser::Serialize for finstack_ai_eval::MeasuredUsage
+pub fn finstack_ai_eval::MeasuredUsage::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_eval::MeasuredUsage
+pub fn finstack_ai_eval::MeasuredUsage::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_eval::MemoryEvalStore
+impl finstack_ai_eval::MemoryEvalStore
+pub fn finstack_ai_eval::MemoryEvalStore::new() -> Self
+impl core::default::Default for finstack_ai_eval::MemoryEvalStore
+pub fn finstack_ai_eval::MemoryEvalStore::default() -> finstack_ai_eval::MemoryEvalStore
+impl finstack_ai_eval::store::EvalStore for finstack_ai_eval::MemoryEvalStore
+pub fn finstack_ai_eval::MemoryEvalStore::acquire_runner(&self) -> core::result::Result<alloc::boxed::Box<dyn finstack_ai_eval::store::RunnerLease>, finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::MemoryEvalStore::append_scores(&self, &str, u32, &finstack_ai_eval::ScoreSet) -> core::result::Result<(), finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::MemoryEvalStore::bind_execution(&self, &str, u32, finstack_ai_eval::ExecutionIdentity) -> core::result::Result<(), finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::MemoryEvalStore::bind_grader_execution(&self, &str, finstack_ai_eval::ExecutionIdentity) -> core::result::Result<(), finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::MemoryEvalStore::bind_subject(&self, &str, finstack_ai_kernel::primitives::digest::Digest) -> core::result::Result<(), finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::MemoryEvalStore::freeze(&self, &finstack_ai_eval::EvalSpec) -> core::result::Result<finstack_ai_eval::store::FrozenExperiment, finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::MemoryEvalStore::reserve(&self, &finstack_ai_eval::Cell, u32, u64) -> core::result::Result<finstack_ai_eval::AttemptReservation, finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::MemoryEvalStore::reserve_grader(&self, &finstack_ai_eval::GraderReservation) -> core::result::Result<(), finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::MemoryEvalStore::settle(&self, &finstack_ai_eval::AttemptRecord) -> core::result::Result<(), finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::MemoryEvalStore::settle_grader(&self, &str, &finstack_ai_eval::GraderOutcome) -> core::result::Result<(), finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::MemoryEvalStore::snapshot(&self) -> core::result::Result<finstack_ai_eval::store::StoreSnapshot, finstack_ai_eval::EvalError>
+pub struct finstack_ai_eval::MetricKey
+pub finstack_ai_eval::MetricKey::name: alloc::sync::Arc<str>
+pub finstack_ai_eval::MetricKey::scorer: alloc::sync::Arc<str>
+pub finstack_ai_eval::MetricKey::scorer_version: u32
+impl core::clone::Clone for finstack_ai_eval::report::MetricKey
+pub fn finstack_ai_eval::report::MetricKey::clone(&self) -> finstack_ai_eval::report::MetricKey
+impl core::cmp::Eq for finstack_ai_eval::report::MetricKey
+impl core::cmp::Ord for finstack_ai_eval::report::MetricKey
+pub fn finstack_ai_eval::report::MetricKey::cmp(&self, &finstack_ai_eval::report::MetricKey) -> core::cmp::Ordering
+impl core::cmp::PartialEq for finstack_ai_eval::report::MetricKey
+pub fn finstack_ai_eval::report::MetricKey::eq(&self, &finstack_ai_eval::report::MetricKey) -> bool
+impl core::cmp::PartialOrd for finstack_ai_eval::report::MetricKey
+pub fn finstack_ai_eval::report::MetricKey::partial_cmp(&self, &finstack_ai_eval::report::MetricKey) -> core::option::Option<core::cmp::Ordering>
+impl core::fmt::Debug for finstack_ai_eval::report::MetricKey
+pub fn finstack_ai_eval::report::MetricKey::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_eval::report::MetricKey
+impl serde_core::ser::Serialize for finstack_ai_eval::report::MetricKey
+pub fn finstack_ai_eval::report::MetricKey::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_eval::report::MetricKey
+pub fn finstack_ai_eval::report::MetricKey::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_eval::OutcomeCounts
+pub finstack_ai_eval::OutcomeCounts::attempts: u32
+pub finstack_ai_eval::OutcomeCounts::completed: u32
+pub finstack_ai_eval::OutcomeCounts::expected: u32
+pub finstack_ai_eval::OutcomeCounts::graders_pending: u32
+pub finstack_ai_eval::OutcomeCounts::indeterminate: u32
+pub finstack_ai_eval::OutcomeCounts::infrastructure_attempts: u32
+pub finstack_ai_eval::OutcomeCounts::infrastructure_failed: u32
+pub finstack_ai_eval::OutcomeCounts::pending: u32
+pub finstack_ai_eval::OutcomeCounts::scoring_failed: u32
+pub finstack_ai_eval::OutcomeCounts::scoring_pending: u32
+pub finstack_ai_eval::OutcomeCounts::subject_failed: u32
+pub finstack_ai_eval::OutcomeCounts::unattempted: u32
+impl core::clone::Clone for finstack_ai_eval::report::OutcomeCounts
+pub fn finstack_ai_eval::report::OutcomeCounts::clone(&self) -> finstack_ai_eval::report::OutcomeCounts
+impl core::cmp::Eq for finstack_ai_eval::report::OutcomeCounts
+impl core::cmp::PartialEq for finstack_ai_eval::report::OutcomeCounts
+pub fn finstack_ai_eval::report::OutcomeCounts::eq(&self, &finstack_ai_eval::report::OutcomeCounts) -> bool
+impl core::default::Default for finstack_ai_eval::report::OutcomeCounts
+pub fn finstack_ai_eval::report::OutcomeCounts::default() -> finstack_ai_eval::report::OutcomeCounts
+impl core::fmt::Debug for finstack_ai_eval::report::OutcomeCounts
+pub fn finstack_ai_eval::report::OutcomeCounts::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_eval::report::OutcomeCounts
+impl serde_core::ser::Serialize for finstack_ai_eval::report::OutcomeCounts
+pub fn finstack_ai_eval::report::OutcomeCounts::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_eval::report::OutcomeCounts
+pub fn finstack_ai_eval::report::OutcomeCounts::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_eval::PairedComparison
+pub finstack_ai_eval::PairedComparison::baseline: alloc::sync::Arc<str>
+pub finstack_ai_eval::PairedComparison::candidate: alloc::sync::Arc<str>
+pub finstack_ai_eval::PairedComparison::costs: alloc::vec::Vec<finstack_ai_eval::PairedCost>
+pub finstack_ai_eval::PairedComparison::execution_pairs: u32
+pub finstack_ai_eval::PairedComparison::expected_pairs: u32
+pub finstack_ai_eval::PairedComparison::input_token_delta: finstack_ai_eval::Statistics
+pub finstack_ai_eval::PairedComparison::metrics: alloc::vec::Vec<finstack_ai_eval::PairedMetric>
+pub finstack_ai_eval::PairedComparison::missing_cost_pairs: u32
+pub finstack_ai_eval::PairedComparison::output_token_delta: finstack_ai_eval::Statistics
+pub finstack_ai_eval::PairedComparison::total_token_delta: finstack_ai_eval::Statistics
+impl core::clone::Clone for finstack_ai_eval::PairedComparison
+pub fn finstack_ai_eval::PairedComparison::clone(&self) -> finstack_ai_eval::PairedComparison
+impl core::cmp::PartialEq for finstack_ai_eval::PairedComparison
+pub fn finstack_ai_eval::PairedComparison::eq(&self, &finstack_ai_eval::PairedComparison) -> bool
+impl core::fmt::Debug for finstack_ai_eval::PairedComparison
+pub fn finstack_ai_eval::PairedComparison::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_eval::PairedComparison
+impl serde_core::ser::Serialize for finstack_ai_eval::PairedComparison
+pub fn finstack_ai_eval::PairedComparison::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_eval::PairedComparison
+pub fn finstack_ai_eval::PairedComparison::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_eval::PairedCost
+pub finstack_ai_eval::PairedCost::delta_micros: finstack_ai_eval::Statistics
+pub finstack_ai_eval::PairedCost::total_delta_micros: alloc::string::String
+pub finstack_ai_eval::PairedCost::unit: alloc::sync::Arc<str>
+impl core::clone::Clone for finstack_ai_eval::PairedCost
+pub fn finstack_ai_eval::PairedCost::clone(&self) -> finstack_ai_eval::PairedCost
+impl core::cmp::PartialEq for finstack_ai_eval::PairedCost
+pub fn finstack_ai_eval::PairedCost::eq(&self, &finstack_ai_eval::PairedCost) -> bool
+impl core::fmt::Debug for finstack_ai_eval::PairedCost
+pub fn finstack_ai_eval::PairedCost::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_eval::PairedCost
+impl serde_core::ser::Serialize for finstack_ai_eval::PairedCost
+pub fn finstack_ai_eval::PairedCost::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_eval::PairedCost
+pub fn finstack_ai_eval::PairedCost::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_eval::PairedMetric
+pub finstack_ai_eval::PairedMetric::baseline_only: u32
+pub finstack_ai_eval::PairedMetric::candidate_only: u32
+pub finstack_ai_eval::PairedMetric::delta: finstack_ai_eval::Statistics
+pub finstack_ai_eval::PairedMetric::losses: u32
+pub finstack_ai_eval::PairedMetric::metric: finstack_ai_eval::report::MetricKey
+pub finstack_ai_eval::PairedMetric::missing_pairs: u32
+pub finstack_ai_eval::PairedMetric::ties: u32
+pub finstack_ai_eval::PairedMetric::wins: u32
+impl core::clone::Clone for finstack_ai_eval::PairedMetric
+pub fn finstack_ai_eval::PairedMetric::clone(&self) -> finstack_ai_eval::PairedMetric
+impl core::cmp::PartialEq for finstack_ai_eval::PairedMetric
+pub fn finstack_ai_eval::PairedMetric::eq(&self, &finstack_ai_eval::PairedMetric) -> bool
+impl core::fmt::Debug for finstack_ai_eval::PairedMetric
+pub fn finstack_ai_eval::PairedMetric::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_eval::PairedMetric
+impl serde_core::ser::Serialize for finstack_ai_eval::PairedMetric
+pub fn finstack_ai_eval::PairedMetric::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_eval::PairedMetric
+pub fn finstack_ai_eval::PairedMetric::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_eval::Score
+pub finstack_ai_eval::Score::explanation: core::option::Option<alloc::sync::Arc<str>>
+pub finstack_ai_eval::Score::metadata: core::option::Option<finstack_ai_kernel::primitives::raw_json::RawJson>
+pub finstack_ai_eval::Score::name: alloc::sync::Arc<str>
+pub finstack_ai_eval::Score::passed: core::option::Option<bool>
+pub finstack_ai_eval::Score::scorer: alloc::sync::Arc<str>
+pub finstack_ai_eval::Score::scorer_version: u32
+pub finstack_ai_eval::Score::value: finstack_ai_eval::ScoreMicros
+impl core::clone::Clone for finstack_ai_eval::Score
+pub fn finstack_ai_eval::Score::clone(&self) -> finstack_ai_eval::Score
+impl core::cmp::Eq for finstack_ai_eval::Score
+impl core::cmp::PartialEq for finstack_ai_eval::Score
+pub fn finstack_ai_eval::Score::eq(&self, &finstack_ai_eval::Score) -> bool
+impl core::fmt::Debug for finstack_ai_eval::Score
+pub fn finstack_ai_eval::Score::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_eval::Score
+impl serde_core::ser::Serialize for finstack_ai_eval::Score
+pub fn finstack_ai_eval::Score::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_eval::Score
+pub fn finstack_ai_eval::Score::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_eval::ScoreMicros(_)
+impl finstack_ai_eval::ScoreMicros
+pub const finstack_ai_eval::ScoreMicros::ONE: Self
+pub const finstack_ai_eval::ScoreMicros::ZERO: Self
+pub const fn finstack_ai_eval::ScoreMicros::get(self) -> u32
+pub fn finstack_ai_eval::ScoreMicros::try_new(u32) -> core::result::Result<Self, finstack_ai_eval::EvalError>
+impl core::clone::Clone for finstack_ai_eval::ScoreMicros
+pub fn finstack_ai_eval::ScoreMicros::clone(&self) -> finstack_ai_eval::ScoreMicros
+impl core::cmp::Eq for finstack_ai_eval::ScoreMicros
+impl core::cmp::Ord for finstack_ai_eval::ScoreMicros
+pub fn finstack_ai_eval::ScoreMicros::cmp(&self, &finstack_ai_eval::ScoreMicros) -> core::cmp::Ordering
+impl core::cmp::PartialEq for finstack_ai_eval::ScoreMicros
+pub fn finstack_ai_eval::ScoreMicros::eq(&self, &finstack_ai_eval::ScoreMicros) -> bool
+impl core::cmp::PartialOrd for finstack_ai_eval::ScoreMicros
+pub fn finstack_ai_eval::ScoreMicros::partial_cmp(&self, &finstack_ai_eval::ScoreMicros) -> core::option::Option<core::cmp::Ordering>
+impl core::convert::From<finstack_ai_eval::ScoreMicros> for u32
+pub fn u32::from(finstack_ai_eval::ScoreMicros) -> Self
+impl core::convert::TryFrom<u32> for finstack_ai_eval::ScoreMicros
+pub type finstack_ai_eval::ScoreMicros::Error = finstack_ai_eval::EvalError
+pub fn finstack_ai_eval::ScoreMicros::try_from(u32) -> core::result::Result<Self, Self::Error>
+impl core::fmt::Debug for finstack_ai_eval::ScoreMicros
+pub fn finstack_ai_eval::ScoreMicros::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_eval::ScoreMicros
+impl core::marker::StructuralPartialEq for finstack_ai_eval::ScoreMicros
+impl serde_core::ser::Serialize for finstack_ai_eval::ScoreMicros
+pub fn finstack_ai_eval::ScoreMicros::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_eval::ScoreMicros
+pub fn finstack_ai_eval::ScoreMicros::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_eval::ScoreSet
+pub finstack_ai_eval::ScoreSet::failure_code: core::option::Option<alloc::sync::Arc<str>>
+pub finstack_ai_eval::ScoreSet::scorer: alloc::sync::Arc<str>
+pub finstack_ai_eval::ScoreSet::scorer_version: u32
+pub finstack_ai_eval::ScoreSet::scores: alloc::vec::Vec<finstack_ai_eval::Score>
+impl finstack_ai_eval::ScoreSet
+pub fn finstack_ai_eval::ScoreSet::validate(&self) -> core::result::Result<(), finstack_ai_eval::EvalError>
+impl core::clone::Clone for finstack_ai_eval::ScoreSet
+pub fn finstack_ai_eval::ScoreSet::clone(&self) -> finstack_ai_eval::ScoreSet
+impl core::cmp::Eq for finstack_ai_eval::ScoreSet
+impl core::cmp::PartialEq for finstack_ai_eval::ScoreSet
+pub fn finstack_ai_eval::ScoreSet::eq(&self, &finstack_ai_eval::ScoreSet) -> bool
+impl core::fmt::Debug for finstack_ai_eval::ScoreSet
+pub fn finstack_ai_eval::ScoreSet::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_eval::ScoreSet
+impl serde_core::ser::Serialize for finstack_ai_eval::ScoreSet
+pub fn finstack_ai_eval::ScoreSet::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_eval::ScoreSet
+pub fn finstack_ai_eval::ScoreSet::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_eval::Spending
+pub finstack_ai_eval::Spending::grader_micros: alloc::collections::btree::map::BTreeMap<alloc::sync::Arc<str>, alloc::string::String>
+pub finstack_ai_eval::Spending::grader_unknown: u32
+pub finstack_ai_eval::Spending::subject_micros: alloc::collections::btree::map::BTreeMap<alloc::sync::Arc<str>, alloc::string::String>
+pub finstack_ai_eval::Spending::subject_unknown: u32
+pub finstack_ai_eval::Spending::total_micros: alloc::collections::btree::map::BTreeMap<alloc::sync::Arc<str>, alloc::string::String>
+impl core::clone::Clone for finstack_ai_eval::report::Spending
+pub fn finstack_ai_eval::report::Spending::clone(&self) -> finstack_ai_eval::report::Spending
+impl core::cmp::Eq for finstack_ai_eval::report::Spending
+impl core::cmp::PartialEq for finstack_ai_eval::report::Spending
+pub fn finstack_ai_eval::report::Spending::eq(&self, &finstack_ai_eval::report::Spending) -> bool
+impl core::default::Default for finstack_ai_eval::report::Spending
+pub fn finstack_ai_eval::report::Spending::default() -> finstack_ai_eval::report::Spending
+impl core::fmt::Debug for finstack_ai_eval::report::Spending
+pub fn finstack_ai_eval::report::Spending::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_eval::report::Spending
+impl serde_core::ser::Serialize for finstack_ai_eval::report::Spending
+pub fn finstack_ai_eval::report::Spending::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_eval::report::Spending
+pub fn finstack_ai_eval::report::Spending::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_eval::Statistics
+pub finstack_ai_eval::Statistics::mean: core::option::Option<f64>
+pub finstack_ai_eval::Statistics::n: u32
+pub finstack_ai_eval::Statistics::stderr: core::option::Option<f64>
+impl finstack_ai_eval::Statistics
+pub fn finstack_ai_eval::Statistics::from_values(impl core::iter::traits::collect::IntoIterator<Item = f64>) -> core::result::Result<Self, finstack_ai_eval::EvalError>
+impl core::clone::Clone for finstack_ai_eval::Statistics
+pub fn finstack_ai_eval::Statistics::clone(&self) -> finstack_ai_eval::Statistics
+impl core::cmp::PartialEq for finstack_ai_eval::Statistics
+pub fn finstack_ai_eval::Statistics::eq(&self, &finstack_ai_eval::Statistics) -> bool
+impl core::default::Default for finstack_ai_eval::Statistics
+pub fn finstack_ai_eval::Statistics::default() -> finstack_ai_eval::Statistics
+impl core::fmt::Debug for finstack_ai_eval::Statistics
+pub fn finstack_ai_eval::Statistics::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_eval::Statistics
+impl serde_core::ser::Serialize for finstack_ai_eval::Statistics
+pub fn finstack_ai_eval::Statistics::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_eval::Statistics
+pub fn finstack_ai_eval::Statistics::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_eval::StoreSnapshot
+pub finstack_ai_eval::StoreSnapshot::attempts: alloc::collections::btree::map::BTreeMap<alloc::sync::Arc<str>, alloc::vec::Vec<finstack_ai_eval::AttemptRecord>>
+pub finstack_ai_eval::StoreSnapshot::frozen: core::option::Option<finstack_ai_eval::store::FrozenExperiment>
+pub finstack_ai_eval::StoreSnapshot::graders: alloc::collections::btree::map::BTreeMap<alloc::sync::Arc<str>, finstack_ai_eval::GraderRecord>
+pub finstack_ai_eval::StoreSnapshot::reservations: alloc::collections::btree::map::BTreeMap<alloc::sync::Arc<str>, alloc::vec::Vec<finstack_ai_eval::AttemptReservation>>
+pub finstack_ai_eval::StoreSnapshot::subject_locks: alloc::collections::btree::map::BTreeMap<alloc::sync::Arc<str>, finstack_ai_kernel::primitives::digest::Digest>
+impl core::clone::Clone for finstack_ai_eval::store::StoreSnapshot
+pub fn finstack_ai_eval::store::StoreSnapshot::clone(&self) -> finstack_ai_eval::store::StoreSnapshot
+impl core::cmp::Eq for finstack_ai_eval::store::StoreSnapshot
+impl core::cmp::PartialEq for finstack_ai_eval::store::StoreSnapshot
+pub fn finstack_ai_eval::store::StoreSnapshot::eq(&self, &finstack_ai_eval::store::StoreSnapshot) -> bool
+impl core::default::Default for finstack_ai_eval::store::StoreSnapshot
+pub fn finstack_ai_eval::store::StoreSnapshot::default() -> finstack_ai_eval::store::StoreSnapshot
+impl core::fmt::Debug for finstack_ai_eval::store::StoreSnapshot
+pub fn finstack_ai_eval::store::StoreSnapshot::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_eval::store::StoreSnapshot
+impl serde_core::ser::Serialize for finstack_ai_eval::store::StoreSnapshot
+pub fn finstack_ai_eval::store::StoreSnapshot::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_eval::store::StoreSnapshot
+pub fn finstack_ai_eval::store::StoreSnapshot::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_eval::SubjectDecl
+pub finstack_ai_eval::SubjectDecl::lock_digest: core::option::Option<finstack_ai_kernel::primitives::digest::Digest>
+pub finstack_ai_eval::SubjectDecl::subject_id: alloc::sync::Arc<str>
+impl core::clone::Clone for finstack_ai_eval::SubjectDecl
+pub fn finstack_ai_eval::SubjectDecl::clone(&self) -> finstack_ai_eval::SubjectDecl
+impl core::cmp::Eq for finstack_ai_eval::SubjectDecl
+impl core::cmp::PartialEq for finstack_ai_eval::SubjectDecl
+pub fn finstack_ai_eval::SubjectDecl::eq(&self, &finstack_ai_eval::SubjectDecl) -> bool
+impl core::fmt::Debug for finstack_ai_eval::SubjectDecl
+pub fn finstack_ai_eval::SubjectDecl::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_eval::SubjectDecl
+impl serde_core::ser::Serialize for finstack_ai_eval::SubjectDecl
+pub fn finstack_ai_eval::SubjectDecl::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_eval::SubjectDecl
+pub fn finstack_ai_eval::SubjectDecl::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_eval::TaskSample
+pub finstack_ai_eval::TaskSample::attachments: alloc::vec::Vec<finstack_ai_kernel::primitives::handles::ArtifactRef>
+pub finstack_ai_eval::TaskSample::input: alloc::sync::Arc<str>
+pub finstack_ai_eval::TaskSample::metadata: core::option::Option<finstack_ai_kernel::primitives::raw_json::RawJson>
+pub finstack_ai_eval::TaskSample::target: alloc::sync::Arc<str>
+pub finstack_ai_eval::TaskSample::task_id: alloc::sync::Arc<str>
+impl core::clone::Clone for finstack_ai_eval::TaskSample
+pub fn finstack_ai_eval::TaskSample::clone(&self) -> finstack_ai_eval::TaskSample
+impl core::cmp::Eq for finstack_ai_eval::TaskSample
+impl core::cmp::PartialEq for finstack_ai_eval::TaskSample
+pub fn finstack_ai_eval::TaskSample::eq(&self, &finstack_ai_eval::TaskSample) -> bool
+impl core::fmt::Debug for finstack_ai_eval::TaskSample
+pub fn finstack_ai_eval::TaskSample::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_eval::TaskSample
+impl serde_core::ser::Serialize for finstack_ai_eval::TaskSample
+pub fn finstack_ai_eval::TaskSample::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_eval::TaskSample
+pub fn finstack_ai_eval::TaskSample::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_eval::ThresholdGate
+pub finstack_ai_eval::ThresholdGate::maximum_regression: core::option::Option<finstack_ai_eval::ScoreMicros>
+pub finstack_ai_eval::ThresholdGate::metric: finstack_ai_eval::report::MetricKey
+pub finstack_ai_eval::ThresholdGate::minimum_mean: core::option::Option<finstack_ai_eval::ScoreMicros>
+pub finstack_ai_eval::ThresholdGate::subject: alloc::sync::Arc<str>
+impl finstack_ai_eval::ThresholdGate
+pub fn finstack_ai_eval::ThresholdGate::evaluate(&self, &finstack_ai_eval::report::EvalReport) -> core::result::Result<finstack_ai_eval::GateResult, finstack_ai_eval::EvalError>
+impl core::clone::Clone for finstack_ai_eval::ThresholdGate
+pub fn finstack_ai_eval::ThresholdGate::clone(&self) -> finstack_ai_eval::ThresholdGate
+impl core::cmp::Eq for finstack_ai_eval::ThresholdGate
+impl core::cmp::PartialEq for finstack_ai_eval::ThresholdGate
+pub fn finstack_ai_eval::ThresholdGate::eq(&self, &finstack_ai_eval::ThresholdGate) -> bool
+impl core::fmt::Debug for finstack_ai_eval::ThresholdGate
+pub fn finstack_ai_eval::ThresholdGate::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_eval::ThresholdGate
+impl serde_core::ser::Serialize for finstack_ai_eval::ThresholdGate
+pub fn finstack_ai_eval::ThresholdGate::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_eval::ThresholdGate
+pub fn finstack_ai_eval::ThresholdGate::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub const finstack_ai_eval::EVAL_ARITHMETIC_OVERFLOW: &str
+pub const finstack_ai_eval::EVAL_ATTEMPT_SEQUENCE_CONFLICT: &str
+pub const finstack_ai_eval::EVAL_ATTEMPT_UNRESOLVED: &str
+pub const finstack_ai_eval::EVAL_BUDGET_EXHAUSTED: &str
+pub const finstack_ai_eval::EVAL_CELL_FINALIZED: &str
+pub const finstack_ai_eval::EVAL_COST_UNKNOWN: &str
+pub const finstack_ai_eval::EVAL_HISTORY_INCOMPLETE: &str
+pub const finstack_ai_eval::EVAL_JUDGE_OUTPUT_INVALID: &str
+pub const finstack_ai_eval::EVAL_RESCORE_SESSION_MISSING: &str
+pub const finstack_ai_eval::EVAL_RUNNER_BUSY: &str
+pub const finstack_ai_eval::EVAL_SCHEMA_VERSION: &str
+pub const finstack_ai_eval::EVAL_SCORER_FAILED: &str
+pub const finstack_ai_eval::EVAL_SCORE_OUT_OF_RANGE: &str
+pub const finstack_ai_eval::EVAL_SPEC_DIVERGED: &str
+pub const finstack_ai_eval::EVAL_SPEC_INVALID: &str
+pub const finstack_ai_eval::EVAL_STORE_UNAVAILABLE: &str
+pub const finstack_ai_eval::EVAL_STORE_VERSION: &str
+pub const finstack_ai_eval::EVAL_SUBJECT_LOCK_MISMATCH: &str
+pub const finstack_ai_eval::EVAL_SUBJECT_UNBOUND: &str
+pub const finstack_ai_eval::EVAL_TARGET_INVALID: &str
+pub const finstack_ai_eval::MAX_CELLS: usize
+pub const finstack_ai_eval::MAX_SPEC_BYTES: usize
+pub trait finstack_ai_eval::EvalStore: core::marker::Send + core::marker::Sync
+pub fn finstack_ai_eval::EvalStore::acquire_runner(&self) -> core::result::Result<alloc::boxed::Box<dyn finstack_ai_eval::store::RunnerLease>, finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::EvalStore::append_scores(&self, &str, u32, &finstack_ai_eval::ScoreSet) -> core::result::Result<(), finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::EvalStore::bind_execution(&self, &str, u32, finstack_ai_eval::ExecutionIdentity) -> core::result::Result<(), finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::EvalStore::bind_grader_execution(&self, &str, finstack_ai_eval::ExecutionIdentity) -> core::result::Result<(), finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::EvalStore::bind_subject(&self, &str, finstack_ai_kernel::primitives::digest::Digest) -> core::result::Result<(), finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::EvalStore::freeze(&self, &finstack_ai_eval::EvalSpec) -> core::result::Result<finstack_ai_eval::store::FrozenExperiment, finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::EvalStore::reserve(&self, &finstack_ai_eval::Cell, u32, u64) -> core::result::Result<finstack_ai_eval::AttemptReservation, finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::EvalStore::reserve_grader(&self, &finstack_ai_eval::GraderReservation) -> core::result::Result<(), finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::EvalStore::settle(&self, &finstack_ai_eval::AttemptRecord) -> core::result::Result<(), finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::EvalStore::settle_grader(&self, &str, &finstack_ai_eval::GraderOutcome) -> core::result::Result<(), finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::EvalStore::snapshot(&self) -> core::result::Result<finstack_ai_eval::store::StoreSnapshot, finstack_ai_eval::EvalError>
+impl finstack_ai_eval::store::EvalStore for finstack_ai_eval::MemoryEvalStore
+pub fn finstack_ai_eval::MemoryEvalStore::acquire_runner(&self) -> core::result::Result<alloc::boxed::Box<dyn finstack_ai_eval::store::RunnerLease>, finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::MemoryEvalStore::append_scores(&self, &str, u32, &finstack_ai_eval::ScoreSet) -> core::result::Result<(), finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::MemoryEvalStore::bind_execution(&self, &str, u32, finstack_ai_eval::ExecutionIdentity) -> core::result::Result<(), finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::MemoryEvalStore::bind_grader_execution(&self, &str, finstack_ai_eval::ExecutionIdentity) -> core::result::Result<(), finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::MemoryEvalStore::bind_subject(&self, &str, finstack_ai_kernel::primitives::digest::Digest) -> core::result::Result<(), finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::MemoryEvalStore::freeze(&self, &finstack_ai_eval::EvalSpec) -> core::result::Result<finstack_ai_eval::store::FrozenExperiment, finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::MemoryEvalStore::reserve(&self, &finstack_ai_eval::Cell, u32, u64) -> core::result::Result<finstack_ai_eval::AttemptReservation, finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::MemoryEvalStore::reserve_grader(&self, &finstack_ai_eval::GraderReservation) -> core::result::Result<(), finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::MemoryEvalStore::settle(&self, &finstack_ai_eval::AttemptRecord) -> core::result::Result<(), finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::MemoryEvalStore::settle_grader(&self, &str, &finstack_ai_eval::GraderOutcome) -> core::result::Result<(), finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::MemoryEvalStore::snapshot(&self) -> core::result::Result<finstack_ai_eval::store::StoreSnapshot, finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::export_jsonl(&finstack_ai_eval::store::StoreSnapshot, impl core::io::write::Write) -> core::result::Result<(), finstack_ai_eval::EvalError>
+pub fn finstack_ai_eval::reduce_repetitions(&[finstack_ai_eval::ScoreMicros], &finstack_ai_eval::RepetitionReducer) -> core::result::Result<core::option::Option<f64>, finstack_ai_eval::EvalError>
+pub type finstack_ai_eval::AttemptSequence = u32
+pub type finstack_ai_eval::CellId = alloc::sync::Arc<str>
+pub type finstack_ai_eval::EvalStoreError = finstack_ai_eval::EvalError
+pub type finstack_ai_eval::ScorerId = alloc::sync::Arc<str>
+pub type finstack_ai_eval::SubjectId = alloc::sync::Arc<str>
+pub type finstack_ai_eval::TaskSet = alloc::vec::Vec<finstack_ai_eval::TaskSample>

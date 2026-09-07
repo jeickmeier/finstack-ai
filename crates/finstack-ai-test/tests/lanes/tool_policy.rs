@@ -152,12 +152,7 @@ async fn tool_policy_agent() -> (Agent, Arc<ScriptedModel>, Arc<ScriptedToolset>
         ),
         Arc::clone(&toolset) as Arc<dyn Toolset>,
     )
-    .middleware(
-        ComponentRef::new(
-            ComponentId::parse("finstack.middleware.tool-policy").expect("middleware id"),
-            Some(TOOL_POLICY_COMPONENT_VERSION),
-        ),
-        middleware,
+    .middleware(middleware,
     )
     .policy(RunPolicy::default())
     .build()

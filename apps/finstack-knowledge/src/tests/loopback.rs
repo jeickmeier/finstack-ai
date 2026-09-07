@@ -33,13 +33,35 @@ pub async fn serve_ndjson(
 pub async fn serve_ndjson_capture(
     responses: Vec<String>,
 ) -> Result<(String, tokio::task::JoinHandle<Result<Vec<String>, String>>), BoxError> {
+    serve_capture(responses, false).await
+}
+
+/// Index the actual attachment advertised in the first captured request.
+pub async fn serve_ingest_capture(
+    responses: Vec<String>,
+) -> Result<(String, tokio::task::JoinHandle<Result<Vec<String>, String>>), BoxError> {
+    serve_capture(responses, true).await
+}
+
+async fn serve_capture(
+    mut responses: Vec<String>,
+    index_attachment: bool,
+) -> Result<(String, tokio::task::JoinHandle<Result<Vec<String>, String>>), BoxError> {
+    if index_attachment {
+        responses.insert(0, String::new());
+    }
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let address = listener.local_addr()?;
     let task = tokio::spawn(async move {
         let mut captured = Vec::new();
-        for body in responses {
+        for (index, body) in responses.into_iter().enumerate() {
             let (mut socket, _) = listener.accept().await.map_err(|error| error.to_string())?;
             let (_path, request_body) = read_request(&mut socket).await?;
+            let body = if index_attachment && index == 0 {
+                index_response(&request_body)?
+            } else {
+                body
+            };
             captured.push(request_body);
             write_response(&mut socket, "application/x-ndjson", &body).await?;
         }
@@ -185,4 +207,25 @@ async fn read_request(socket: &mut tokio::net::TcpStream) -> Result<(String, Str
     }
     let body = String::from_utf8_lossy(&request[header_end..]).into_owned();
     Ok((path, body))
+}
+
+/// Build an indexing call using only the uploaded reference in model context.
+fn index_response(request: &str) -> Result<String, String> {
+    let request: serde_json::Value = serde_json::from_str(request).map_err(|e| e.to_string())?;
+    let messages = request["messages"].as_array().ok_or("missing messages")?;
+    let reference = messages
+        .iter()
+        .filter_map(|message| message["content"].as_str())
+        .find_map(|content| {
+            content
+                .split_once("Document source reference: ")
+                .map(|(_, tail)| tail)
+        })
+        .and_then(|tail| tail.lines().next())
+        .ok_or("missing uploaded source reference")?;
+    let arguments: serde_json::Value =
+        serde_json::from_str(reference).map_err(|e| e.to_string())?;
+    let call = serde_json::json!({"message":{"role":"assistant","content":"","tool_calls":[{"function":{"name":"index_document","arguments":arguments}}]},"done":false});
+    let done = serde_json::json!({"message":{"role":"assistant","content":""},"done":true,"prompt_eval_count":1,"eval_count":1});
+    Ok(format!("{call}\n{done}\n"))
 }

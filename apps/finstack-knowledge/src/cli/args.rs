@@ -35,6 +35,26 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub api_key_env: Option<String>,
 
+    /// Opt in to deterministic graph extraction/expansion with this vocabulary JSON.
+    #[arg(long, global = true)]
+    pub graph_vocabulary: Option<PathBuf>,
+
+    /// Explicit Ollama embedding model (lexical search is the default).
+    #[arg(long, global = true, requires = "embedding_dimensions")]
+    pub embedding_model: Option<String>,
+
+    /// Expected dimensions of the explicitly configured embedding model.
+    #[arg(long, global = true, requires = "embedding_model")]
+    pub embedding_dimensions: Option<usize>,
+
+    /// Operator-configured embedding endpoint; independent of the chat provider.
+    #[arg(long, global = true, requires = "embedding_model")]
+    pub embedding_url: Option<String>,
+
+    /// Restrict journal search to these application-authorized session IDs.
+    #[arg(long, global = true)]
+    pub search_session: Vec<String>,
+
     /// What to do.
     #[command(subcommand)]
     pub command: Command,

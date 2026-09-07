@@ -1,0 +1,1772 @@
+pub mod finstack_ai
+pub use finstack_ai::AGENT_SPEC_SCHEMA_VERSION
+pub use finstack_ai::ActiveCapability
+pub use finstack_ai::AgentBuilder
+pub use finstack_ai::AgentId
+pub use finstack_ai::AgentSpec
+pub use finstack_ai::AgentSpecError
+pub use finstack_ai::ApprovalGrantMode
+pub use finstack_ai::BundleId
+pub use finstack_ai::CapabilityActivation
+pub use finstack_ai::CapabilityActivationSource
+pub use finstack_ai::CapabilityId
+pub use finstack_ai::CapabilityRef
+pub use finstack_ai::CapabilitySpec
+pub use finstack_ai::ChildRunPolicy
+pub use finstack_ai::CompactionAuthorization
+pub use finstack_ai::ComponentId
+pub use finstack_ai::ComponentRef
+pub use finstack_ai::CostLimit
+pub use finstack_ai::ErrorCategory
+pub use finstack_ai::ErrorCode
+pub use finstack_ai::ErrorDescriptor
+pub use finstack_ai::ExternalIdentityKey
+pub use finstack_ai::ExternalIdentityMap
+pub use finstack_ai::IdentityMapError
+pub use finstack_ai::InstructionSpec
+pub use finstack_ai::InteractionRequest
+pub use finstack_ai::InteractionResolution
+pub use finstack_ai::LaneInspect
+pub use finstack_ai::MemoryExternalIdentityMap
+pub use finstack_ai::OperationLocator
+pub use finstack_ai::PrincipalRef
+pub use finstack_ai::RunLimits
+pub use finstack_ai::RunPolicy
+pub use finstack_ai::RunSecurityContext
+pub use finstack_ai::SessionError
+pub use finstack_ai::SessionId
+pub use finstack_ai::SessionInspectPhase
+pub use finstack_ai::SessionInspectSnapshot
+pub use finstack_ai::Version
+pub use finstack_ai::inspect_session
+pub mod finstack_ai::durable
+pub use finstack_ai::durable::InteractionRow
+pub use finstack_ai::durable::ResolutionInput
+pub use finstack_ai::durable::TickReport
+pub struct finstack_ai::durable::DurableHost
+impl finstack_ai::durable::DurableHost
+pub async fn finstack_ai::durable::DurableHost::inspect(&self, &finstack_ai_kernel::records::run::external::OperationLocator) -> core::result::Result<finstack_ai::durable::DurableInspection, finstack_ai::durable::DurableHostError>
+pub fn finstack_ai::durable::DurableHost::pending(&self) -> core::result::Result<alloc::vec::Vec<finstack_ai_workflow_hitl::row::InteractionRow>, finstack_ai::durable::DurableHostError>
+pub fn finstack_ai::durable::DurableHost::resolve(&self, &str, finstack_ai_workflow_hitl::router::ResolutionInput) -> core::result::Result<(), finstack_ai::durable::DurableHostError>
+pub async fn finstack_ai::durable::DurableHost::shutdown(&self)
+pub async fn finstack_ai::durable::DurableHost::start(&self, &str, finstack_ai::AgentRunRequest) -> core::result::Result<finstack_ai_kernel::records::run::external::OperationLocator, finstack_ai::durable::DurableHostError>
+pub fn finstack_ai::durable::DurableHost::sweep_interactions(&self) -> core::result::Result<finstack_ai_workflow_hitl::router::SweepReport, finstack_ai::durable::DurableHostError>
+pub async fn finstack_ai::durable::DurableHost::tick(&self) -> core::result::Result<finstack_ai_workflow_worker::worker::TickReport, finstack_ai::durable::DurableHostError>
+impl core::clone::Clone for finstack_ai::durable::DurableHost
+pub fn finstack_ai::durable::DurableHost::clone(&self) -> finstack_ai::durable::DurableHost
+pub struct finstack_ai::durable::DurableHostBuilder
+impl finstack_ai::durable::DurableHostBuilder
+pub fn finstack_ai::durable::DurableHostBuilder::build(self) -> core::result::Result<finstack_ai::durable::DurableHost, finstack_ai::durable::DurableHostError>
+pub const fn finstack_ai::durable::DurableHostBuilder::drive_timeout(self, core::time::Duration) -> Self
+pub fn finstack_ai::durable::DurableHostBuilder::journal_store(&self) -> alloc::sync::Arc<dyn finstack_ai_runtime::ports::journal::JournalStore>
+pub const fn finstack_ai::durable::DurableHostBuilder::lease_ttl_ms(self, u64) -> Self
+pub async fn finstack_ai::durable::DurableHostBuilder::register(self, &str, finstack_ai::Agent) -> core::result::Result<Self, finstack_ai::durable::DurableHostError>
+pub fn finstack_ai::durable::DurableHostBuilder::try_open(&str, impl core::convert::AsRef<std::path::Path>, finstack_ai_runtime::ports::journal::StoreLimits) -> core::result::Result<Self, finstack_ai::durable::DurableHostError>
+pub fn finstack_ai::durable::DurableHostBuilder::worker_id(self, impl core::convert::Into<alloc::sync::Arc<str>>) -> Self
+pub struct finstack_ai::durable::DurableHostError
+pub finstack_ai::durable::DurableHostError::code: alloc::sync::Arc<str>
+impl core::clone::Clone for finstack_ai::durable::DurableHostError
+pub fn finstack_ai::durable::DurableHostError::clone(&self) -> finstack_ai::durable::DurableHostError
+impl core::convert::From<finstack_ai::AgentRunError> for finstack_ai::durable::DurableHostError
+pub fn finstack_ai::durable::DurableHostError::from(finstack_ai::AgentRunError) -> Self
+impl core::convert::From<finstack_ai_runtime::driver::workflow::WorkflowDriverError> for finstack_ai::durable::DurableHostError
+pub fn finstack_ai::durable::DurableHostError::from(finstack_ai_runtime::driver::workflow::WorkflowDriverError) -> Self
+impl core::convert::From<finstack_ai_workflow_hitl::error::HitlError> for finstack_ai::durable::DurableHostError
+pub fn finstack_ai::durable::DurableHostError::from(finstack_ai_workflow_hitl::error::HitlError) -> Self
+impl core::convert::From<finstack_ai_workflow_worker::error::WorkerError> for finstack_ai::durable::DurableHostError
+pub fn finstack_ai::durable::DurableHostError::from(finstack_ai_workflow_worker::error::WorkerError) -> Self
+impl core::error::Error for finstack_ai::durable::DurableHostError
+impl core::fmt::Debug for finstack_ai::durable::DurableHostError
+pub fn finstack_ai::durable::DurableHostError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai::durable::DurableHostError
+pub fn finstack_ai::durable::DurableHostError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct finstack_ai::durable::DurableInspection
+pub finstack_ai::durable::DurableInspection::locator: finstack_ai_kernel::records::run::external::OperationLocator
+pub finstack_ai::durable::DurableInspection::state: finstack_ai_kernel::state::KernelState
+pub finstack_ai::durable::DurableInspection::wait: core::option::Option<finstack_ai_runtime::driver::workflow::WorkflowWait>
+pub finstack_ai::durable::DurableInspection::workflow_kind: alloc::sync::Arc<str>
+impl core::clone::Clone for finstack_ai::durable::DurableInspection
+pub fn finstack_ai::durable::DurableInspection::clone(&self) -> finstack_ai::durable::DurableInspection
+impl core::fmt::Debug for finstack_ai::durable::DurableInspection
+pub fn finstack_ai::durable::DurableInspection::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub mod finstack_ai::media
+pub mod finstack_ai::registry
+pub enum finstack_ai::registry::AgentBuildError
+pub finstack_ai::registry::AgentBuildError::Cancelled
+pub finstack_ai::registry::AgentBuildError::Cancelled::component: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::registry::AgentBuildError::Cancelled::request_source: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::registry::AgentBuildError::ConfigurationConflict
+pub finstack_ai::registry::AgentBuildError::ConfigurationConflict::component: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::registry::AgentBuildError::ConfigurationConflict::registration_source: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::registry::AgentBuildError::ConfigurationConflict::request_source: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::registry::AgentBuildError::DuplicateSelection
+pub finstack_ai::registry::AgentBuildError::DuplicateSelection::component: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::registry::AgentBuildError::DuplicateSelection::request_source: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::registry::AgentBuildError::FactoryFailed
+pub finstack_ai::registry::AgentBuildError::FactoryFailed::component: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::registry::AgentBuildError::FactoryFailed::failure_code: alloc::sync::Arc<str>
+pub finstack_ai::registry::AgentBuildError::FactoryFailed::message: alloc::sync::Arc<str>
+pub finstack_ai::registry::AgentBuildError::FactoryFailed::registration_source: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::registry::AgentBuildError::FactoryFailed::request_source: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::registry::AgentBuildError::InvalidDescriptor
+pub finstack_ai::registry::AgentBuildError::InvalidDescriptor::component: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::registry::AgentBuildError::InvalidDescriptor::message: alloc::sync::Arc<str>
+pub finstack_ai::registry::AgentBuildError::InvalidDescriptor::registration_source: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::registry::AgentBuildError::InvalidDescriptor::request_source: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::registry::AgentBuildError::KindMismatch
+pub finstack_ai::registry::AgentBuildError::KindMismatch::actual_kind: finstack_ai::ComponentKind
+pub finstack_ai::registry::AgentBuildError::KindMismatch::component: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::registry::AgentBuildError::KindMismatch::expected_kind: finstack_ai::ComponentKind
+pub finstack_ai::registry::AgentBuildError::KindMismatch::registration_source: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::registry::AgentBuildError::KindMismatch::request_source: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::registry::AgentBuildError::MiddlewareInvalid
+pub finstack_ai::registry::AgentBuildError::MiddlewareInvalid::failure_code: alloc::sync::Arc<str>
+pub finstack_ai::registry::AgentBuildError::MiddlewareInvalid::message: alloc::sync::Arc<str>
+pub finstack_ai::registry::AgentBuildError::MiddlewareInvalid::request_source: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::registry::AgentBuildError::MissingComponent
+pub finstack_ai::registry::AgentBuildError::MissingComponent::expected_kind: finstack_ai::ComponentKind
+pub finstack_ai::registry::AgentBuildError::MissingComponent::request_source: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::registry::AgentBuildError::MissingComponent::selector: alloc::sync::Arc<str>
+pub finstack_ai::registry::AgentBuildError::VersionMismatch
+pub finstack_ai::registry::AgentBuildError::VersionMismatch::actual: finstack_ai_kernel::primitives::identity::Version
+pub finstack_ai::registry::AgentBuildError::VersionMismatch::component: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::registry::AgentBuildError::VersionMismatch::registration_source: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::registry::AgentBuildError::VersionMismatch::request_source: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::registry::AgentBuildError::VersionMismatch::required: finstack_ai_kernel::primitives::identity::Version
+impl finstack_ai::AgentBuildError
+pub const fn finstack_ai::AgentBuildError::code(&self) -> &'static str
+impl core::clone::Clone for finstack_ai::AgentBuildError
+pub fn finstack_ai::AgentBuildError::clone(&self) -> finstack_ai::AgentBuildError
+impl core::cmp::Eq for finstack_ai::AgentBuildError
+impl core::cmp::PartialEq for finstack_ai::AgentBuildError
+pub fn finstack_ai::AgentBuildError::eq(&self, &finstack_ai::AgentBuildError) -> bool
+impl core::error::Error for finstack_ai::AgentBuildError
+impl core::fmt::Debug for finstack_ai::AgentBuildError
+pub fn finstack_ai::AgentBuildError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai::AgentBuildError
+pub fn finstack_ai::AgentBuildError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai::AgentBuildError
+pub enum finstack_ai::registry::ComponentKind
+pub finstack_ai::registry::ComponentKind::ContextProvider
+pub finstack_ai::registry::ComponentKind::Middleware
+pub finstack_ai::registry::ComponentKind::Model
+pub finstack_ai::registry::ComponentKind::Observer
+pub finstack_ai::registry::ComponentKind::Store
+pub finstack_ai::registry::ComponentKind::Toolset
+impl core::clone::Clone for finstack_ai::ComponentKind
+pub fn finstack_ai::ComponentKind::clone(&self) -> finstack_ai::ComponentKind
+impl core::cmp::Eq for finstack_ai::ComponentKind
+impl core::cmp::Ord for finstack_ai::ComponentKind
+pub fn finstack_ai::ComponentKind::cmp(&self, &finstack_ai::ComponentKind) -> core::cmp::Ordering
+impl core::cmp::PartialEq for finstack_ai::ComponentKind
+pub fn finstack_ai::ComponentKind::eq(&self, &finstack_ai::ComponentKind) -> bool
+impl core::cmp::PartialOrd for finstack_ai::ComponentKind
+pub fn finstack_ai::ComponentKind::partial_cmp(&self, &finstack_ai::ComponentKind) -> core::option::Option<core::cmp::Ordering>
+impl core::convert::From<finstack_ai::ComponentKind> for finstack_ai::LockedComponentKind
+pub fn finstack_ai::LockedComponentKind::from(finstack_ai::ComponentKind) -> Self
+impl core::fmt::Debug for finstack_ai::ComponentKind
+pub fn finstack_ai::ComponentKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai::ComponentKind
+pub fn finstack_ai::ComponentKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for finstack_ai::ComponentKind
+pub fn finstack_ai::ComponentKind::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for finstack_ai::ComponentKind
+impl core::marker::StructuralPartialEq for finstack_ai::ComponentKind
+pub enum finstack_ai::registry::ComponentSelector
+pub finstack_ai::registry::ComponentSelector::Alias
+pub finstack_ai::registry::ComponentSelector::Alias::alias: finstack_ai::ComponentAlias
+pub finstack_ai::registry::ComponentSelector::Alias::version: core::option::Option<finstack_ai_kernel::primitives::identity::Version>
+pub finstack_ai::registry::ComponentSelector::Component(finstack_ai_kernel::primitives::identity::ComponentRef)
+impl core::clone::Clone for finstack_ai::ComponentSelector
+pub fn finstack_ai::ComponentSelector::clone(&self) -> finstack_ai::ComponentSelector
+impl core::cmp::Eq for finstack_ai::ComponentSelector
+impl core::cmp::PartialEq for finstack_ai::ComponentSelector
+pub fn finstack_ai::ComponentSelector::eq(&self, &finstack_ai::ComponentSelector) -> bool
+impl core::fmt::Debug for finstack_ai::ComponentSelector
+pub fn finstack_ai::ComponentSelector::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai::ComponentSelector
+pub enum finstack_ai::registry::ComponentShutdownOutcome
+pub finstack_ai::registry::ComponentShutdownOutcome::AlreadyCompleted
+pub finstack_ai::registry::ComponentShutdownOutcome::Completed
+pub finstack_ai::registry::ComponentShutdownOutcome::Failed(finstack_ai::registry::LifecycleError)
+pub finstack_ai::registry::ComponentShutdownOutcome::HostOwned
+impl core::clone::Clone for finstack_ai::registry::ComponentShutdownOutcome
+pub fn finstack_ai::registry::ComponentShutdownOutcome::clone(&self) -> finstack_ai::registry::ComponentShutdownOutcome
+impl core::cmp::Eq for finstack_ai::registry::ComponentShutdownOutcome
+impl core::cmp::PartialEq for finstack_ai::registry::ComponentShutdownOutcome
+pub fn finstack_ai::registry::ComponentShutdownOutcome::eq(&self, &finstack_ai::registry::ComponentShutdownOutcome) -> bool
+impl core::fmt::Debug for finstack_ai::registry::ComponentShutdownOutcome
+pub fn finstack_ai::registry::ComponentShutdownOutcome::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai::registry::ComponentShutdownOutcome
+pub enum finstack_ai::registry::DuplicatePolicy
+pub finstack_ai::registry::DuplicatePolicy::Reject
+pub finstack_ai::registry::DuplicatePolicy::Replace
+pub finstack_ai::registry::DuplicatePolicy::Replace::expected_source: finstack_ai_kernel::primitives::ids::ComponentId
+impl core::clone::Clone for finstack_ai::DuplicatePolicy
+pub fn finstack_ai::DuplicatePolicy::clone(&self) -> finstack_ai::DuplicatePolicy
+impl core::cmp::Eq for finstack_ai::DuplicatePolicy
+impl core::cmp::PartialEq for finstack_ai::DuplicatePolicy
+pub fn finstack_ai::DuplicatePolicy::eq(&self, &finstack_ai::DuplicatePolicy) -> bool
+impl core::fmt::Debug for finstack_ai::DuplicatePolicy
+pub fn finstack_ai::DuplicatePolicy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai::DuplicatePolicy
+pub enum finstack_ai::registry::ExtensionTrust
+pub finstack_ai::registry::ExtensionTrust::TrustedInProcess
+impl core::clone::Clone for finstack_ai::ExtensionTrust
+pub fn finstack_ai::ExtensionTrust::clone(&self) -> finstack_ai::ExtensionTrust
+impl core::cmp::Eq for finstack_ai::ExtensionTrust
+impl core::cmp::PartialEq for finstack_ai::ExtensionTrust
+pub fn finstack_ai::ExtensionTrust::eq(&self, &finstack_ai::ExtensionTrust) -> bool
+impl core::fmt::Debug for finstack_ai::ExtensionTrust
+pub fn finstack_ai::ExtensionTrust::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai::ExtensionTrust
+impl core::marker::StructuralPartialEq for finstack_ai::ExtensionTrust
+pub enum finstack_ai::registry::RegistrationError
+pub finstack_ai::registry::RegistrationError::AliasConflict
+pub finstack_ai::registry::RegistrationError::AliasConflict::alias: finstack_ai::ComponentAlias
+pub finstack_ai::registry::RegistrationError::AliasConflict::attempted_source: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::registry::RegistrationError::AliasConflict::component: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::registry::RegistrationError::AliasConflict::existing_component: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::registry::RegistrationError::AliasConflict::existing_source: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::registry::RegistrationError::AliasLimit
+pub finstack_ai::registry::RegistrationError::AliasLimit::component: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::registry::RegistrationError::AliasLimit::limit: usize
+pub finstack_ai::registry::RegistrationError::ComponentLimit
+pub finstack_ai::registry::RegistrationError::ComponentLimit::limit: usize
+pub finstack_ai::registry::RegistrationError::Duplicate
+pub finstack_ai::registry::RegistrationError::Duplicate::attempted_source: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::registry::RegistrationError::Duplicate::component: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::registry::RegistrationError::Duplicate::existing_source: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::registry::RegistrationError::Duplicate::kind: finstack_ai::ComponentKind
+pub finstack_ai::registry::RegistrationError::InvalidDescriptor
+pub finstack_ai::registry::RegistrationError::InvalidDescriptor::message: alloc::sync::Arc<str>
+pub finstack_ai::registry::RegistrationError::Reentrant
+pub finstack_ai::registry::RegistrationError::ReplacementRejected
+pub finstack_ai::registry::RegistrationError::ReplacementRejected::actual_kind: core::option::Option<finstack_ai::ComponentKind>
+pub finstack_ai::registry::RegistrationError::ReplacementRejected::actual_source: core::option::Option<finstack_ai_kernel::primitives::ids::ComponentId>
+pub finstack_ai::registry::RegistrationError::ReplacementRejected::attempted_kind: finstack_ai::ComponentKind
+pub finstack_ai::registry::RegistrationError::ReplacementRejected::attempted_source: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::registry::RegistrationError::ReplacementRejected::component: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::registry::RegistrationError::ReplacementRejected::expected_source: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::registry::RegistrationError::SourceDuplicate
+pub finstack_ai::registry::RegistrationError::SourceDuplicate::extension_source: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::registry::RegistrationError::SourceRequired
+impl finstack_ai::RegistrationError
+pub const fn finstack_ai::RegistrationError::code(&self) -> &'static str
+impl core::clone::Clone for finstack_ai::RegistrationError
+pub fn finstack_ai::RegistrationError::clone(&self) -> finstack_ai::RegistrationError
+impl core::cmp::Eq for finstack_ai::RegistrationError
+impl core::cmp::PartialEq for finstack_ai::RegistrationError
+pub fn finstack_ai::RegistrationError::eq(&self, &finstack_ai::RegistrationError) -> bool
+impl core::error::Error for finstack_ai::RegistrationError
+impl core::fmt::Debug for finstack_ai::RegistrationError
+pub fn finstack_ai::RegistrationError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai::RegistrationError
+pub fn finstack_ai::RegistrationError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai::RegistrationError
+pub enum finstack_ai::registry::ResolutionDiagnosticKind
+pub finstack_ai::registry::ResolutionDiagnosticKind::AliasExpanded
+pub finstack_ai::registry::ResolutionDiagnosticKind::CachedFactoryReused
+pub finstack_ai::registry::ResolutionDiagnosticKind::FactoryConstructed
+pub finstack_ai::registry::ResolutionDiagnosticKind::ReadyConfigurationIgnored
+pub finstack_ai::registry::ResolutionDiagnosticKind::ReadySelected
+pub finstack_ai::registry::ResolutionDiagnosticKind::UnusedConfiguration
+impl core::clone::Clone for finstack_ai::ResolutionDiagnosticKind
+pub fn finstack_ai::ResolutionDiagnosticKind::clone(&self) -> finstack_ai::ResolutionDiagnosticKind
+impl core::cmp::Eq for finstack_ai::ResolutionDiagnosticKind
+impl core::cmp::PartialEq for finstack_ai::ResolutionDiagnosticKind
+pub fn finstack_ai::ResolutionDiagnosticKind::eq(&self, &finstack_ai::ResolutionDiagnosticKind) -> bool
+impl core::fmt::Debug for finstack_ai::ResolutionDiagnosticKind
+pub fn finstack_ai::ResolutionDiagnosticKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai::ResolutionDiagnosticKind
+impl core::marker::StructuralPartialEq for finstack_ai::ResolutionDiagnosticKind
+pub enum finstack_ai::registry::ShutdownOwnership
+pub finstack_ai::registry::ShutdownOwnership::Host
+pub finstack_ai::registry::ShutdownOwnership::ResolvedAgent
+impl core::clone::Clone for finstack_ai::registry::ShutdownOwnership
+pub fn finstack_ai::registry::ShutdownOwnership::clone(&self) -> finstack_ai::registry::ShutdownOwnership
+impl core::cmp::Eq for finstack_ai::registry::ShutdownOwnership
+impl core::cmp::PartialEq for finstack_ai::registry::ShutdownOwnership
+pub fn finstack_ai::registry::ShutdownOwnership::eq(&self, &finstack_ai::registry::ShutdownOwnership) -> bool
+impl core::fmt::Debug for finstack_ai::registry::ShutdownOwnership
+pub fn finstack_ai::registry::ShutdownOwnership::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai::registry::ShutdownOwnership
+impl core::marker::StructuralPartialEq for finstack_ai::registry::ShutdownOwnership
+pub struct finstack_ai::registry::AgentComponentSelection
+pub finstack_ai::registry::AgentComponentSelection::context_providers: alloc::sync::Arc<[finstack_ai::ComponentSelector]>
+pub finstack_ai::registry::AgentComponentSelection::middleware: alloc::sync::Arc<[finstack_ai::ComponentSelector]>
+pub finstack_ai::registry::AgentComponentSelection::model: finstack_ai::ComponentSelector
+pub finstack_ai::registry::AgentComponentSelection::observers: alloc::sync::Arc<[finstack_ai::ComponentSelector]>
+pub finstack_ai::registry::AgentComponentSelection::store: finstack_ai::ComponentSelector
+pub finstack_ai::registry::AgentComponentSelection::toolsets: alloc::sync::Arc<[finstack_ai::ComponentSelector]>
+impl finstack_ai::AgentComponentSelection
+pub fn finstack_ai::AgentComponentSelection::new(finstack_ai::ComponentSelector, finstack_ai::ComponentSelector) -> Self
+impl core::clone::Clone for finstack_ai::AgentComponentSelection
+pub fn finstack_ai::AgentComponentSelection::clone(&self) -> finstack_ai::AgentComponentSelection
+impl core::cmp::Eq for finstack_ai::AgentComponentSelection
+impl core::cmp::PartialEq for finstack_ai::AgentComponentSelection
+pub fn finstack_ai::AgentComponentSelection::eq(&self, &finstack_ai::AgentComponentSelection) -> bool
+impl core::fmt::Debug for finstack_ai::AgentComponentSelection
+pub fn finstack_ai::AgentComponentSelection::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai::AgentComponentSelection
+pub struct finstack_ai::registry::AgentConstructionContext
+pub finstack_ai::registry::AgentConstructionContext::cancellation: finstack_ai_runtime::ports::model::context::CancellationSignal
+pub finstack_ai::registry::AgentConstructionContext::deadline: core::option::Option<finstack_ai_kernel::primitives::time::Timestamp>
+pub finstack_ai::registry::AgentConstructionContext::metadata: finstack_ai_kernel::primitives::raw_json::Metadata
+impl finstack_ai::AgentConstructionContext
+pub fn finstack_ai::AgentConstructionContext::new() -> Self
+impl core::clone::Clone for finstack_ai::AgentConstructionContext
+pub fn finstack_ai::AgentConstructionContext::clone(&self) -> finstack_ai::AgentConstructionContext
+impl core::default::Default for finstack_ai::AgentConstructionContext
+pub fn finstack_ai::AgentConstructionContext::default() -> Self
+impl core::fmt::Debug for finstack_ai::AgentConstructionContext
+pub fn finstack_ai::AgentConstructionContext::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct finstack_ai::registry::ComponentAlias(_)
+impl finstack_ai::ComponentAlias
+pub fn finstack_ai::ComponentAlias::as_str(&self) -> &str
+pub fn finstack_ai::ComponentAlias::try_new(impl core::convert::AsRef<str>) -> core::result::Result<Self, finstack_ai::RegistrationError>
+impl core::clone::Clone for finstack_ai::ComponentAlias
+pub fn finstack_ai::ComponentAlias::clone(&self) -> finstack_ai::ComponentAlias
+impl core::cmp::Eq for finstack_ai::ComponentAlias
+impl core::cmp::Ord for finstack_ai::ComponentAlias
+pub fn finstack_ai::ComponentAlias::cmp(&self, &finstack_ai::ComponentAlias) -> core::cmp::Ordering
+impl core::cmp::PartialEq for finstack_ai::ComponentAlias
+pub fn finstack_ai::ComponentAlias::eq(&self, &finstack_ai::ComponentAlias) -> bool
+impl core::cmp::PartialOrd for finstack_ai::ComponentAlias
+pub fn finstack_ai::ComponentAlias::partial_cmp(&self, &finstack_ai::ComponentAlias) -> core::option::Option<core::cmp::Ordering>
+impl core::fmt::Debug for finstack_ai::ComponentAlias
+pub fn finstack_ai::ComponentAlias::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai::ComponentAlias
+pub fn finstack_ai::ComponentAlias::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for finstack_ai::ComponentAlias
+pub fn finstack_ai::ComponentAlias::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::StructuralPartialEq for finstack_ai::ComponentAlias
+pub struct finstack_ai::registry::ComponentConstructionContext
+pub finstack_ai::registry::ComponentConstructionContext::cancellation: finstack_ai_runtime::ports::model::context::CancellationSignal
+pub finstack_ai::registry::ComponentConstructionContext::component: finstack_ai_kernel::primitives::identity::ComponentRef
+pub finstack_ai::registry::ComponentConstructionContext::configuration: core::option::Option<finstack_ai_kernel::primitives::raw_json::RawJson>
+pub finstack_ai::registry::ComponentConstructionContext::deadline: core::option::Option<finstack_ai_kernel::primitives::time::Timestamp>
+pub finstack_ai::registry::ComponentConstructionContext::metadata: finstack_ai_kernel::primitives::raw_json::Metadata
+impl core::clone::Clone for finstack_ai::registry::ComponentConstructionContext
+pub fn finstack_ai::registry::ComponentConstructionContext::clone(&self) -> finstack_ai::registry::ComponentConstructionContext
+impl core::fmt::Debug for finstack_ai::registry::ComponentConstructionContext
+pub fn finstack_ai::registry::ComponentConstructionContext::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct finstack_ai::registry::ComponentHealth
+pub finstack_ai::registry::ComponentHealth::detail: alloc::sync::Arc<str>
+pub finstack_ai::registry::ComponentHealth::ready: bool
+impl core::clone::Clone for finstack_ai::registry::ComponentHealth
+pub fn finstack_ai::registry::ComponentHealth::clone(&self) -> finstack_ai::registry::ComponentHealth
+impl core::cmp::Eq for finstack_ai::registry::ComponentHealth
+impl core::cmp::PartialEq for finstack_ai::registry::ComponentHealth
+pub fn finstack_ai::registry::ComponentHealth::eq(&self, &finstack_ai::registry::ComponentHealth) -> bool
+impl core::fmt::Debug for finstack_ai::registry::ComponentHealth
+pub fn finstack_ai::registry::ComponentHealth::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai::registry::ComponentHealth
+pub struct finstack_ai::registry::ComponentHealthReport
+pub finstack_ai::registry::ComponentHealthReport::component: finstack_ai_kernel::primitives::identity::ComponentRef
+pub finstack_ai::registry::ComponentHealthReport::ownership: finstack_ai::registry::ShutdownOwnership
+pub finstack_ai::registry::ComponentHealthReport::result: core::result::Result<finstack_ai::registry::ComponentHealth, finstack_ai::registry::LifecycleError>
+impl core::clone::Clone for finstack_ai::registry::ComponentHealthReport
+pub fn finstack_ai::registry::ComponentHealthReport::clone(&self) -> finstack_ai::registry::ComponentHealthReport
+impl core::cmp::Eq for finstack_ai::registry::ComponentHealthReport
+impl core::cmp::PartialEq for finstack_ai::registry::ComponentHealthReport
+pub fn finstack_ai::registry::ComponentHealthReport::eq(&self, &finstack_ai::registry::ComponentHealthReport) -> bool
+impl core::fmt::Debug for finstack_ai::registry::ComponentHealthReport
+pub fn finstack_ai::registry::ComponentHealthReport::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai::registry::ComponentHealthReport
+pub struct finstack_ai::registry::ComponentShutdownReport
+pub finstack_ai::registry::ComponentShutdownReport::component: finstack_ai_kernel::primitives::identity::ComponentRef
+pub finstack_ai::registry::ComponentShutdownReport::outcome: finstack_ai::registry::ComponentShutdownOutcome
+impl core::clone::Clone for finstack_ai::registry::ComponentShutdownReport
+pub fn finstack_ai::registry::ComponentShutdownReport::clone(&self) -> finstack_ai::registry::ComponentShutdownReport
+impl core::cmp::Eq for finstack_ai::registry::ComponentShutdownReport
+impl core::cmp::PartialEq for finstack_ai::registry::ComponentShutdownReport
+pub fn finstack_ai::registry::ComponentShutdownReport::eq(&self, &finstack_ai::registry::ComponentShutdownReport) -> bool
+impl core::fmt::Debug for finstack_ai::registry::ComponentShutdownReport
+pub fn finstack_ai::registry::ComponentShutdownReport::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai::registry::ComponentShutdownReport
+pub struct finstack_ai::registry::ConstructionError
+impl finstack_ai::registry::ConstructionError
+pub const fn finstack_ai::registry::ConstructionError::code(&self) -> &'static str
+pub fn finstack_ai::registry::ConstructionError::failed(impl core::convert::Into<alloc::sync::Arc<str>>) -> Self
+pub fn finstack_ai::registry::ConstructionError::message(&self) -> &str
+impl core::clone::Clone for finstack_ai::registry::ConstructionError
+pub fn finstack_ai::registry::ConstructionError::clone(&self) -> finstack_ai::registry::ConstructionError
+impl core::cmp::Eq for finstack_ai::registry::ConstructionError
+impl core::cmp::PartialEq for finstack_ai::registry::ConstructionError
+pub fn finstack_ai::registry::ConstructionError::eq(&self, &finstack_ai::registry::ConstructionError) -> bool
+impl core::error::Error for finstack_ai::registry::ConstructionError
+impl core::fmt::Debug for finstack_ai::registry::ConstructionError
+pub fn finstack_ai::registry::ConstructionError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai::registry::ConstructionError
+pub fn finstack_ai::registry::ConstructionError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai::registry::ConstructionError
+pub struct finstack_ai::registry::ExtensionDescriptor
+pub finstack_ai::registry::ExtensionDescriptor::id: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::registry::ExtensionDescriptor::trust: finstack_ai::ExtensionTrust
+pub finstack_ai::registry::ExtensionDescriptor::version: finstack_ai_kernel::primitives::identity::Version
+impl finstack_ai::ExtensionDescriptor
+pub const fn finstack_ai::ExtensionDescriptor::trusted_in_process(finstack_ai_kernel::primitives::ids::ComponentId, finstack_ai_kernel::primitives::identity::Version) -> Self
+impl core::clone::Clone for finstack_ai::ExtensionDescriptor
+pub fn finstack_ai::ExtensionDescriptor::clone(&self) -> finstack_ai::ExtensionDescriptor
+impl core::cmp::Eq for finstack_ai::ExtensionDescriptor
+impl core::cmp::PartialEq for finstack_ai::ExtensionDescriptor
+pub fn finstack_ai::ExtensionDescriptor::eq(&self, &finstack_ai::ExtensionDescriptor) -> bool
+impl core::fmt::Debug for finstack_ai::ExtensionDescriptor
+pub fn finstack_ai::ExtensionDescriptor::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai::ExtensionDescriptor
+pub struct finstack_ai::registry::LifecycleBinding
+impl finstack_ai::registry::LifecycleBinding
+pub fn finstack_ai::registry::LifecycleBinding::host(alloc::sync::Arc<dyn finstack_ai::registry::ComponentLifecycle>) -> Self
+pub const fn finstack_ai::registry::LifecycleBinding::ownership(&self) -> finstack_ai::registry::ShutdownOwnership
+pub fn finstack_ai::registry::LifecycleBinding::resolved_agent(alloc::sync::Arc<dyn finstack_ai::registry::ComponentLifecycle>) -> Self
+impl core::clone::Clone for finstack_ai::registry::LifecycleBinding
+pub fn finstack_ai::registry::LifecycleBinding::clone(&self) -> finstack_ai::registry::LifecycleBinding
+impl core::fmt::Debug for finstack_ai::registry::LifecycleBinding
+pub fn finstack_ai::registry::LifecycleBinding::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct finstack_ai::registry::LifecycleError
+impl finstack_ai::registry::LifecycleError
+pub const fn finstack_ai::registry::LifecycleError::code(&self) -> &'static str
+pub fn finstack_ai::registry::LifecycleError::failed(impl core::convert::Into<alloc::sync::Arc<str>>) -> Self
+pub fn finstack_ai::registry::LifecycleError::message(&self) -> &str
+impl core::clone::Clone for finstack_ai::registry::LifecycleError
+pub fn finstack_ai::registry::LifecycleError::clone(&self) -> finstack_ai::registry::LifecycleError
+impl core::cmp::Eq for finstack_ai::registry::LifecycleError
+impl core::cmp::PartialEq for finstack_ai::registry::LifecycleError
+pub fn finstack_ai::registry::LifecycleError::eq(&self, &finstack_ai::registry::LifecycleError) -> bool
+impl core::error::Error for finstack_ai::registry::LifecycleError
+impl core::fmt::Debug for finstack_ai::registry::LifecycleError
+pub fn finstack_ai::registry::LifecycleError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai::registry::LifecycleError
+pub fn finstack_ai::registry::LifecycleError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai::registry::LifecycleError
+pub struct finstack_ai::registry::ReadyComponent<T: ?core::marker::Sized>
+impl<T: ?core::marker::Sized> finstack_ai::registry::ReadyComponent<T>
+pub fn finstack_ai::registry::ReadyComponent<T>::handle(&self) -> &alloc::sync::Arc<T>
+pub fn finstack_ai::registry::ReadyComponent<T>::new(alloc::sync::Arc<T>) -> Self
+pub fn finstack_ai::registry::ReadyComponent<T>::with_lifecycle(self, finstack_ai::registry::LifecycleBinding) -> Self
+impl<T: ?core::marker::Sized> core::clone::Clone for finstack_ai::registry::ReadyComponent<T>
+pub fn finstack_ai::registry::ReadyComponent<T>::clone(&self) -> Self
+pub struct finstack_ai::registry::RegisteredComponentDescriptor
+pub finstack_ai::registry::RegisteredComponentDescriptor::aliases: alloc::sync::Arc<[finstack_ai::ComponentAlias]>
+pub finstack_ai::registry::RegisteredComponentDescriptor::component: finstack_ai_kernel::primitives::identity::ComponentRef
+pub finstack_ai::registry::RegisteredComponentDescriptor::configuration_schema: core::option::Option<finstack_ai_kernel::records::policy::agent::SchemaRef>
+pub finstack_ai::registry::RegisteredComponentDescriptor::kind: finstack_ai::ComponentKind
+pub finstack_ai::registry::RegisteredComponentDescriptor::source: finstack_ai::ExtensionDescriptor
+impl core::clone::Clone for finstack_ai::RegisteredComponentDescriptor
+pub fn finstack_ai::RegisteredComponentDescriptor::clone(&self) -> finstack_ai::RegisteredComponentDescriptor
+impl core::cmp::Eq for finstack_ai::RegisteredComponentDescriptor
+impl core::cmp::PartialEq for finstack_ai::RegisteredComponentDescriptor
+pub fn finstack_ai::RegisteredComponentDescriptor::eq(&self, &finstack_ai::RegisteredComponentDescriptor) -> bool
+impl core::fmt::Debug for finstack_ai::RegisteredComponentDescriptor
+pub fn finstack_ai::RegisteredComponentDescriptor::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai::RegisteredComponentDescriptor
+pub struct finstack_ai::registry::Registrar
+impl finstack_ai::Registrar
+pub fn finstack_ai::Registrar::context_provider(&mut self, finstack_ai::RegistrationMetadata, finstack_ai::registry::ReadyComponent<dyn finstack_ai_runtime::ports::context::port::ContextProvider>) -> core::result::Result<(), finstack_ai::RegistrationError>
+pub fn finstack_ai::Registrar::context_provider_factory(&mut self, finstack_ai::RegistrationMetadata, alloc::sync::Arc<dyn finstack_ai::registry::ComponentFactory<dyn finstack_ai_runtime::ports::context::port::ContextProvider>>) -> core::result::Result<(), finstack_ai::RegistrationError>
+pub fn finstack_ai::Registrar::into_registry(self) -> finstack_ai::Registry
+pub fn finstack_ai::Registrar::middleware(&mut self, finstack_ai::RegistrationMetadata, finstack_ai::registry::ReadyComponent<dyn finstack_ai_runtime::ports::middleware::port::Middleware>) -> core::result::Result<(), finstack_ai::RegistrationError>
+pub fn finstack_ai::Registrar::middleware_factory(&mut self, finstack_ai::RegistrationMetadata, alloc::sync::Arc<dyn finstack_ai::registry::ComponentFactory<dyn finstack_ai_runtime::ports::middleware::port::Middleware>>) -> core::result::Result<(), finstack_ai::RegistrationError>
+pub fn finstack_ai::Registrar::model(&mut self, finstack_ai::RegistrationMetadata, finstack_ai::registry::ReadyComponent<dyn finstack_ai_runtime::ports::model::port::Model>) -> core::result::Result<(), finstack_ai::RegistrationError>
+pub fn finstack_ai::Registrar::model_factory(&mut self, finstack_ai::RegistrationMetadata, alloc::sync::Arc<dyn finstack_ai::registry::ComponentFactory<dyn finstack_ai_runtime::ports::model::port::Model>>) -> core::result::Result<(), finstack_ai::RegistrationError>
+pub const fn finstack_ai::Registrar::new() -> Self
+pub fn finstack_ai::Registrar::observer(&mut self, finstack_ai::RegistrationMetadata, finstack_ai::registry::ReadyComponent<dyn finstack_ai_runtime::ports::observer::Observer>) -> core::result::Result<(), finstack_ai::RegistrationError>
+pub fn finstack_ai::Registrar::observer_factory(&mut self, finstack_ai::RegistrationMetadata, alloc::sync::Arc<dyn finstack_ai::registry::ComponentFactory<dyn finstack_ai_runtime::ports::observer::Observer>>) -> core::result::Result<(), finstack_ai::RegistrationError>
+pub fn finstack_ai::Registrar::register_extension(&mut self, &dyn finstack_ai::Extension) -> core::result::Result<(), finstack_ai::RegistrationError>
+pub fn finstack_ai::Registrar::store(&mut self, finstack_ai::RegistrationMetadata, finstack_ai::registry::ReadyComponent<dyn finstack_ai_runtime::ports::journal::JournalStore>) -> core::result::Result<(), finstack_ai::RegistrationError>
+pub fn finstack_ai::Registrar::store_factory(&mut self, finstack_ai::RegistrationMetadata, alloc::sync::Arc<dyn finstack_ai::registry::ComponentFactory<dyn finstack_ai_runtime::ports::journal::JournalStore>>) -> core::result::Result<(), finstack_ai::RegistrationError>
+pub fn finstack_ai::Registrar::toolset(&mut self, finstack_ai::RegistrationMetadata, finstack_ai::registry::ReadyComponent<dyn finstack_ai_runtime::ports::tool::port::Toolset>) -> core::result::Result<(), finstack_ai::RegistrationError>
+pub fn finstack_ai::Registrar::toolset_factory(&mut self, finstack_ai::RegistrationMetadata, alloc::sync::Arc<dyn finstack_ai::registry::ComponentFactory<dyn finstack_ai_runtime::ports::tool::port::Toolset>>) -> core::result::Result<(), finstack_ai::RegistrationError>
+impl core::default::Default for finstack_ai::Registrar
+pub fn finstack_ai::Registrar::default() -> finstack_ai::Registrar
+pub struct finstack_ai::registry::RegistrationEvent
+pub finstack_ai::registry::RegistrationEvent::component: finstack_ai_kernel::primitives::identity::ComponentRef
+pub finstack_ai::registry::RegistrationEvent::kind: finstack_ai::ComponentKind
+pub finstack_ai::registry::RegistrationEvent::replaced_source: core::option::Option<finstack_ai_kernel::primitives::ids::ComponentId>
+pub finstack_ai::registry::RegistrationEvent::source: finstack_ai_kernel::primitives::ids::ComponentId
+impl core::clone::Clone for finstack_ai::RegistrationEvent
+pub fn finstack_ai::RegistrationEvent::clone(&self) -> finstack_ai::RegistrationEvent
+impl core::cmp::Eq for finstack_ai::RegistrationEvent
+impl core::cmp::PartialEq for finstack_ai::RegistrationEvent
+pub fn finstack_ai::RegistrationEvent::eq(&self, &finstack_ai::RegistrationEvent) -> bool
+impl core::fmt::Debug for finstack_ai::RegistrationEvent
+pub fn finstack_ai::RegistrationEvent::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai::RegistrationEvent
+pub struct finstack_ai::registry::RegistrationMetadata
+impl finstack_ai::RegistrationMetadata
+pub fn finstack_ai::RegistrationMetadata::new(finstack_ai_kernel::primitives::ids::ComponentId, finstack_ai_kernel::primitives::identity::Version) -> Self
+pub fn finstack_ai::RegistrationMetadata::replacing(self, finstack_ai_kernel::primitives::ids::ComponentId) -> Self
+pub fn finstack_ai::RegistrationMetadata::with_alias(self, finstack_ai::ComponentAlias) -> core::result::Result<Self, finstack_ai::RegistrationError>
+pub fn finstack_ai::RegistrationMetadata::with_configuration_schema(self, finstack_ai_kernel::records::policy::agent::SchemaRef) -> Self
+impl core::clone::Clone for finstack_ai::RegistrationMetadata
+pub fn finstack_ai::RegistrationMetadata::clone(&self) -> finstack_ai::RegistrationMetadata
+impl core::cmp::Eq for finstack_ai::RegistrationMetadata
+impl core::cmp::PartialEq for finstack_ai::RegistrationMetadata
+pub fn finstack_ai::RegistrationMetadata::eq(&self, &finstack_ai::RegistrationMetadata) -> bool
+impl core::fmt::Debug for finstack_ai::RegistrationMetadata
+pub fn finstack_ai::RegistrationMetadata::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai::RegistrationMetadata
+pub struct finstack_ai::registry::Registry
+impl finstack_ai::Registry
+pub fn finstack_ai::Registry::registered_component(&self, &finstack_ai_kernel::primitives::ids::ComponentId) -> core::option::Option<&finstack_ai::RegisteredComponentDescriptor>
+pub const fn finstack_ai::Registry::registration_events(&self) -> &alloc::sync::Arc<[finstack_ai::RegistrationEvent]>
+pub async fn finstack_ai::Registry::resolve(&mut self, finstack_ai::ResolveRequest, finstack_ai::AgentConstructionContext) -> core::result::Result<finstack_ai::ResolvedAgent, finstack_ai::AgentBuildError>
+pub struct finstack_ai::registry::ResolutionDiagnostic
+pub finstack_ai::registry::ResolutionDiagnostic::alias: core::option::Option<finstack_ai::ComponentAlias>
+pub finstack_ai::registry::ResolutionDiagnostic::component: core::option::Option<finstack_ai_kernel::primitives::identity::ComponentRef>
+pub finstack_ai::registry::ResolutionDiagnostic::kind: finstack_ai::ResolutionDiagnosticKind
+pub finstack_ai::registry::ResolutionDiagnostic::registration_source: core::option::Option<finstack_ai_kernel::primitives::ids::ComponentId>
+pub finstack_ai::registry::ResolutionDiagnostic::request_source: finstack_ai_kernel::primitives::ids::ComponentId
+impl core::clone::Clone for finstack_ai::ResolutionDiagnostic
+pub fn finstack_ai::ResolutionDiagnostic::clone(&self) -> finstack_ai::ResolutionDiagnostic
+impl core::cmp::Eq for finstack_ai::ResolutionDiagnostic
+impl core::cmp::PartialEq for finstack_ai::ResolutionDiagnostic
+pub fn finstack_ai::ResolutionDiagnostic::eq(&self, &finstack_ai::ResolutionDiagnostic) -> bool
+impl core::fmt::Debug for finstack_ai::ResolutionDiagnostic
+pub fn finstack_ai::ResolutionDiagnostic::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai::ResolutionDiagnostic
+pub struct finstack_ai::registry::ResolutionReport
+pub finstack_ai::registry::ResolutionReport::diagnostics: alloc::sync::Arc<[finstack_ai::ResolutionDiagnostic]>
+pub finstack_ai::registry::ResolutionReport::request_source: finstack_ai_kernel::primitives::ids::ComponentId
+impl core::clone::Clone for finstack_ai::ResolutionReport
+pub fn finstack_ai::ResolutionReport::clone(&self) -> finstack_ai::ResolutionReport
+impl core::cmp::Eq for finstack_ai::ResolutionReport
+impl core::cmp::PartialEq for finstack_ai::ResolutionReport
+pub fn finstack_ai::ResolutionReport::eq(&self, &finstack_ai::ResolutionReport) -> bool
+impl core::fmt::Debug for finstack_ai::ResolutionReport
+pub fn finstack_ai::ResolutionReport::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai::ResolutionReport
+pub struct finstack_ai::registry::ResolveRequest
+pub finstack_ai::registry::ResolveRequest::selection: finstack_ai::AgentComponentSelection
+pub finstack_ai::registry::ResolveRequest::source: finstack_ai_kernel::primitives::ids::ComponentId
+impl finstack_ai::ResolveRequest
+pub fn finstack_ai::ResolveRequest::new(finstack_ai_kernel::primitives::ids::ComponentId, finstack_ai::AgentComponentSelection) -> Self
+pub fn finstack_ai::ResolveRequest::with_configuration(self, finstack_ai_kernel::primitives::ids::ComponentId, finstack_ai_kernel::primitives::raw_json::RawJson) -> core::result::Result<Self, finstack_ai::AgentBuildError>
+impl core::clone::Clone for finstack_ai::ResolveRequest
+pub fn finstack_ai::ResolveRequest::clone(&self) -> finstack_ai::ResolveRequest
+impl core::fmt::Debug for finstack_ai::ResolveRequest
+pub fn finstack_ai::ResolveRequest::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct finstack_ai::registry::ResolvedAgent
+impl finstack_ai::ResolvedAgent
+pub async fn finstack_ai::ResolvedAgent::health(&self) -> alloc::sync::Arc<[finstack_ai::registry::ComponentHealthReport]>
+pub fn finstack_ai::ResolvedAgent::lock(&self) -> core::option::Option<&alloc::sync::Arc<finstack_ai::ResolvedAgentLock>>
+pub const fn finstack_ai::ResolvedAgent::resolution_report(&self) -> &finstack_ai::ResolutionReport
+pub fn finstack_ai::ResolvedAgent::run_plan(&self) -> finstack_ai::ResolvedRunPlan
+pub fn finstack_ai::ResolvedAgent::services(&self) -> core::option::Option<&finstack_ai::RuntimeServices>
+pub async fn finstack_ai::ResolvedAgent::shutdown(&self, finstack_ai::AgentConstructionContext) -> alloc::sync::Arc<[finstack_ai::registry::ComponentShutdownReport]>
+pub fn finstack_ai::ResolvedAgent::spec(&self) -> core::option::Option<&alloc::sync::Arc<finstack_ai_runtime::spec::AgentSpec>>
+pub struct finstack_ai::registry::ResolvedComponent<T: ?core::marker::Sized>
+impl<T: ?core::marker::Sized> finstack_ai::ResolvedComponent<T>
+pub const fn finstack_ai::ResolvedComponent<T>::descriptor(&self) -> &finstack_ai::RegisteredComponentDescriptor
+pub const fn finstack_ai::ResolvedComponent<T>::handle(&self) -> &alloc::sync::Arc<T>
+pub fn finstack_ai::ResolvedComponent<T>::shutdown_ownership(&self) -> core::option::Option<finstack_ai::registry::ShutdownOwnership>
+impl<T: ?core::marker::Sized> core::clone::Clone for finstack_ai::ResolvedComponent<T>
+pub fn finstack_ai::ResolvedComponent<T>::clone(&self) -> Self
+pub struct finstack_ai::registry::ResolvedRunPlan
+impl finstack_ai::ResolvedRunPlan
+pub fn finstack_ai::ResolvedRunPlan::context_providers(&self) -> &[finstack_ai::ResolvedComponent<dyn finstack_ai_runtime::ports::context::port::ContextProvider>]
+pub fn finstack_ai::ResolvedRunPlan::middleware(&self) -> &[finstack_ai::ResolvedComponent<dyn finstack_ai_runtime::ports::middleware::port::Middleware>]
+pub fn finstack_ai::ResolvedRunPlan::middleware_chain(&self) -> &alloc::sync::Arc<finstack_ai_runtime::ports::middleware::chain::ResolvedMiddlewareChain>
+pub fn finstack_ai::ResolvedRunPlan::model(&self) -> &finstack_ai::ResolvedComponent<finstack_ai_runtime::ports::model::port::ReadyModel>
+pub fn finstack_ai::ResolvedRunPlan::observers(&self) -> &[finstack_ai::ResolvedComponent<dyn finstack_ai_runtime::ports::observer::Observer>]
+pub fn finstack_ai::ResolvedRunPlan::store(&self) -> &finstack_ai::ResolvedComponent<dyn finstack_ai_runtime::ports::journal::JournalStore>
+pub fn finstack_ai::ResolvedRunPlan::toolsets(&self) -> &[finstack_ai::ResolvedComponent<dyn finstack_ai_runtime::ports::tool::port::Toolset>]
+impl core::clone::Clone for finstack_ai::ResolvedRunPlan
+pub fn finstack_ai::ResolvedRunPlan::clone(&self) -> finstack_ai::ResolvedRunPlan
+pub const finstack_ai::registry::AGENT_BUILD_CANCELLED: &str
+pub const finstack_ai::registry::AGENT_BUILD_CONFIGURATION_CONFLICT: &str
+pub const finstack_ai::registry::AGENT_BUILD_DUPLICATE_SELECTION: &str
+pub const finstack_ai::registry::AGENT_BUILD_FACTORY_FAILED: &str
+pub const finstack_ai::registry::AGENT_BUILD_INVALID_DESCRIPTOR: &str
+pub const finstack_ai::registry::AGENT_BUILD_KIND_MISMATCH: &str
+pub const finstack_ai::registry::AGENT_BUILD_MIDDLEWARE_INVALID: &str
+pub const finstack_ai::registry::AGENT_BUILD_MISSING_COMPONENT: &str
+pub const finstack_ai::registry::AGENT_BUILD_VERSION_MISMATCH: &str
+pub const finstack_ai::registry::MAX_COMPONENT_ALIASES: usize
+pub const finstack_ai::registry::MAX_REGISTERED_COMPONENTS: usize
+pub const finstack_ai::registry::MAX_SELECTED_COMPONENTS: usize
+pub trait finstack_ai::registry::ComponentFactory<T: ?core::marker::Sized>: finstack_ai_runtime::ports::PortObject
+pub fn finstack_ai::registry::ComponentFactory::construct(&self, finstack_ai::registry::ComponentConstructionContext) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai::registry::ReadyComponent<T>, finstack_ai::registry::ConstructionError>>
+impl<T, F, Fut> finstack_ai::registry::ComponentFactory<T> for F where T: ?core::marker::Sized + 'static, F: core::ops::function::Fn(finstack_ai::registry::ComponentConstructionContext) -> Fut + core::marker::Send + core::marker::Sync + 'static, Fut: core::future::future::Future<Output = core::result::Result<finstack_ai::registry::ReadyComponent<T>, finstack_ai::registry::ConstructionError>> + core::marker::Send + 'static
+pub fn F::construct(&self, finstack_ai::registry::ComponentConstructionContext) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai::registry::ReadyComponent<T>, finstack_ai::registry::ConstructionError>>
+pub trait finstack_ai::registry::ComponentLifecycle: finstack_ai_runtime::ports::PortObject
+pub fn finstack_ai::registry::ComponentLifecycle::health(&self) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai::registry::ComponentHealth, finstack_ai::registry::LifecycleError>>
+pub fn finstack_ai::registry::ComponentLifecycle::shutdown(&self, finstack_ai::AgentConstructionContext) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai::registry::LifecycleError>>
+pub trait finstack_ai::registry::Extension: finstack_ai_runtime::ports::PortObject
+pub fn finstack_ai::registry::Extension::descriptor(&self) -> finstack_ai::ExtensionDescriptor
+pub fn finstack_ai::registry::Extension::register(&self, &mut finstack_ai::Registrar) -> core::result::Result<(), finstack_ai::RegistrationError>
+impl finstack_ai::Extension for finstack_ai::NativeAgentBuilder
+pub fn finstack_ai::NativeAgentBuilder::descriptor(&self) -> finstack_ai::ExtensionDescriptor
+pub fn finstack_ai::NativeAgentBuilder::register(&self, &mut finstack_ai::Registrar) -> core::result::Result<(), finstack_ai::RegistrationError>
+pub mod finstack_ai::runtime
+pub use finstack_ai::runtime::Bytes
+pub use finstack_ai::runtime::PortErrorInvalid
+pub use finstack_ai::runtime::artifact
+pub use finstack_ai::runtime::audit
+pub use finstack_ai::runtime::budget
+pub use finstack_ai::runtime::child
+pub use finstack_ai::runtime::commit
+pub use finstack_ai::runtime::confinement
+pub use finstack_ai::runtime::events
+pub use finstack_ai::runtime::ids
+pub use finstack_ai::runtime::ingress
+pub use finstack_ai::runtime::native_driver
+pub use finstack_ai::runtime::ports
+pub use finstack_ai::runtime::run
+pub use finstack_ai::runtime::session
+pub use finstack_ai::runtime::spec
+pub use finstack_ai::runtime::workflow
+pub enum finstack_ai::ActivationHostError
+pub finstack_ai::ActivationHostError::Bound
+pub finstack_ai::ActivationHostError::Failed
+pub finstack_ai::ActivationHostError::Failed::reason: alloc::sync::Arc<str>
+impl core::clone::Clone for finstack_ai::ActivationHostError
+pub fn finstack_ai::ActivationHostError::clone(&self) -> finstack_ai::ActivationHostError
+impl core::cmp::Eq for finstack_ai::ActivationHostError
+impl core::cmp::PartialEq for finstack_ai::ActivationHostError
+pub fn finstack_ai::ActivationHostError::eq(&self, &finstack_ai::ActivationHostError) -> bool
+impl core::error::Error for finstack_ai::ActivationHostError
+impl core::fmt::Debug for finstack_ai::ActivationHostError
+pub fn finstack_ai::ActivationHostError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai::ActivationHostError
+pub fn finstack_ai::ActivationHostError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai::ActivationHostError
+pub enum finstack_ai::AgentBuildError
+pub finstack_ai::AgentBuildError::Cancelled
+pub finstack_ai::AgentBuildError::Cancelled::component: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::AgentBuildError::Cancelled::request_source: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::AgentBuildError::ConfigurationConflict
+pub finstack_ai::AgentBuildError::ConfigurationConflict::component: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::AgentBuildError::ConfigurationConflict::registration_source: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::AgentBuildError::ConfigurationConflict::request_source: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::AgentBuildError::DuplicateSelection
+pub finstack_ai::AgentBuildError::DuplicateSelection::component: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::AgentBuildError::DuplicateSelection::request_source: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::AgentBuildError::FactoryFailed
+pub finstack_ai::AgentBuildError::FactoryFailed::component: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::AgentBuildError::FactoryFailed::failure_code: alloc::sync::Arc<str>
+pub finstack_ai::AgentBuildError::FactoryFailed::message: alloc::sync::Arc<str>
+pub finstack_ai::AgentBuildError::FactoryFailed::registration_source: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::AgentBuildError::FactoryFailed::request_source: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::AgentBuildError::InvalidDescriptor
+pub finstack_ai::AgentBuildError::InvalidDescriptor::component: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::AgentBuildError::InvalidDescriptor::message: alloc::sync::Arc<str>
+pub finstack_ai::AgentBuildError::InvalidDescriptor::registration_source: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::AgentBuildError::InvalidDescriptor::request_source: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::AgentBuildError::KindMismatch
+pub finstack_ai::AgentBuildError::KindMismatch::actual_kind: finstack_ai::ComponentKind
+pub finstack_ai::AgentBuildError::KindMismatch::component: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::AgentBuildError::KindMismatch::expected_kind: finstack_ai::ComponentKind
+pub finstack_ai::AgentBuildError::KindMismatch::registration_source: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::AgentBuildError::KindMismatch::request_source: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::AgentBuildError::MiddlewareInvalid
+pub finstack_ai::AgentBuildError::MiddlewareInvalid::failure_code: alloc::sync::Arc<str>
+pub finstack_ai::AgentBuildError::MiddlewareInvalid::message: alloc::sync::Arc<str>
+pub finstack_ai::AgentBuildError::MiddlewareInvalid::request_source: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::AgentBuildError::MissingComponent
+pub finstack_ai::AgentBuildError::MissingComponent::expected_kind: finstack_ai::ComponentKind
+pub finstack_ai::AgentBuildError::MissingComponent::request_source: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::AgentBuildError::MissingComponent::selector: alloc::sync::Arc<str>
+pub finstack_ai::AgentBuildError::VersionMismatch
+pub finstack_ai::AgentBuildError::VersionMismatch::actual: finstack_ai_kernel::primitives::identity::Version
+pub finstack_ai::AgentBuildError::VersionMismatch::component: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::AgentBuildError::VersionMismatch::registration_source: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::AgentBuildError::VersionMismatch::request_source: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::AgentBuildError::VersionMismatch::required: finstack_ai_kernel::primitives::identity::Version
+impl finstack_ai::AgentBuildError
+pub const fn finstack_ai::AgentBuildError::code(&self) -> &'static str
+impl core::clone::Clone for finstack_ai::AgentBuildError
+pub fn finstack_ai::AgentBuildError::clone(&self) -> finstack_ai::AgentBuildError
+impl core::cmp::Eq for finstack_ai::AgentBuildError
+impl core::cmp::PartialEq for finstack_ai::AgentBuildError
+pub fn finstack_ai::AgentBuildError::eq(&self, &finstack_ai::AgentBuildError) -> bool
+impl core::error::Error for finstack_ai::AgentBuildError
+impl core::fmt::Debug for finstack_ai::AgentBuildError
+pub fn finstack_ai::AgentBuildError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai::AgentBuildError
+pub fn finstack_ai::AgentBuildError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai::AgentBuildError
+pub enum finstack_ai::AgentRunError
+pub finstack_ai::AgentRunError::Cancelled
+pub finstack_ai::AgentRunError::Configuration
+pub finstack_ai::AgentRunError::Configuration::code: finstack_ai_kernel::primitives::error::ErrorCode
+pub finstack_ai::AgentRunError::Configuration::message: alloc::string::String
+pub finstack_ai::AgentRunError::Failed
+pub finstack_ai::AgentRunError::Failed::descriptor: alloc::boxed::Box<finstack_ai_kernel::primitives::error::ErrorDescriptor>
+pub finstack_ai::AgentRunError::Runtime
+pub finstack_ai::AgentRunError::Runtime::code: finstack_ai_kernel::primitives::error::ErrorCode
+pub finstack_ai::AgentRunError::Runtime::message: alloc::string::String
+pub finstack_ai::AgentRunError::Timeout
+pub finstack_ai::AgentRunError::Timeout::timeout: core::time::Duration
+impl finstack_ai::AgentRunError
+pub fn finstack_ai::AgentRunError::code(&self) -> &str
+pub fn finstack_ai::AgentRunError::descriptor(&self) -> core::option::Option<&finstack_ai_kernel::primitives::error::ErrorDescriptor>
+pub const fn finstack_ai::AgentRunError::retryable(&self) -> bool
+impl core::clone::Clone for finstack_ai::AgentRunError
+pub fn finstack_ai::AgentRunError::clone(&self) -> finstack_ai::AgentRunError
+impl core::convert::From<finstack_ai::AgentRunError> for finstack_ai::durable::DurableHostError
+pub fn finstack_ai::durable::DurableHostError::from(finstack_ai::AgentRunError) -> Self
+impl core::convert::From<finstack_ai_runtime::services::id_generation::IdGenerationError> for finstack_ai::AgentRunError
+pub fn finstack_ai::AgentRunError::from(finstack_ai_runtime::services::id_generation::IdGenerationError) -> Self
+impl core::error::Error for finstack_ai::AgentRunError
+impl core::fmt::Debug for finstack_ai::AgentRunError
+pub fn finstack_ai::AgentRunError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai::AgentRunError
+pub fn finstack_ai::AgentRunError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub enum finstack_ai::BundleConflict
+pub finstack_ai::BundleConflict::Capability
+pub finstack_ai::BundleConflict::Capability::capability: finstack_ai_kernel::primitives::ids::CapabilityId
+pub finstack_ai::BundleConflict::Component
+pub finstack_ai::BundleConflict::Component::component: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::BundleConflict::HostFeature
+pub finstack_ai::BundleConflict::HostFeature::feature: finstack_ai::HostFeature
+impl core::clone::Clone for finstack_ai::BundleConflict
+pub fn finstack_ai::BundleConflict::clone(&self) -> finstack_ai::BundleConflict
+impl core::cmp::Eq for finstack_ai::BundleConflict
+impl core::cmp::PartialEq for finstack_ai::BundleConflict
+pub fn finstack_ai::BundleConflict::eq(&self, &finstack_ai::BundleConflict) -> bool
+impl core::fmt::Debug for finstack_ai::BundleConflict
+pub fn finstack_ai::BundleConflict::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai::BundleConflict
+impl serde_core::ser::Serialize for finstack_ai::BundleConflict
+pub fn finstack_ai::BundleConflict::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai::BundleConflict
+pub fn finstack_ai::BundleConflict::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub enum finstack_ai::BundleRequirement
+pub finstack_ai::BundleRequirement::MinimumFrameworkContract
+pub finstack_ai::BundleRequirement::MinimumFrameworkContract::version: finstack_ai_kernel::primitives::identity::Version
+pub finstack_ai::BundleRequirement::OneOfComponents
+pub finstack_ai::BundleRequirement::OneOfComponents::alternatives: alloc::sync::Arc<[finstack_ai_kernel::primitives::ids::ComponentId]>
+pub finstack_ai::BundleRequirement::OptionalComponent
+pub finstack_ai::BundleRequirement::OptionalComponent::component: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::BundleRequirement::OptionalComponent::version: finstack_ai::VersionRequirement
+pub finstack_ai::BundleRequirement::RequiredCapability
+pub finstack_ai::BundleRequirement::RequiredCapability::capability: finstack_ai_kernel::primitives::ids::CapabilityId
+pub finstack_ai::BundleRequirement::RequiredComponent
+pub finstack_ai::BundleRequirement::RequiredComponent::component: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::BundleRequirement::RequiredComponent::version: finstack_ai::VersionRequirement
+pub finstack_ai::BundleRequirement::RequiredHostFeature
+pub finstack_ai::BundleRequirement::RequiredHostFeature::feature: finstack_ai::HostFeature
+impl core::clone::Clone for finstack_ai::BundleRequirement
+pub fn finstack_ai::BundleRequirement::clone(&self) -> finstack_ai::BundleRequirement
+impl core::cmp::Eq for finstack_ai::BundleRequirement
+impl core::cmp::PartialEq for finstack_ai::BundleRequirement
+pub fn finstack_ai::BundleRequirement::eq(&self, &finstack_ai::BundleRequirement) -> bool
+impl core::fmt::Debug for finstack_ai::BundleRequirement
+pub fn finstack_ai::BundleRequirement::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai::BundleRequirement
+impl serde_core::ser::Serialize for finstack_ai::BundleRequirement
+pub fn finstack_ai::BundleRequirement::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai::BundleRequirement
+pub fn finstack_ai::BundleRequirement::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub enum finstack_ai::BundleResolutionError
+pub finstack_ai::BundleResolutionError::Conflict
+pub finstack_ai::BundleResolutionError::Conflict::item: alloc::sync::Arc<str>
+pub finstack_ai::BundleResolutionError::Invalid
+pub finstack_ai::BundleResolutionError::Invalid::message: alloc::sync::Arc<str>
+pub finstack_ai::BundleResolutionError::LockMismatch
+pub finstack_ai::BundleResolutionError::LockMismatch::message: alloc::sync::Arc<str>
+pub finstack_ai::BundleResolutionError::Missing
+pub finstack_ai::BundleResolutionError::Missing::item: alloc::sync::Arc<str>
+impl finstack_ai::BundleResolutionError
+pub const fn finstack_ai::BundleResolutionError::code(&self) -> &'static str
+impl core::clone::Clone for finstack_ai::BundleResolutionError
+pub fn finstack_ai::BundleResolutionError::clone(&self) -> finstack_ai::BundleResolutionError
+impl core::cmp::Eq for finstack_ai::BundleResolutionError
+impl core::cmp::PartialEq for finstack_ai::BundleResolutionError
+pub fn finstack_ai::BundleResolutionError::eq(&self, &finstack_ai::BundleResolutionError) -> bool
+impl core::error::Error for finstack_ai::BundleResolutionError
+impl core::fmt::Debug for finstack_ai::BundleResolutionError
+pub fn finstack_ai::BundleResolutionError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai::BundleResolutionError
+pub fn finstack_ai::BundleResolutionError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai::BundleResolutionError
+pub enum finstack_ai::ChildRunBridgeError
+pub finstack_ai::ChildRunBridgeError::Failed
+pub finstack_ai::ChildRunBridgeError::Failed::message: alloc::string::String
+pub finstack_ai::ChildRunBridgeError::PlannerRejected
+pub finstack_ai::ChildRunBridgeError::PlannerRejected::message: alloc::string::String
+pub finstack_ai::ChildRunBridgeError::PlannerUnavailable
+pub finstack_ai::ChildRunBridgeError::PlannerUnavailable::message: alloc::string::String
+impl finstack_ai::ChildRunBridgeError
+pub const fn finstack_ai::ChildRunBridgeError::code(&self) -> &'static str
+impl core::clone::Clone for finstack_ai::ChildRunBridgeError
+pub fn finstack_ai::ChildRunBridgeError::clone(&self) -> finstack_ai::ChildRunBridgeError
+impl core::cmp::Eq for finstack_ai::ChildRunBridgeError
+impl core::cmp::PartialEq for finstack_ai::ChildRunBridgeError
+pub fn finstack_ai::ChildRunBridgeError::eq(&self, &finstack_ai::ChildRunBridgeError) -> bool
+impl core::convert::From<finstack_ai::DeferredPlanError> for finstack_ai::ChildRunBridgeError
+pub fn finstack_ai::ChildRunBridgeError::from(finstack_ai::DeferredPlanError) -> Self
+impl core::error::Error for finstack_ai::ChildRunBridgeError
+impl core::fmt::Debug for finstack_ai::ChildRunBridgeError
+pub fn finstack_ai::ChildRunBridgeError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai::ChildRunBridgeError
+pub fn finstack_ai::ChildRunBridgeError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai::ChildRunBridgeError
+pub enum finstack_ai::ChildSettleOutcome
+pub finstack_ai::ChildSettleOutcome::Completed
+pub finstack_ai::ChildSettleOutcome::Failed
+pub finstack_ai::ChildSettleOutcome::Unclaimed
+impl core::clone::Clone for finstack_ai::ChildSettleOutcome
+pub fn finstack_ai::ChildSettleOutcome::clone(&self) -> finstack_ai::ChildSettleOutcome
+impl core::cmp::Eq for finstack_ai::ChildSettleOutcome
+impl core::cmp::PartialEq for finstack_ai::ChildSettleOutcome
+pub fn finstack_ai::ChildSettleOutcome::eq(&self, &finstack_ai::ChildSettleOutcome) -> bool
+impl core::fmt::Debug for finstack_ai::ChildSettleOutcome
+pub fn finstack_ai::ChildSettleOutcome::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai::ChildSettleOutcome
+impl core::marker::StructuralPartialEq for finstack_ai::ChildSettleOutcome
+pub enum finstack_ai::ComponentKind
+pub finstack_ai::ComponentKind::ContextProvider
+pub finstack_ai::ComponentKind::Middleware
+pub finstack_ai::ComponentKind::Model
+pub finstack_ai::ComponentKind::Observer
+pub finstack_ai::ComponentKind::Store
+pub finstack_ai::ComponentKind::Toolset
+impl core::clone::Clone for finstack_ai::ComponentKind
+pub fn finstack_ai::ComponentKind::clone(&self) -> finstack_ai::ComponentKind
+impl core::cmp::Eq for finstack_ai::ComponentKind
+impl core::cmp::Ord for finstack_ai::ComponentKind
+pub fn finstack_ai::ComponentKind::cmp(&self, &finstack_ai::ComponentKind) -> core::cmp::Ordering
+impl core::cmp::PartialEq for finstack_ai::ComponentKind
+pub fn finstack_ai::ComponentKind::eq(&self, &finstack_ai::ComponentKind) -> bool
+impl core::cmp::PartialOrd for finstack_ai::ComponentKind
+pub fn finstack_ai::ComponentKind::partial_cmp(&self, &finstack_ai::ComponentKind) -> core::option::Option<core::cmp::Ordering>
+impl core::convert::From<finstack_ai::ComponentKind> for finstack_ai::LockedComponentKind
+pub fn finstack_ai::LockedComponentKind::from(finstack_ai::ComponentKind) -> Self
+impl core::fmt::Debug for finstack_ai::ComponentKind
+pub fn finstack_ai::ComponentKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai::ComponentKind
+pub fn finstack_ai::ComponentKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for finstack_ai::ComponentKind
+pub fn finstack_ai::ComponentKind::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for finstack_ai::ComponentKind
+impl core::marker::StructuralPartialEq for finstack_ai::ComponentKind
+pub enum finstack_ai::ComponentSelector
+pub finstack_ai::ComponentSelector::Alias
+pub finstack_ai::ComponentSelector::Alias::alias: finstack_ai::ComponentAlias
+pub finstack_ai::ComponentSelector::Alias::version: core::option::Option<finstack_ai_kernel::primitives::identity::Version>
+pub finstack_ai::ComponentSelector::Component(finstack_ai_kernel::primitives::identity::ComponentRef)
+impl core::clone::Clone for finstack_ai::ComponentSelector
+pub fn finstack_ai::ComponentSelector::clone(&self) -> finstack_ai::ComponentSelector
+impl core::cmp::Eq for finstack_ai::ComponentSelector
+impl core::cmp::PartialEq for finstack_ai::ComponentSelector
+pub fn finstack_ai::ComponentSelector::eq(&self, &finstack_ai::ComponentSelector) -> bool
+impl core::fmt::Debug for finstack_ai::ComponentSelector
+pub fn finstack_ai::ComponentSelector::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai::ComponentSelector
+pub enum finstack_ai::DeferredPlanError
+pub finstack_ai::DeferredPlanError::Rejected
+pub finstack_ai::DeferredPlanError::Rejected::message: alloc::string::String
+pub finstack_ai::DeferredPlanError::Unavailable
+pub finstack_ai::DeferredPlanError::Unavailable::message: alloc::string::String
+impl core::clone::Clone for finstack_ai::DeferredPlanError
+pub fn finstack_ai::DeferredPlanError::clone(&self) -> finstack_ai::DeferredPlanError
+impl core::cmp::Eq for finstack_ai::DeferredPlanError
+impl core::cmp::PartialEq for finstack_ai::DeferredPlanError
+pub fn finstack_ai::DeferredPlanError::eq(&self, &finstack_ai::DeferredPlanError) -> bool
+impl core::convert::From<finstack_ai::DeferredPlanError> for finstack_ai::ChildRunBridgeError
+pub fn finstack_ai::ChildRunBridgeError::from(finstack_ai::DeferredPlanError) -> Self
+impl core::error::Error for finstack_ai::DeferredPlanError
+impl core::fmt::Debug for finstack_ai::DeferredPlanError
+pub fn finstack_ai::DeferredPlanError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai::DeferredPlanError
+pub fn finstack_ai::DeferredPlanError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai::DeferredPlanError
+pub enum finstack_ai::DuplicatePolicy
+pub finstack_ai::DuplicatePolicy::Reject
+pub finstack_ai::DuplicatePolicy::Replace
+pub finstack_ai::DuplicatePolicy::Replace::expected_source: finstack_ai_kernel::primitives::ids::ComponentId
+impl core::clone::Clone for finstack_ai::DuplicatePolicy
+pub fn finstack_ai::DuplicatePolicy::clone(&self) -> finstack_ai::DuplicatePolicy
+impl core::cmp::Eq for finstack_ai::DuplicatePolicy
+impl core::cmp::PartialEq for finstack_ai::DuplicatePolicy
+pub fn finstack_ai::DuplicatePolicy::eq(&self, &finstack_ai::DuplicatePolicy) -> bool
+impl core::fmt::Debug for finstack_ai::DuplicatePolicy
+pub fn finstack_ai::DuplicatePolicy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai::DuplicatePolicy
+pub enum finstack_ai::ExtensionTrust
+pub finstack_ai::ExtensionTrust::TrustedInProcess
+impl core::clone::Clone for finstack_ai::ExtensionTrust
+pub fn finstack_ai::ExtensionTrust::clone(&self) -> finstack_ai::ExtensionTrust
+impl core::cmp::Eq for finstack_ai::ExtensionTrust
+impl core::cmp::PartialEq for finstack_ai::ExtensionTrust
+pub fn finstack_ai::ExtensionTrust::eq(&self, &finstack_ai::ExtensionTrust) -> bool
+impl core::fmt::Debug for finstack_ai::ExtensionTrust
+pub fn finstack_ai::ExtensionTrust::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai::ExtensionTrust
+impl core::marker::StructuralPartialEq for finstack_ai::ExtensionTrust
+pub enum finstack_ai::HostFeature
+pub finstack_ai::HostFeature::AgentInvoker
+pub finstack_ai::HostFeature::ArtifactStore
+pub finstack_ai::HostFeature::BudgetLedger
+pub finstack_ai::HostFeature::Custom
+pub finstack_ai::HostFeature::Custom::id: finstack_ai_kernel::primitives::ids::ComponentId
+impl core::clone::Clone for finstack_ai::HostFeature
+pub fn finstack_ai::HostFeature::clone(&self) -> finstack_ai::HostFeature
+impl core::cmp::Eq for finstack_ai::HostFeature
+impl core::cmp::Ord for finstack_ai::HostFeature
+pub fn finstack_ai::HostFeature::cmp(&self, &finstack_ai::HostFeature) -> core::cmp::Ordering
+impl core::cmp::PartialEq for finstack_ai::HostFeature
+pub fn finstack_ai::HostFeature::eq(&self, &finstack_ai::HostFeature) -> bool
+impl core::cmp::PartialOrd for finstack_ai::HostFeature
+pub fn finstack_ai::HostFeature::partial_cmp(&self, &finstack_ai::HostFeature) -> core::option::Option<core::cmp::Ordering>
+impl core::fmt::Debug for finstack_ai::HostFeature
+pub fn finstack_ai::HostFeature::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai::HostFeature
+impl serde_core::ser::Serialize for finstack_ai::HostFeature
+pub fn finstack_ai::HostFeature::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai::HostFeature
+pub fn finstack_ai::HostFeature::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub enum finstack_ai::LinkedProviderSpec
+pub finstack_ai::LinkedProviderSpec::Anthropic(finstack_ai::AnthropicAgentSpec)
+pub finstack_ai::LinkedProviderSpec::Gateway(finstack_ai::GatewayAgentSpec)
+pub finstack_ai::LinkedProviderSpec::Gemini(finstack_ai::GeminiAgentSpec)
+pub finstack_ai::LinkedProviderSpec::Ollama(finstack_ai::OllamaAgentSpec)
+pub finstack_ai::LinkedProviderSpec::OpenAi(finstack_ai::OpenAiAgentSpec)
+pub finstack_ai::LinkedProviderSpec::OpenRouter(finstack_ai::OpenRouterAgentSpec)
+pub enum finstack_ai::LockedComponentKind
+pub finstack_ai::LockedComponentKind::ContextProvider
+pub finstack_ai::LockedComponentKind::Middleware
+pub finstack_ai::LockedComponentKind::Model
+pub finstack_ai::LockedComponentKind::Observer
+pub finstack_ai::LockedComponentKind::Store
+pub finstack_ai::LockedComponentKind::Toolset
+impl core::clone::Clone for finstack_ai::LockedComponentKind
+pub fn finstack_ai::LockedComponentKind::clone(&self) -> finstack_ai::LockedComponentKind
+impl core::cmp::Eq for finstack_ai::LockedComponentKind
+impl core::cmp::PartialEq for finstack_ai::LockedComponentKind
+pub fn finstack_ai::LockedComponentKind::eq(&self, &finstack_ai::LockedComponentKind) -> bool
+impl core::convert::From<finstack_ai::ComponentKind> for finstack_ai::LockedComponentKind
+pub fn finstack_ai::LockedComponentKind::from(finstack_ai::ComponentKind) -> Self
+impl core::fmt::Debug for finstack_ai::LockedComponentKind
+pub fn finstack_ai::LockedComponentKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai::LockedComponentKind
+impl core::marker::StructuralPartialEq for finstack_ai::LockedComponentKind
+impl serde_core::ser::Serialize for finstack_ai::LockedComponentKind
+pub fn finstack_ai::LockedComponentKind::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai::LockedComponentKind
+pub fn finstack_ai::LockedComponentKind::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub enum finstack_ai::RegistrationError
+pub finstack_ai::RegistrationError::AliasConflict
+pub finstack_ai::RegistrationError::AliasConflict::alias: finstack_ai::ComponentAlias
+pub finstack_ai::RegistrationError::AliasConflict::attempted_source: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::RegistrationError::AliasConflict::component: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::RegistrationError::AliasConflict::existing_component: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::RegistrationError::AliasConflict::existing_source: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::RegistrationError::AliasLimit
+pub finstack_ai::RegistrationError::AliasLimit::component: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::RegistrationError::AliasLimit::limit: usize
+pub finstack_ai::RegistrationError::ComponentLimit
+pub finstack_ai::RegistrationError::ComponentLimit::limit: usize
+pub finstack_ai::RegistrationError::Duplicate
+pub finstack_ai::RegistrationError::Duplicate::attempted_source: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::RegistrationError::Duplicate::component: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::RegistrationError::Duplicate::existing_source: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::RegistrationError::Duplicate::kind: finstack_ai::ComponentKind
+pub finstack_ai::RegistrationError::InvalidDescriptor
+pub finstack_ai::RegistrationError::InvalidDescriptor::message: alloc::sync::Arc<str>
+pub finstack_ai::RegistrationError::Reentrant
+pub finstack_ai::RegistrationError::ReplacementRejected
+pub finstack_ai::RegistrationError::ReplacementRejected::actual_kind: core::option::Option<finstack_ai::ComponentKind>
+pub finstack_ai::RegistrationError::ReplacementRejected::actual_source: core::option::Option<finstack_ai_kernel::primitives::ids::ComponentId>
+pub finstack_ai::RegistrationError::ReplacementRejected::attempted_kind: finstack_ai::ComponentKind
+pub finstack_ai::RegistrationError::ReplacementRejected::attempted_source: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::RegistrationError::ReplacementRejected::component: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::RegistrationError::ReplacementRejected::expected_source: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::RegistrationError::SourceDuplicate
+pub finstack_ai::RegistrationError::SourceDuplicate::extension_source: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::RegistrationError::SourceRequired
+impl finstack_ai::RegistrationError
+pub const fn finstack_ai::RegistrationError::code(&self) -> &'static str
+impl core::clone::Clone for finstack_ai::RegistrationError
+pub fn finstack_ai::RegistrationError::clone(&self) -> finstack_ai::RegistrationError
+impl core::cmp::Eq for finstack_ai::RegistrationError
+impl core::cmp::PartialEq for finstack_ai::RegistrationError
+pub fn finstack_ai::RegistrationError::eq(&self, &finstack_ai::RegistrationError) -> bool
+impl core::error::Error for finstack_ai::RegistrationError
+impl core::fmt::Debug for finstack_ai::RegistrationError
+pub fn finstack_ai::RegistrationError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai::RegistrationError
+pub fn finstack_ai::RegistrationError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai::RegistrationError
+pub enum finstack_ai::ResolutionDiagnosticKind
+pub finstack_ai::ResolutionDiagnosticKind::AliasExpanded
+pub finstack_ai::ResolutionDiagnosticKind::CachedFactoryReused
+pub finstack_ai::ResolutionDiagnosticKind::FactoryConstructed
+pub finstack_ai::ResolutionDiagnosticKind::ReadyConfigurationIgnored
+pub finstack_ai::ResolutionDiagnosticKind::ReadySelected
+pub finstack_ai::ResolutionDiagnosticKind::UnusedConfiguration
+impl core::clone::Clone for finstack_ai::ResolutionDiagnosticKind
+pub fn finstack_ai::ResolutionDiagnosticKind::clone(&self) -> finstack_ai::ResolutionDiagnosticKind
+impl core::cmp::Eq for finstack_ai::ResolutionDiagnosticKind
+impl core::cmp::PartialEq for finstack_ai::ResolutionDiagnosticKind
+pub fn finstack_ai::ResolutionDiagnosticKind::eq(&self, &finstack_ai::ResolutionDiagnosticKind) -> bool
+impl core::fmt::Debug for finstack_ai::ResolutionDiagnosticKind
+pub fn finstack_ai::ResolutionDiagnosticKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai::ResolutionDiagnosticKind
+impl core::marker::StructuralPartialEq for finstack_ai::ResolutionDiagnosticKind
+pub enum finstack_ai::ResultDecodeError
+pub finstack_ai::ResultDecodeError::InvalidValue
+pub finstack_ai::ResultDecodeError::InvalidValue::message: alloc::string::String
+pub finstack_ai::ResultDecodeError::InvalidValue::path: alloc::string::String
+pub finstack_ai::ResultDecodeError::SchemaMismatch
+pub finstack_ai::ResultDecodeError::SchemaMismatch::committed: finstack_ai_kernel::primitives::digest::Digest
+pub finstack_ai::ResultDecodeError::SchemaMismatch::expected: finstack_ai_kernel::primitives::digest::Digest
+pub finstack_ai::ResultDecodeError::ValueDigestMismatch
+pub finstack_ai::ResultDecodeError::ValueDigestMismatch::actual: finstack_ai_kernel::primitives::digest::Digest
+pub finstack_ai::ResultDecodeError::ValueDigestMismatch::expected: finstack_ai_kernel::primitives::digest::Digest
+impl finstack_ai::ResultDecodeError
+pub const fn finstack_ai::ResultDecodeError::code(&self) -> &'static str
+impl core::clone::Clone for finstack_ai::ResultDecodeError
+pub fn finstack_ai::ResultDecodeError::clone(&self) -> finstack_ai::ResultDecodeError
+impl core::cmp::Eq for finstack_ai::ResultDecodeError
+impl core::cmp::PartialEq for finstack_ai::ResultDecodeError
+pub fn finstack_ai::ResultDecodeError::eq(&self, &finstack_ai::ResultDecodeError) -> bool
+impl core::error::Error for finstack_ai::ResultDecodeError
+impl core::fmt::Debug for finstack_ai::ResultDecodeError
+pub fn finstack_ai::ResultDecodeError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai::ResultDecodeError
+pub fn finstack_ai::ResultDecodeError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai::ResultDecodeError
+pub enum finstack_ai::VersionRequirement
+pub finstack_ai::VersionRequirement::CompatibleMajor
+pub finstack_ai::VersionRequirement::CompatibleMajor::major: u16
+pub finstack_ai::VersionRequirement::Exact
+pub finstack_ai::VersionRequirement::Exact::version: finstack_ai_kernel::primitives::identity::Version
+pub finstack_ai::VersionRequirement::Range
+pub finstack_ai::VersionRequirement::Range::max_exclusive: finstack_ai_kernel::primitives::identity::Version
+pub finstack_ai::VersionRequirement::Range::min_inclusive: finstack_ai_kernel::primitives::identity::Version
+impl core::clone::Clone for finstack_ai::VersionRequirement
+pub fn finstack_ai::VersionRequirement::clone(&self) -> finstack_ai::VersionRequirement
+impl core::cmp::Eq for finstack_ai::VersionRequirement
+impl core::cmp::PartialEq for finstack_ai::VersionRequirement
+pub fn finstack_ai::VersionRequirement::eq(&self, &finstack_ai::VersionRequirement) -> bool
+impl core::fmt::Debug for finstack_ai::VersionRequirement
+pub fn finstack_ai::VersionRequirement::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai::VersionRequirement
+impl serde_core::ser::Serialize for finstack_ai::VersionRequirement
+pub fn finstack_ai::VersionRequirement::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai::VersionRequirement
+pub fn finstack_ai::VersionRequirement::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai::Agent
+impl finstack_ai::Agent
+pub fn finstack_ai::Agent::builder(finstack_ai_kernel::primitives::ids::AgentId, finstack_ai_kernel::primitives::ids::BundleId, (finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::model::port::Model>), (finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::journal::JournalStore>)) -> finstack_ai::NativeAgentBuilder
+pub fn finstack_ai::Agent::capability_catalog(&self) -> alloc::vec::Vec<finstack_ai::CapabilityCatalogEntry>
+pub fn finstack_ai::Agent::compact_capability_catalog(&self) -> alloc::string::String
+pub async fn finstack_ai::Agent::inspect_session(&self, finstack_ai_kernel::primitives::ids::SessionId) -> core::result::Result<finstack_ai_runtime::services::session_inspect::SessionInspectSnapshot, finstack_ai_runtime::services::session::SessionError>
+pub fn finstack_ai::Agent::journal_store(&self) -> alloc::sync::Arc<dyn finstack_ai_runtime::ports::journal::JournalStore>
+pub async fn finstack_ai::Agent::re_resolve(&self) -> core::result::Result<Self, finstack_ai::AgentRunError>
+pub fn finstack_ai::Agent::resolved(&self) -> &alloc::sync::Arc<finstack_ai::ResolvedAgent>
+pub async fn finstack_ai::Agent::run(&self, finstack_ai::AgentRunRequest) -> core::result::Result<finstack_ai::AgentRunOutput, finstack_ai::AgentRunError>
+pub fn finstack_ai::Agent::start(&self, finstack_ai::AgentRunRequest) -> core::result::Result<finstack_ai::AgentRun, finstack_ai::AgentRunError>
+pub fn finstack_ai::Agent::try_from_resolved(alloc::sync::Arc<finstack_ai::ResolvedAgent>) -> core::result::Result<Self, finstack_ai::AgentRunError>
+pub fn finstack_ai::Agent::try_with_output_schema(self, &finstack_ai_kernel::primitives::raw_json::RawJson) -> core::result::Result<Self, finstack_ai::AgentRunError>
+pub fn finstack_ai::Agent::with_history_cache_policy(self, finstack_ai::HistoryCachePolicy) -> Self
+pub async fn finstack_ai::Agent::with_limits(&self, finstack_ai_kernel::records::policy::limits::RunLimits) -> core::result::Result<Self, finstack_ai::AgentRunError>
+impl finstack_ai::Agent
+pub async fn finstack_ai::Agent::linked(finstack_ai::LinkedProviderSpec) -> core::result::Result<finstack_ai::LinkedAgent, finstack_ai::AgentRunError>
+impl core::clone::Clone for finstack_ai::Agent
+pub fn finstack_ai::Agent::clone(&self) -> finstack_ai::Agent
+pub struct finstack_ai::AgentComponentSelection
+pub finstack_ai::AgentComponentSelection::context_providers: alloc::sync::Arc<[finstack_ai::ComponentSelector]>
+pub finstack_ai::AgentComponentSelection::middleware: alloc::sync::Arc<[finstack_ai::ComponentSelector]>
+pub finstack_ai::AgentComponentSelection::model: finstack_ai::ComponentSelector
+pub finstack_ai::AgentComponentSelection::observers: alloc::sync::Arc<[finstack_ai::ComponentSelector]>
+pub finstack_ai::AgentComponentSelection::store: finstack_ai::ComponentSelector
+pub finstack_ai::AgentComponentSelection::toolsets: alloc::sync::Arc<[finstack_ai::ComponentSelector]>
+impl finstack_ai::AgentComponentSelection
+pub fn finstack_ai::AgentComponentSelection::new(finstack_ai::ComponentSelector, finstack_ai::ComponentSelector) -> Self
+impl core::clone::Clone for finstack_ai::AgentComponentSelection
+pub fn finstack_ai::AgentComponentSelection::clone(&self) -> finstack_ai::AgentComponentSelection
+impl core::cmp::Eq for finstack_ai::AgentComponentSelection
+impl core::cmp::PartialEq for finstack_ai::AgentComponentSelection
+pub fn finstack_ai::AgentComponentSelection::eq(&self, &finstack_ai::AgentComponentSelection) -> bool
+impl core::fmt::Debug for finstack_ai::AgentComponentSelection
+pub fn finstack_ai::AgentComponentSelection::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai::AgentComponentSelection
+pub struct finstack_ai::AgentConstructionContext
+pub finstack_ai::AgentConstructionContext::cancellation: finstack_ai_runtime::ports::model::context::CancellationSignal
+pub finstack_ai::AgentConstructionContext::deadline: core::option::Option<finstack_ai_kernel::primitives::time::Timestamp>
+pub finstack_ai::AgentConstructionContext::metadata: finstack_ai_kernel::primitives::raw_json::Metadata
+impl finstack_ai::AgentConstructionContext
+pub fn finstack_ai::AgentConstructionContext::new() -> Self
+impl core::clone::Clone for finstack_ai::AgentConstructionContext
+pub fn finstack_ai::AgentConstructionContext::clone(&self) -> finstack_ai::AgentConstructionContext
+impl core::default::Default for finstack_ai::AgentConstructionContext
+pub fn finstack_ai::AgentConstructionContext::default() -> Self
+impl core::fmt::Debug for finstack_ai::AgentConstructionContext
+pub fn finstack_ai::AgentConstructionContext::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct finstack_ai::AgentRun
+impl finstack_ai::AgentRun
+pub async fn finstack_ai::AgentRun::accept_child(&self, &finstack_ai_kernel::records::run::child::ChildRunPrepared, &finstack_ai::Agent, finstack_ai::AgentRunRequest) -> core::result::Result<Self, finstack_ai::AgentRunError>
+pub async fn finstack_ai::AgentRun::cancel_child_locator(&self, &finstack_ai_kernel::records::run::child::ChildRunLocator) -> core::result::Result<(), finstack_ai::AgentRunError>
+pub async fn finstack_ai::AgentRun::complete_external(&self, finstack_ai_kernel::records::run::external::ExternalEffectCompletionCommand) -> core::result::Result<finstack_ai_runtime::driver::ingress::types::ExternalRouteOutcome, finstack_ai::AgentRunError>
+pub async fn finstack_ai::AgentRun::prepare_child(&self, &finstack_ai::Agent, finstack_ai::AgentRunRequest, finstack_ai_kernel::records::run::child::ChildPlacement, core::option::Option<finstack_ai::RemoteChildRouteSpec>) -> core::result::Result<finstack_ai_kernel::records::run::child::ChildRunPrepared, finstack_ai::AgentRunError>
+pub async fn finstack_ai::AgentRun::start_child(&self, &finstack_ai::Agent, finstack_ai::AgentRunRequest, finstack_ai_kernel::records::run::child::ChildPlacement, core::option::Option<finstack_ai::RemoteChildRouteSpec>) -> core::result::Result<Self, finstack_ai::AgentRunError>
+pub async fn finstack_ai::AgentRun::start_or_attach_child(&self, alloc::sync::Arc<dyn finstack_ai_runtime::services::agent_invoker::AgentInvoker>, finstack_ai_kernel::primitives::ids::EffectId, finstack_ai_runtime::services::agent_invoker::ChildRunRequest) -> core::result::Result<finstack_ai_runtime::services::agent_invoker::ChildRunHandle, finstack_ai::AgentRunError>
+impl finstack_ai::AgentRun
+pub async fn finstack_ai::AgentRun::cancel(&self) -> core::result::Result<(), finstack_ai::AgentRunError>
+pub fn finstack_ai::AgentRun::close_events(&self)
+pub async fn finstack_ai::AgentRun::list_interactions(&self) -> core::result::Result<alloc::vec::Vec<finstack_ai_kernel::effects::interaction::InteractionRequest>, finstack_ai::AgentRunError>
+pub async fn finstack_ai::AgentRun::live_state(&self) -> core::result::Result<finstack_ai_runtime::exec::live_state::LiveRunState, finstack_ai::AgentRunError>
+pub fn finstack_ai::AgentRun::locator(&self) -> &finstack_ai_kernel::records::run::external::OperationLocator
+pub async fn finstack_ai::AgentRun::next_event_batch(&self) -> core::result::Result<core::option::Option<finstack_ai_runtime::exec::event_hub::EventBatch>, finstack_ai::AgentRunError>
+pub async fn finstack_ai::AgentRun::observer_diagnostics(&self) -> core::result::Result<finstack_ai_runtime::ports::observer::ObserverDiagnostics, finstack_ai::AgentRunError>
+pub async fn finstack_ai::AgentRun::resolve_interaction(&self, finstack_ai_kernel::effects::interaction::InteractionResolution) -> core::result::Result<(), finstack_ai::AgentRunError>
+pub async fn finstack_ai::AgentRun::result(&self) -> core::result::Result<finstack_ai::AgentRunOutput, finstack_ai::AgentRunError>
+pub fn finstack_ai::AgentRun::session(&self) -> finstack_ai::Session
+pub async fn finstack_ai::AgentRun::wait_for_live_state(&self, u64) -> core::result::Result<finstack_ai_runtime::exec::live_state::LiveRunState, finstack_ai::AgentRunError>
+impl core::clone::Clone for finstack_ai::AgentRun
+pub fn finstack_ai::AgentRun::clone(&self) -> finstack_ai::AgentRun
+pub struct finstack_ai::AgentRunOutput
+pub finstack_ai::AgentRunOutput::active_capabilities: alloc::sync::Arc<[finstack_ai_kernel::records::policy::capabilities::ActiveCapability]>
+pub finstack_ai::AgentRunOutput::locator: finstack_ai_kernel::records::run::external::OperationLocator
+pub finstack_ai::AgentRunOutput::message: finstack_ai_kernel::conversation::message::Message
+pub finstack_ai::AgentRunOutput::record_kinds: alloc::sync::Arc<[alloc::sync::Arc<str>]>
+pub finstack_ai::AgentRunOutput::retry_attempts: u32
+impl finstack_ai::AgentRunOutput
+pub fn finstack_ai::AgentRunOutput::active_capabilities(&self) -> &[finstack_ai_kernel::records::policy::capabilities::ActiveCapability]
+pub fn finstack_ai::AgentRunOutput::record_kinds(&self) -> &[alloc::sync::Arc<str>]
+pub const fn finstack_ai::AgentRunOutput::retry_attempts(&self) -> u32
+pub fn finstack_ai::AgentRunOutput::structured_json(&self) -> core::option::Option<&finstack_ai_kernel::primitives::raw_json::RawJson>
+pub fn finstack_ai::AgentRunOutput::text(&self) -> alloc::string::String
+impl core::clone::Clone for finstack_ai::AgentRunOutput
+pub fn finstack_ai::AgentRunOutput::clone(&self) -> finstack_ai::AgentRunOutput
+impl core::cmp::Eq for finstack_ai::AgentRunOutput
+impl core::cmp::PartialEq for finstack_ai::AgentRunOutput
+pub fn finstack_ai::AgentRunOutput::eq(&self, &finstack_ai::AgentRunOutput) -> bool
+impl core::fmt::Debug for finstack_ai::AgentRunOutput
+pub fn finstack_ai::AgentRunOutput::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai::AgentRunOutput
+pub struct finstack_ai::AgentRunRequest
+pub finstack_ai::AgentRunRequest::attachments: alloc::sync::Arc<[finstack_ai::AttachmentInput]>
+pub finstack_ai::AgentRunRequest::capability: core::option::Option<finstack_ai_kernel::primitives::ids::CapabilityId>
+pub finstack_ai::AgentRunRequest::input: alloc::sync::Arc<str>
+pub finstack_ai::AgentRunRequest::max_cycles: u64
+pub finstack_ai::AgentRunRequest::max_output_retries: u32
+pub finstack_ai::AgentRunRequest::model: finstack_ai_runtime::ports::model::identity::ModelName
+pub finstack_ai::AgentRunRequest::security: finstack_ai_kernel::records::run::security::RunSecurityContext
+pub finstack_ai::AgentRunRequest::settings: finstack_ai_runtime::ports::model::request::ModelSettings
+pub finstack_ai::AgentRunRequest::timeout: core::time::Duration
+impl finstack_ai::AgentRunRequest
+pub fn finstack_ai::AgentRunRequest::try_new(finstack_ai_runtime::ports::model::identity::ModelName, impl core::convert::Into<alloc::sync::Arc<str>>, finstack_ai_kernel::records::run::security::RunSecurityContext) -> core::result::Result<Self, finstack_ai::AgentRunError>
+impl core::clone::Clone for finstack_ai::AgentRunRequest
+pub fn finstack_ai::AgentRunRequest::clone(&self) -> finstack_ai::AgentRunRequest
+impl core::fmt::Debug for finstack_ai::AgentRunRequest
+pub fn finstack_ai::AgentRunRequest::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct finstack_ai::AnthropicAgentSpec
+pub finstack_ai::AnthropicAgentSpec::api_key: core::option::Option<alloc::string::String>
+pub finstack_ai::AnthropicAgentSpec::base_url: alloc::string::String
+pub finstack_ai::AnthropicAgentSpec::common: finstack_ai::LinkedCommon
+pub finstack_ai::AnthropicAgentSpec::model: alloc::string::String
+pub struct finstack_ai::AttachmentInput
+pub finstack_ai::AttachmentInput::artifact: finstack_ai_kernel::primitives::handles::ArtifactRef
+impl core::clone::Clone for finstack_ai::AttachmentInput
+pub fn finstack_ai::AttachmentInput::clone(&self) -> finstack_ai::AttachmentInput
+impl core::fmt::Debug for finstack_ai::AttachmentInput
+pub fn finstack_ai::AttachmentInput::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct finstack_ai::BundleCatalog
+impl finstack_ai::BundleCatalog
+pub fn finstack_ai::BundleCatalog::bundle(&self, &finstack_ai_kernel::primitives::ids::BundleId) -> core::option::Option<alloc::sync::Arc<finstack_ai::BundleSpec>>
+pub fn finstack_ai::BundleCatalog::install(&mut self, finstack_ai::BundleSpec) -> core::result::Result<(), finstack_ai::BundleResolutionError>
+impl core::default::Default for finstack_ai::BundleCatalog
+pub fn finstack_ai::BundleCatalog::default() -> finstack_ai::BundleCatalog
+pub struct finstack_ai::BundleDefaults
+pub finstack_ai::BundleDefaults::extension_config: alloc::collections::btree::map::BTreeMap<finstack_ai_kernel::primitives::ids::ComponentId, finstack_ai_kernel::primitives::raw_json::RawJson>
+impl core::clone::Clone for finstack_ai::BundleDefaults
+pub fn finstack_ai::BundleDefaults::clone(&self) -> finstack_ai::BundleDefaults
+impl core::cmp::Eq for finstack_ai::BundleDefaults
+impl core::cmp::PartialEq for finstack_ai::BundleDefaults
+pub fn finstack_ai::BundleDefaults::eq(&self, &finstack_ai::BundleDefaults) -> bool
+impl core::default::Default for finstack_ai::BundleDefaults
+pub fn finstack_ai::BundleDefaults::default() -> finstack_ai::BundleDefaults
+impl core::fmt::Debug for finstack_ai::BundleDefaults
+pub fn finstack_ai::BundleDefaults::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai::BundleDefaults
+impl serde_core::ser::Serialize for finstack_ai::BundleDefaults
+pub fn finstack_ai::BundleDefaults::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai::BundleDefaults
+pub fn finstack_ai::BundleDefaults::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai::BundleResolver<'a>
+impl<'a> finstack_ai::BundleResolver<'a>
+pub async fn finstack_ai::BundleResolver<'a>::activate_application(&self, &mut finstack_ai::Registry, &finstack_ai::ResolvedAgent, impl core::iter::traits::collect::IntoIterator<Item = finstack_ai_kernel::primitives::ids::CapabilityId>, finstack_ai::AgentConstructionContext) -> core::result::Result<finstack_ai::ResolvedAgent, finstack_ai::BundleResolutionError>
+pub async fn finstack_ai::BundleResolver<'a>::activate_model(&self, &mut finstack_ai::Registry, &finstack_ai::ResolvedAgent, impl core::iter::traits::collect::IntoIterator<Item = finstack_ai_kernel::primitives::ids::CapabilityId>, finstack_ai::AgentConstructionContext) -> core::result::Result<finstack_ai::ResolvedAgent, finstack_ai::BundleResolutionError>
+pub fn finstack_ai::BundleResolver<'a>::new(&'a finstack_ai::BundleCatalog, finstack_ai_kernel::primitives::identity::Version, alloc::collections::btree::set::BTreeSet<finstack_ai::HostFeature>, finstack_ai::RuntimeServices) -> Self
+pub async fn finstack_ai::BundleResolver<'a>::resolve_agent(&self, &mut finstack_ai::Registry, &finstack_ai_kernel::primitives::ids::BundleId, &finstack_ai_kernel::primitives::ids::AgentId, alloc::collections::btree::map::BTreeMap<finstack_ai_kernel::primitives::ids::ComponentId, finstack_ai_kernel::primitives::raw_json::RawJson>, finstack_ai::AgentConstructionContext) -> core::result::Result<finstack_ai::ResolvedAgent, finstack_ai::BundleResolutionError>
+pub async fn finstack_ai::BundleResolver<'a>::resolve_lock(&self, &mut finstack_ai::Registry, &finstack_ai::ResolvedAgentLock, alloc::collections::btree::map::BTreeMap<finstack_ai_kernel::primitives::ids::ComponentId, finstack_ai_kernel::primitives::raw_json::RawJson>, finstack_ai::AgentConstructionContext) -> core::result::Result<finstack_ai::ResolvedAgent, finstack_ai::BundleResolutionError>
+pub struct finstack_ai::BundleSpec
+pub finstack_ai::BundleSpec::agents: alloc::sync::Arc<[finstack_ai_runtime::spec::AgentSpec]>
+pub finstack_ai::BundleSpec::capabilities: alloc::sync::Arc<[finstack_ai_runtime::spec::CapabilitySpec]>
+pub finstack_ai::BundleSpec::compatibility: finstack_ai::CompatibilityRequirements
+pub finstack_ai::BundleSpec::config_schema: core::option::Option<finstack_ai_kernel::records::policy::agent::SchemaRef>
+pub finstack_ai::BundleSpec::conflicts: alloc::sync::Arc<[finstack_ai::BundleConflict]>
+pub finstack_ai::BundleSpec::defaults: finstack_ai::BundleDefaults
+pub finstack_ai::BundleSpec::id: finstack_ai_kernel::primitives::ids::BundleId
+pub finstack_ai::BundleSpec::requirements: alloc::sync::Arc<[finstack_ai::BundleRequirement]>
+pub finstack_ai::BundleSpec::schema_version: u16
+pub finstack_ai::BundleSpec::version: finstack_ai_kernel::primitives::identity::Version
+impl finstack_ai::BundleSpec
+pub fn finstack_ai::BundleSpec::validate(&self) -> core::result::Result<(), finstack_ai::BundleResolutionError>
+impl core::clone::Clone for finstack_ai::BundleSpec
+pub fn finstack_ai::BundleSpec::clone(&self) -> finstack_ai::BundleSpec
+impl core::cmp::Eq for finstack_ai::BundleSpec
+impl core::cmp::PartialEq for finstack_ai::BundleSpec
+pub fn finstack_ai::BundleSpec::eq(&self, &finstack_ai::BundleSpec) -> bool
+impl core::fmt::Debug for finstack_ai::BundleSpec
+pub fn finstack_ai::BundleSpec::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai::BundleSpec
+impl serde_core::ser::Serialize for finstack_ai::BundleSpec
+pub fn finstack_ai::BundleSpec::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai::BundleSpec
+pub fn finstack_ai::BundleSpec::deserialize<D>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error> where D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai::CapabilityCatalogEntry
+impl finstack_ai::CapabilityCatalogEntry
+pub fn finstack_ai::CapabilityCatalogEntry::description(&self) -> &str
+pub const fn finstack_ai::CapabilityCatalogEntry::id(&self) -> &finstack_ai_kernel::primitives::ids::CapabilityId
+impl core::clone::Clone for finstack_ai::CapabilityCatalogEntry
+pub fn finstack_ai::CapabilityCatalogEntry::clone(&self) -> finstack_ai::CapabilityCatalogEntry
+impl core::cmp::Eq for finstack_ai::CapabilityCatalogEntry
+impl core::cmp::PartialEq for finstack_ai::CapabilityCatalogEntry
+pub fn finstack_ai::CapabilityCatalogEntry::eq(&self, &finstack_ai::CapabilityCatalogEntry) -> bool
+impl core::fmt::Debug for finstack_ai::CapabilityCatalogEntry
+pub fn finstack_ai::CapabilityCatalogEntry::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai::CapabilityCatalogEntry
+pub fn finstack_ai::CapabilityCatalogEntry::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai::CapabilityCatalogEntry
+pub struct finstack_ai::ChildEventContext
+pub finstack_ai::ChildEventContext::child: finstack_ai_kernel::records::run::child::ChildRunLocator
+pub finstack_ai::ChildEventContext::effect_id: finstack_ai_kernel::primitives::ids::EffectId
+pub finstack_ai::ChildEventContext::parent: finstack_ai_kernel::records::run::external::OperationLocator
+impl core::clone::Clone for finstack_ai::ChildEventContext
+pub fn finstack_ai::ChildEventContext::clone(&self) -> finstack_ai::ChildEventContext
+impl core::cmp::Eq for finstack_ai::ChildEventContext
+impl core::cmp::PartialEq for finstack_ai::ChildEventContext
+pub fn finstack_ai::ChildEventContext::eq(&self, &finstack_ai::ChildEventContext) -> bool
+impl core::fmt::Debug for finstack_ai::ChildEventContext
+pub fn finstack_ai::ChildEventContext::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai::ChildEventContext
+pub struct finstack_ai::ChildPlanContext
+pub finstack_ai::ChildPlanContext::deferred: finstack_ai_kernel::effects::lifecycle::EffectDeferred
+pub finstack_ai::ChildPlanContext::parent: finstack_ai_kernel::records::run::external::OperationLocator
+impl core::clone::Clone for finstack_ai::ChildPlanContext
+pub fn finstack_ai::ChildPlanContext::clone(&self) -> finstack_ai::ChildPlanContext
+impl core::cmp::Eq for finstack_ai::ChildPlanContext
+impl core::cmp::PartialEq for finstack_ai::ChildPlanContext
+pub fn finstack_ai::ChildPlanContext::eq(&self, &finstack_ai::ChildPlanContext) -> bool
+impl core::fmt::Debug for finstack_ai::ChildPlanContext
+pub fn finstack_ai::ChildPlanContext::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai::ChildPlanContext
+pub struct finstack_ai::ChildRunBridge
+impl finstack_ai::ChildRunBridge
+pub fn finstack_ai::ChildRunBridge::new(alloc::vec::Vec<alloc::sync::Arc<dyn finstack_ai::DeferredChildPlanner>>, alloc::sync::Arc<dyn finstack_ai_runtime::services::agent_invoker::AgentInvoker>, alloc::sync::Arc<dyn finstack_ai::ChildRunResolver>) -> Self
+pub async fn finstack_ai::ChildRunBridge::recover(&self, &finstack_ai::AgentRun) -> core::result::Result<alloc::vec::Vec<finstack_ai::ChildSettleOutcome>, finstack_ai::ChildRunBridgeError>
+pub async fn finstack_ai::ChildRunBridge::settle(&self, &finstack_ai::AgentRun, &finstack_ai_kernel::effects::lifecycle::EffectDeferred) -> core::result::Result<finstack_ai::ChildSettleOutcome, finstack_ai::ChildRunBridgeError>
+pub fn finstack_ai::ChildRunBridge::with_event_sink(self, alloc::sync::Arc<dyn finstack_ai::ChildEventSink>) -> Self
+pub struct finstack_ai::CompatibilityRequirements
+pub finstack_ai::CompatibilityRequirements::minimum_engine_version: core::option::Option<finstack_ai_kernel::primitives::identity::Version>
+pub finstack_ai::CompatibilityRequirements::required_host_features: alloc::collections::btree::set::BTreeSet<finstack_ai::HostFeature>
+impl core::clone::Clone for finstack_ai::CompatibilityRequirements
+pub fn finstack_ai::CompatibilityRequirements::clone(&self) -> finstack_ai::CompatibilityRequirements
+impl core::cmp::Eq for finstack_ai::CompatibilityRequirements
+impl core::cmp::PartialEq for finstack_ai::CompatibilityRequirements
+pub fn finstack_ai::CompatibilityRequirements::eq(&self, &finstack_ai::CompatibilityRequirements) -> bool
+impl core::default::Default for finstack_ai::CompatibilityRequirements
+pub fn finstack_ai::CompatibilityRequirements::default() -> finstack_ai::CompatibilityRequirements
+impl core::fmt::Debug for finstack_ai::CompatibilityRequirements
+pub fn finstack_ai::CompatibilityRequirements::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai::CompatibilityRequirements
+impl serde_core::ser::Serialize for finstack_ai::CompatibilityRequirements
+pub fn finstack_ai::CompatibilityRequirements::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai::CompatibilityRequirements
+pub fn finstack_ai::CompatibilityRequirements::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai::ComponentAlias(_)
+impl finstack_ai::ComponentAlias
+pub fn finstack_ai::ComponentAlias::as_str(&self) -> &str
+pub fn finstack_ai::ComponentAlias::try_new(impl core::convert::AsRef<str>) -> core::result::Result<Self, finstack_ai::RegistrationError>
+impl core::clone::Clone for finstack_ai::ComponentAlias
+pub fn finstack_ai::ComponentAlias::clone(&self) -> finstack_ai::ComponentAlias
+impl core::cmp::Eq for finstack_ai::ComponentAlias
+impl core::cmp::Ord for finstack_ai::ComponentAlias
+pub fn finstack_ai::ComponentAlias::cmp(&self, &finstack_ai::ComponentAlias) -> core::cmp::Ordering
+impl core::cmp::PartialEq for finstack_ai::ComponentAlias
+pub fn finstack_ai::ComponentAlias::eq(&self, &finstack_ai::ComponentAlias) -> bool
+impl core::cmp::PartialOrd for finstack_ai::ComponentAlias
+pub fn finstack_ai::ComponentAlias::partial_cmp(&self, &finstack_ai::ComponentAlias) -> core::option::Option<core::cmp::Ordering>
+impl core::fmt::Debug for finstack_ai::ComponentAlias
+pub fn finstack_ai::ComponentAlias::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for finstack_ai::ComponentAlias
+pub fn finstack_ai::ComponentAlias::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for finstack_ai::ComponentAlias
+pub fn finstack_ai::ComponentAlias::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::StructuralPartialEq for finstack_ai::ComponentAlias
+pub struct finstack_ai::ExtensionDescriptor
+pub finstack_ai::ExtensionDescriptor::id: finstack_ai_kernel::primitives::ids::ComponentId
+pub finstack_ai::ExtensionDescriptor::trust: finstack_ai::ExtensionTrust
+pub finstack_ai::ExtensionDescriptor::version: finstack_ai_kernel::primitives::identity::Version
+impl finstack_ai::ExtensionDescriptor
+pub const fn finstack_ai::ExtensionDescriptor::trusted_in_process(finstack_ai_kernel::primitives::ids::ComponentId, finstack_ai_kernel::primitives::identity::Version) -> Self
+impl core::clone::Clone for finstack_ai::ExtensionDescriptor
+pub fn finstack_ai::ExtensionDescriptor::clone(&self) -> finstack_ai::ExtensionDescriptor
+impl core::cmp::Eq for finstack_ai::ExtensionDescriptor
+impl core::cmp::PartialEq for finstack_ai::ExtensionDescriptor
+pub fn finstack_ai::ExtensionDescriptor::eq(&self, &finstack_ai::ExtensionDescriptor) -> bool
+impl core::fmt::Debug for finstack_ai::ExtensionDescriptor
+pub fn finstack_ai::ExtensionDescriptor::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai::ExtensionDescriptor
+pub struct finstack_ai::GatewayAgentSpec
+pub finstack_ai::GatewayAgentSpec::api_key: core::option::Option<alloc::string::String>
+pub finstack_ai::GatewayAgentSpec::auth_kind: core::option::Option<alloc::string::String>
+pub finstack_ai::GatewayAgentSpec::common: finstack_ai::LinkedCommon
+pub finstack_ai::GatewayAgentSpec::credential_name: alloc::string::String
+pub finstack_ai::GatewayAgentSpec::endpoint: alloc::string::String
+pub finstack_ai::GatewayAgentSpec::hard_input_bytes: core::option::Option<u64>
+pub finstack_ai::GatewayAgentSpec::model: alloc::string::String
+pub finstack_ai::GatewayAgentSpec::wire_protocol: alloc::string::String
+pub struct finstack_ai::GeminiAgentSpec
+pub finstack_ai::GeminiAgentSpec::api_key: core::option::Option<alloc::string::String>
+pub finstack_ai::GeminiAgentSpec::common: finstack_ai::LinkedCommon
+pub finstack_ai::GeminiAgentSpec::endpoint: alloc::string::String
+pub finstack_ai::GeminiAgentSpec::model: alloc::string::String
+pub struct finstack_ai::HistoryCachePolicy
+impl finstack_ai::HistoryCachePolicy
+pub const finstack_ai::HistoryCachePolicy::DEFAULT_MAX_BYTES: usize
+pub const finstack_ai::HistoryCachePolicy::DEFAULT_MAX_ENTRIES: usize
+pub const finstack_ai::HistoryCachePolicy::MAX_BYTES: usize
+pub const finstack_ai::HistoryCachePolicy::MAX_ENTRIES: usize
+pub const fn finstack_ai::HistoryCachePolicy::disabled() -> Self
+pub const fn finstack_ai::HistoryCachePolicy::max_bytes(self) -> usize
+pub const fn finstack_ai::HistoryCachePolicy::max_entries(self) -> usize
+pub fn finstack_ai::HistoryCachePolicy::try_new(usize, usize) -> core::result::Result<Self, finstack_ai::AgentRunError>
+impl core::clone::Clone for finstack_ai::HistoryCachePolicy
+pub fn finstack_ai::HistoryCachePolicy::clone(&self) -> finstack_ai::HistoryCachePolicy
+impl core::cmp::Eq for finstack_ai::HistoryCachePolicy
+impl core::cmp::PartialEq for finstack_ai::HistoryCachePolicy
+pub fn finstack_ai::HistoryCachePolicy::eq(&self, &finstack_ai::HistoryCachePolicy) -> bool
+impl core::default::Default for finstack_ai::HistoryCachePolicy
+pub fn finstack_ai::HistoryCachePolicy::default() -> Self
+impl core::fmt::Debug for finstack_ai::HistoryCachePolicy
+pub fn finstack_ai::HistoryCachePolicy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai::HistoryCachePolicy
+impl core::marker::StructuralPartialEq for finstack_ai::HistoryCachePolicy
+pub struct finstack_ai::Lane
+impl finstack_ai::Lane
+pub async fn finstack_ai::Lane::append_text(&self, &str) -> core::result::Result<finstack_ai_kernel::primitives::ids::EntryId, finstack_ai_runtime::services::session::SessionError>
+pub async fn finstack_ai::Lane::cancel(&self, finstack_ai_kernel::primitives::identity::PrincipalRef, finstack_ai_kernel::primitives::identity::AuthorizationEvidence) -> core::result::Result<(), finstack_ai_runtime::services::session::SessionError>
+pub async fn finstack_ai::Lane::inspect(&self) -> core::result::Result<finstack_ai_runtime::services::session::LaneInspect, finstack_ai_runtime::services::session::SessionError>
+pub const fn finstack_ai::Lane::lane_id(&self) -> finstack_ai_kernel::primitives::ids::LaneId
+pub async fn finstack_ai::Lane::navigate(&self, finstack_ai_kernel::primitives::ids::EntryId) -> core::result::Result<(), finstack_ai_runtime::services::session::SessionError>
+pub fn finstack_ai::Lane::session(&self) -> &finstack_ai::Session
+impl finstack_ai::Lane
+pub async fn finstack_ai::Lane::resume(&self, &finstack_ai::Agent) -> core::result::Result<(), finstack_ai::AgentRunError>
+pub fn finstack_ai::Lane::run(&self, &finstack_ai::Agent, finstack_ai::AgentRunRequest) -> core::result::Result<finstack_ai::AgentRun, finstack_ai::AgentRunError>
+pub async fn finstack_ai::Lane::suspend(&self) -> core::result::Result<(), finstack_ai_runtime::services::session::SessionError>
+impl core::clone::Clone for finstack_ai::Lane
+pub fn finstack_ai::Lane::clone(&self) -> finstack_ai::Lane
+pub struct finstack_ai::LinkedAgent
+pub finstack_ai::LinkedAgent::agent: finstack_ai::Agent
+pub finstack_ai::LinkedAgent::default_timeout: core::time::Duration
+pub finstack_ai::LinkedAgent::model: finstack_ai_runtime::ports::model::identity::ModelName
+pub finstack_ai::LinkedAgent::settings: finstack_ai_runtime::ports::model::request::ModelSettings
+pub struct finstack_ai::LinkedAgentPorts
+pub finstack_ai::LinkedAgentPorts::artifact_store: core::option::Option<alloc::sync::Arc<dyn finstack_ai_runtime::services::artifact::ArtifactStore>>
+pub finstack_ai::LinkedAgentPorts::context_providers: alloc::vec::Vec<alloc::sync::Arc<dyn finstack_ai_runtime::ports::context::port::ContextProvider>>
+pub finstack_ai::LinkedAgentPorts::middleware: alloc::vec::Vec<alloc::sync::Arc<dyn finstack_ai_runtime::ports::middleware::port::Middleware>>
+pub finstack_ai::LinkedAgentPorts::observers: alloc::vec::Vec<alloc::sync::Arc<dyn finstack_ai_runtime::ports::observer::Observer>>
+pub finstack_ai::LinkedAgentPorts::output_schema: core::option::Option<finstack_ai_kernel::primitives::raw_json::RawJson>
+pub finstack_ai::LinkedAgentPorts::toolsets: alloc::vec::Vec<(finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::tool::port::Toolset>)>
+impl core::default::Default for finstack_ai::LinkedAgentPorts
+pub fn finstack_ai::LinkedAgentPorts::default() -> finstack_ai::LinkedAgentPorts
+pub struct finstack_ai::LinkedCommon
+pub finstack_ai::LinkedCommon::active_capabilities: alloc::vec::Vec<finstack_ai_kernel::primitives::ids::CapabilityId>
+pub finstack_ai::LinkedCommon::approval_grant: finstack_ai_runtime::ports::model::request::ApprovalGrantMode
+pub finstack_ai::LinkedCommon::capabilities: alloc::vec::Vec<finstack_ai_runtime::spec::CapabilitySpec>
+pub finstack_ai::LinkedCommon::child_runs: finstack_ai_runtime::services::agent_invoker::ChildRunPolicy
+pub finstack_ai::LinkedCommon::instruction: core::option::Option<alloc::string::String>
+pub finstack_ai::LinkedCommon::journal_store: core::option::Option<(finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::journal::JournalStore>)>
+pub finstack_ai::LinkedCommon::ports: finstack_ai::LinkedAgentPorts
+impl core::default::Default for finstack_ai::LinkedCommon
+pub fn finstack_ai::LinkedCommon::default() -> finstack_ai::LinkedCommon
+pub struct finstack_ai::LockedBundle
+pub finstack_ai::LockedBundle::id: finstack_ai_kernel::primitives::ids::BundleId
+pub finstack_ai::LockedBundle::version: finstack_ai_kernel::primitives::identity::Version
+impl core::clone::Clone for finstack_ai::LockedBundle
+pub fn finstack_ai::LockedBundle::clone(&self) -> finstack_ai::LockedBundle
+impl core::cmp::Eq for finstack_ai::LockedBundle
+impl core::cmp::PartialEq for finstack_ai::LockedBundle
+pub fn finstack_ai::LockedBundle::eq(&self, &finstack_ai::LockedBundle) -> bool
+impl core::fmt::Debug for finstack_ai::LockedBundle
+pub fn finstack_ai::LockedBundle::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai::LockedBundle
+impl serde_core::ser::Serialize for finstack_ai::LockedBundle
+pub fn finstack_ai::LockedBundle::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai::LockedBundle
+pub fn finstack_ai::LockedBundle::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai::LockedCapability
+pub finstack_ai::LockedCapability::activation: finstack_ai_runtime::spec::CapabilityActivation
+pub finstack_ai::LockedCapability::active: bool
+pub finstack_ai::LockedCapability::bundle: finstack_ai::LockedBundle
+pub finstack_ai::LockedCapability::definition_digest: finstack_ai_kernel::primitives::digest::Digest
+pub finstack_ai::LockedCapability::id: finstack_ai_kernel::primitives::ids::CapabilityId
+impl core::clone::Clone for finstack_ai::LockedCapability
+pub fn finstack_ai::LockedCapability::clone(&self) -> finstack_ai::LockedCapability
+impl core::cmp::Eq for finstack_ai::LockedCapability
+impl core::cmp::PartialEq for finstack_ai::LockedCapability
+pub fn finstack_ai::LockedCapability::eq(&self, &finstack_ai::LockedCapability) -> bool
+impl core::fmt::Debug for finstack_ai::LockedCapability
+pub fn finstack_ai::LockedCapability::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai::LockedCapability
+impl serde_core::ser::Serialize for finstack_ai::LockedCapability
+pub fn finstack_ai::LockedCapability::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai::LockedCapability
+pub fn finstack_ai::LockedCapability::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai::LockedComponent
+pub finstack_ai::LockedComponent::component: finstack_ai_kernel::primitives::identity::ComponentRef
+pub finstack_ai::LockedComponent::config_digest: core::option::Option<finstack_ai_kernel::primitives::digest::Digest>
+pub finstack_ai::LockedComponent::configuration_schema: core::option::Option<finstack_ai_kernel::records::policy::agent::SchemaRef>
+pub finstack_ai::LockedComponent::kind: finstack_ai::LockedComponentKind
+impl core::clone::Clone for finstack_ai::LockedComponent
+pub fn finstack_ai::LockedComponent::clone(&self) -> finstack_ai::LockedComponent
+impl core::cmp::Eq for finstack_ai::LockedComponent
+impl core::cmp::PartialEq for finstack_ai::LockedComponent
+pub fn finstack_ai::LockedComponent::eq(&self, &finstack_ai::LockedComponent) -> bool
+impl core::fmt::Debug for finstack_ai::LockedComponent
+pub fn finstack_ai::LockedComponent::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai::LockedComponent
+impl serde_core::ser::Serialize for finstack_ai::LockedComponent
+pub fn finstack_ai::LockedComponent::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai::LockedComponent
+pub fn finstack_ai::LockedComponent::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai::NativeAgentBuilder
+impl finstack_ai::NativeAgentBuilder
+pub fn finstack_ai::NativeAgentBuilder::activate_application(self, finstack_ai_kernel::primitives::ids::CapabilityId) -> Self
+pub fn finstack_ai::NativeAgentBuilder::artifact_store(self, alloc::sync::Arc<dyn finstack_ai_runtime::services::artifact::ArtifactStore>) -> Self
+pub async fn finstack_ai::NativeAgentBuilder::build(self) -> core::result::Result<finstack_ai::Agent, finstack_ai::AgentRunError>
+pub fn finstack_ai::NativeAgentBuilder::capability(self, finstack_ai_runtime::spec::CapabilitySpec) -> Self
+pub fn finstack_ai::NativeAgentBuilder::capability_activation_host(self, alloc::sync::Arc<finstack_ai::NativeCapabilityHost>) -> Self
+pub fn finstack_ai::NativeAgentBuilder::capability_context_provider(self, alloc::sync::Arc<dyn finstack_ai_runtime::ports::context::port::ContextProvider>) -> Self
+pub fn finstack_ai::NativeAgentBuilder::capability_middleware(self, alloc::sync::Arc<dyn finstack_ai_runtime::ports::middleware::port::Middleware>) -> Self
+pub fn finstack_ai::NativeAgentBuilder::capability_toolset(self, finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::tool::port::Toolset>) -> Self
+pub fn finstack_ai::NativeAgentBuilder::context_provider(self, alloc::sync::Arc<dyn finstack_ai_runtime::ports::context::port::ContextProvider>) -> Self
+pub fn finstack_ai::NativeAgentBuilder::history_cache_policy(self, finstack_ai::HistoryCachePolicy) -> Self
+pub fn finstack_ai::NativeAgentBuilder::limits(self, finstack_ai_kernel::records::policy::limits::RunLimits) -> Self
+pub fn finstack_ai::NativeAgentBuilder::middleware(self, alloc::sync::Arc<dyn finstack_ai_runtime::ports::middleware::port::Middleware>) -> Self
+pub fn finstack_ai::NativeAgentBuilder::observer(self, alloc::sync::Arc<dyn finstack_ai_runtime::ports::observer::Observer>) -> Self
+pub fn finstack_ai::NativeAgentBuilder::policy(self, finstack_ai_runtime::spec::RunPolicy) -> Self
+pub fn finstack_ai::NativeAgentBuilder::toolset(self, finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::tool::port::Toolset>) -> Self
+pub fn finstack_ai::NativeAgentBuilder::try_child_toolset<F, E>(self, finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::services::agent_invoker::AgentInvoker>, F) -> core::result::Result<Self, finstack_ai::AgentRunError> where F: core::ops::function::FnOnce(alloc::sync::Arc<finstack_ai_runtime::services::child_starter::ChildRunStarter>) -> core::result::Result<alloc::sync::Arc<dyn finstack_ai_runtime::ports::tool::port::Toolset>, E>, E: core::fmt::Display
+pub fn finstack_ai::NativeAgentBuilder::try_instruction(self, impl core::convert::Into<alloc::sync::Arc<str>>) -> core::result::Result<Self, finstack_ai::AgentRunError>
+impl finstack_ai::NativeAgentBuilder
+pub async fn finstack_ai::NativeAgentBuilder::build_linked(self, finstack_ai::LinkedCommon, finstack_ai_runtime::ports::model::identity::ModelName, finstack_ai_runtime::ports::model::request::ModelSettings, core::time::Duration) -> core::result::Result<finstack_ai::LinkedAgent, finstack_ai::AgentRunError>
+impl core::clone::Clone for finstack_ai::NativeAgentBuilder
+pub fn finstack_ai::NativeAgentBuilder::clone(&self) -> finstack_ai::NativeAgentBuilder
+impl finstack_ai::Extension for finstack_ai::NativeAgentBuilder
+pub fn finstack_ai::NativeAgentBuilder::descriptor(&self) -> finstack_ai::ExtensionDescriptor
+pub fn finstack_ai::NativeAgentBuilder::register(&self, &mut finstack_ai::Registrar) -> core::result::Result<(), finstack_ai::RegistrationError>
+pub struct finstack_ai::NativeCapabilityHost
+impl finstack_ai::NativeCapabilityHost
+pub fn finstack_ai::NativeCapabilityHost::active(&self, finstack_ai_kernel::primitives::ids::RunId) -> core::result::Result<alloc::vec::Vec<finstack_ai_kernel::records::policy::capabilities::ActiveCapability>, finstack_ai::ActivationHostError>
+pub fn finstack_ai::NativeCapabilityHost::compact_catalog(&self) -> &str
+pub fn finstack_ai::NativeCapabilityHost::lock_digest(&self) -> core::option::Option<finstack_ai_kernel::primitives::digest::Digest>
+pub fn finstack_ai::NativeCapabilityHost::new(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn finstack_ai::NativeCapabilityHost::queue_activation(&self, finstack_ai_kernel::primitives::ids::RunId, alloc::vec::Vec<finstack_ai_kernel::records::policy::capabilities::ActiveCapability>) -> core::result::Result<(), finstack_ai::ActivationHostError>
+pub fn finstack_ai::NativeCapabilityHost::seed_active(&self, finstack_ai_kernel::primitives::ids::RunId, alloc::sync::Arc<[finstack_ai_kernel::records::policy::capabilities::ActiveCapability]>)
+pub fn finstack_ai::NativeCapabilityHost::set_lock_digest(&self, finstack_ai_kernel::primitives::digest::Digest)
+pub fn finstack_ai::NativeCapabilityHost::take_pending(&self, finstack_ai_kernel::primitives::ids::RunId) -> core::option::Option<alloc::vec::Vec<finstack_ai_kernel::records::policy::capabilities::ActiveCapability>>
+impl core::fmt::Debug for finstack_ai::NativeCapabilityHost
+pub fn finstack_ai::NativeCapabilityHost::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct finstack_ai::OllamaAgentSpec
+pub finstack_ai::OllamaAgentSpec::base_url: alloc::string::String
+pub finstack_ai::OllamaAgentSpec::common: finstack_ai::LinkedCommon
+pub finstack_ai::OllamaAgentSpec::model: alloc::string::String
+pub struct finstack_ai::OpenAiAgentSpec
+pub finstack_ai::OpenAiAgentSpec::api_key: alloc::string::String
+pub finstack_ai::OpenAiAgentSpec::common: finstack_ai::LinkedCommon
+pub finstack_ai::OpenAiAgentSpec::model: alloc::string::String
+pub finstack_ai::OpenAiAgentSpec::reasoning_effort: core::option::Option<alloc::string::String>
+pub finstack_ai::OpenAiAgentSpec::reasoning_summary: core::option::Option<alloc::string::String>
+pub struct finstack_ai::OpenRouterAgentSpec
+pub finstack_ai::OpenRouterAgentSpec::api_key: alloc::string::String
+pub finstack_ai::OpenRouterAgentSpec::common: finstack_ai::LinkedCommon
+pub finstack_ai::OpenRouterAgentSpec::model: alloc::string::String
+pub finstack_ai::OpenRouterAgentSpec::reasoning_effort: core::option::Option<alloc::string::String>
+pub finstack_ai::OpenRouterAgentSpec::reasoning_summary: core::option::Option<alloc::string::String>
+pub finstack_ai::OpenRouterAgentSpec::referer: core::option::Option<alloc::string::String>
+pub finstack_ai::OpenRouterAgentSpec::title: core::option::Option<alloc::string::String>
+pub struct finstack_ai::OutstandingDeferral
+pub finstack_ai::OutstandingDeferral::deferred: finstack_ai_kernel::effects::lifecycle::EffectDeferred
+impl core::clone::Clone for finstack_ai::OutstandingDeferral
+pub fn finstack_ai::OutstandingDeferral::clone(&self) -> finstack_ai::OutstandingDeferral
+impl core::cmp::Eq for finstack_ai::OutstandingDeferral
+impl core::cmp::PartialEq for finstack_ai::OutstandingDeferral
+pub fn finstack_ai::OutstandingDeferral::eq(&self, &finstack_ai::OutstandingDeferral) -> bool
+impl core::fmt::Debug for finstack_ai::OutstandingDeferral
+pub fn finstack_ai::OutstandingDeferral::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai::OutstandingDeferral
+pub struct finstack_ai::RegisteredComponentDescriptor
+pub finstack_ai::RegisteredComponentDescriptor::aliases: alloc::sync::Arc<[finstack_ai::ComponentAlias]>
+pub finstack_ai::RegisteredComponentDescriptor::component: finstack_ai_kernel::primitives::identity::ComponentRef
+pub finstack_ai::RegisteredComponentDescriptor::configuration_schema: core::option::Option<finstack_ai_kernel::records::policy::agent::SchemaRef>
+pub finstack_ai::RegisteredComponentDescriptor::kind: finstack_ai::ComponentKind
+pub finstack_ai::RegisteredComponentDescriptor::source: finstack_ai::ExtensionDescriptor
+impl core::clone::Clone for finstack_ai::RegisteredComponentDescriptor
+pub fn finstack_ai::RegisteredComponentDescriptor::clone(&self) -> finstack_ai::RegisteredComponentDescriptor
+impl core::cmp::Eq for finstack_ai::RegisteredComponentDescriptor
+impl core::cmp::PartialEq for finstack_ai::RegisteredComponentDescriptor
+pub fn finstack_ai::RegisteredComponentDescriptor::eq(&self, &finstack_ai::RegisteredComponentDescriptor) -> bool
+impl core::fmt::Debug for finstack_ai::RegisteredComponentDescriptor
+pub fn finstack_ai::RegisteredComponentDescriptor::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai::RegisteredComponentDescriptor
+pub struct finstack_ai::Registrar
+impl finstack_ai::Registrar
+pub fn finstack_ai::Registrar::context_provider(&mut self, finstack_ai::RegistrationMetadata, finstack_ai::registry::ReadyComponent<dyn finstack_ai_runtime::ports::context::port::ContextProvider>) -> core::result::Result<(), finstack_ai::RegistrationError>
+pub fn finstack_ai::Registrar::context_provider_factory(&mut self, finstack_ai::RegistrationMetadata, alloc::sync::Arc<dyn finstack_ai::registry::ComponentFactory<dyn finstack_ai_runtime::ports::context::port::ContextProvider>>) -> core::result::Result<(), finstack_ai::RegistrationError>
+pub fn finstack_ai::Registrar::into_registry(self) -> finstack_ai::Registry
+pub fn finstack_ai::Registrar::middleware(&mut self, finstack_ai::RegistrationMetadata, finstack_ai::registry::ReadyComponent<dyn finstack_ai_runtime::ports::middleware::port::Middleware>) -> core::result::Result<(), finstack_ai::RegistrationError>
+pub fn finstack_ai::Registrar::middleware_factory(&mut self, finstack_ai::RegistrationMetadata, alloc::sync::Arc<dyn finstack_ai::registry::ComponentFactory<dyn finstack_ai_runtime::ports::middleware::port::Middleware>>) -> core::result::Result<(), finstack_ai::RegistrationError>
+pub fn finstack_ai::Registrar::model(&mut self, finstack_ai::RegistrationMetadata, finstack_ai::registry::ReadyComponent<dyn finstack_ai_runtime::ports::model::port::Model>) -> core::result::Result<(), finstack_ai::RegistrationError>
+pub fn finstack_ai::Registrar::model_factory(&mut self, finstack_ai::RegistrationMetadata, alloc::sync::Arc<dyn finstack_ai::registry::ComponentFactory<dyn finstack_ai_runtime::ports::model::port::Model>>) -> core::result::Result<(), finstack_ai::RegistrationError>
+pub const fn finstack_ai::Registrar::new() -> Self
+pub fn finstack_ai::Registrar::observer(&mut self, finstack_ai::RegistrationMetadata, finstack_ai::registry::ReadyComponent<dyn finstack_ai_runtime::ports::observer::Observer>) -> core::result::Result<(), finstack_ai::RegistrationError>
+pub fn finstack_ai::Registrar::observer_factory(&mut self, finstack_ai::RegistrationMetadata, alloc::sync::Arc<dyn finstack_ai::registry::ComponentFactory<dyn finstack_ai_runtime::ports::observer::Observer>>) -> core::result::Result<(), finstack_ai::RegistrationError>
+pub fn finstack_ai::Registrar::register_extension(&mut self, &dyn finstack_ai::Extension) -> core::result::Result<(), finstack_ai::RegistrationError>
+pub fn finstack_ai::Registrar::store(&mut self, finstack_ai::RegistrationMetadata, finstack_ai::registry::ReadyComponent<dyn finstack_ai_runtime::ports::journal::JournalStore>) -> core::result::Result<(), finstack_ai::RegistrationError>
+pub fn finstack_ai::Registrar::store_factory(&mut self, finstack_ai::RegistrationMetadata, alloc::sync::Arc<dyn finstack_ai::registry::ComponentFactory<dyn finstack_ai_runtime::ports::journal::JournalStore>>) -> core::result::Result<(), finstack_ai::RegistrationError>
+pub fn finstack_ai::Registrar::toolset(&mut self, finstack_ai::RegistrationMetadata, finstack_ai::registry::ReadyComponent<dyn finstack_ai_runtime::ports::tool::port::Toolset>) -> core::result::Result<(), finstack_ai::RegistrationError>
+pub fn finstack_ai::Registrar::toolset_factory(&mut self, finstack_ai::RegistrationMetadata, alloc::sync::Arc<dyn finstack_ai::registry::ComponentFactory<dyn finstack_ai_runtime::ports::tool::port::Toolset>>) -> core::result::Result<(), finstack_ai::RegistrationError>
+impl core::default::Default for finstack_ai::Registrar
+pub fn finstack_ai::Registrar::default() -> finstack_ai::Registrar
+pub struct finstack_ai::RegistrationEvent
+pub finstack_ai::RegistrationEvent::component: finstack_ai_kernel::primitives::identity::ComponentRef
+pub finstack_ai::RegistrationEvent::kind: finstack_ai::ComponentKind
+pub finstack_ai::RegistrationEvent::replaced_source: core::option::Option<finstack_ai_kernel::primitives::ids::ComponentId>
+pub finstack_ai::RegistrationEvent::source: finstack_ai_kernel::primitives::ids::ComponentId
+impl core::clone::Clone for finstack_ai::RegistrationEvent
+pub fn finstack_ai::RegistrationEvent::clone(&self) -> finstack_ai::RegistrationEvent
+impl core::cmp::Eq for finstack_ai::RegistrationEvent
+impl core::cmp::PartialEq for finstack_ai::RegistrationEvent
+pub fn finstack_ai::RegistrationEvent::eq(&self, &finstack_ai::RegistrationEvent) -> bool
+impl core::fmt::Debug for finstack_ai::RegistrationEvent
+pub fn finstack_ai::RegistrationEvent::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai::RegistrationEvent
+pub struct finstack_ai::RegistrationMetadata
+impl finstack_ai::RegistrationMetadata
+pub fn finstack_ai::RegistrationMetadata::new(finstack_ai_kernel::primitives::ids::ComponentId, finstack_ai_kernel::primitives::identity::Version) -> Self
+pub fn finstack_ai::RegistrationMetadata::replacing(self, finstack_ai_kernel::primitives::ids::ComponentId) -> Self
+pub fn finstack_ai::RegistrationMetadata::with_alias(self, finstack_ai::ComponentAlias) -> core::result::Result<Self, finstack_ai::RegistrationError>
+pub fn finstack_ai::RegistrationMetadata::with_configuration_schema(self, finstack_ai_kernel::records::policy::agent::SchemaRef) -> Self
+impl core::clone::Clone for finstack_ai::RegistrationMetadata
+pub fn finstack_ai::RegistrationMetadata::clone(&self) -> finstack_ai::RegistrationMetadata
+impl core::cmp::Eq for finstack_ai::RegistrationMetadata
+impl core::cmp::PartialEq for finstack_ai::RegistrationMetadata
+pub fn finstack_ai::RegistrationMetadata::eq(&self, &finstack_ai::RegistrationMetadata) -> bool
+impl core::fmt::Debug for finstack_ai::RegistrationMetadata
+pub fn finstack_ai::RegistrationMetadata::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai::RegistrationMetadata
+pub struct finstack_ai::Registry
+impl finstack_ai::Registry
+pub fn finstack_ai::Registry::registered_component(&self, &finstack_ai_kernel::primitives::ids::ComponentId) -> core::option::Option<&finstack_ai::RegisteredComponentDescriptor>
+pub const fn finstack_ai::Registry::registration_events(&self) -> &alloc::sync::Arc<[finstack_ai::RegistrationEvent]>
+pub async fn finstack_ai::Registry::resolve(&mut self, finstack_ai::ResolveRequest, finstack_ai::AgentConstructionContext) -> core::result::Result<finstack_ai::ResolvedAgent, finstack_ai::AgentBuildError>
+pub struct finstack_ai::RemoteChildRouteSpec
+pub finstack_ai::RemoteChildRouteSpec::endpoint: alloc::string::String
+pub finstack_ai::RemoteChildRouteSpec::route: alloc::string::String
+pub finstack_ai::RemoteChildRouteSpec::service: alloc::string::String
+pub finstack_ai::RemoteChildRouteSpec::token: core::option::Option<alloc::string::String>
+pub struct finstack_ai::RequiredServices
+pub finstack_ai::RequiredServices::agent_invoker: bool
+pub finstack_ai::RequiredServices::artifact_store: bool
+pub finstack_ai::RequiredServices::budget_ledger: bool
+impl core::clone::Clone for finstack_ai::RequiredServices
+pub fn finstack_ai::RequiredServices::clone(&self) -> finstack_ai::RequiredServices
+impl core::cmp::Eq for finstack_ai::RequiredServices
+impl core::cmp::PartialEq for finstack_ai::RequiredServices
+pub fn finstack_ai::RequiredServices::eq(&self, &finstack_ai::RequiredServices) -> bool
+impl core::default::Default for finstack_ai::RequiredServices
+pub fn finstack_ai::RequiredServices::default() -> finstack_ai::RequiredServices
+impl core::fmt::Debug for finstack_ai::RequiredServices
+pub fn finstack_ai::RequiredServices::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai::RequiredServices
+impl core::marker::StructuralPartialEq for finstack_ai::RequiredServices
+impl serde_core::ser::Serialize for finstack_ai::RequiredServices
+pub fn finstack_ai::RequiredServices::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai::RequiredServices
+pub fn finstack_ai::RequiredServices::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai::ResolutionDiagnostic
+pub finstack_ai::ResolutionDiagnostic::alias: core::option::Option<finstack_ai::ComponentAlias>
+pub finstack_ai::ResolutionDiagnostic::component: core::option::Option<finstack_ai_kernel::primitives::identity::ComponentRef>
+pub finstack_ai::ResolutionDiagnostic::kind: finstack_ai::ResolutionDiagnosticKind
+pub finstack_ai::ResolutionDiagnostic::registration_source: core::option::Option<finstack_ai_kernel::primitives::ids::ComponentId>
+pub finstack_ai::ResolutionDiagnostic::request_source: finstack_ai_kernel::primitives::ids::ComponentId
+impl core::clone::Clone for finstack_ai::ResolutionDiagnostic
+pub fn finstack_ai::ResolutionDiagnostic::clone(&self) -> finstack_ai::ResolutionDiagnostic
+impl core::cmp::Eq for finstack_ai::ResolutionDiagnostic
+impl core::cmp::PartialEq for finstack_ai::ResolutionDiagnostic
+pub fn finstack_ai::ResolutionDiagnostic::eq(&self, &finstack_ai::ResolutionDiagnostic) -> bool
+impl core::fmt::Debug for finstack_ai::ResolutionDiagnostic
+pub fn finstack_ai::ResolutionDiagnostic::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai::ResolutionDiagnostic
+pub struct finstack_ai::ResolutionReport
+pub finstack_ai::ResolutionReport::diagnostics: alloc::sync::Arc<[finstack_ai::ResolutionDiagnostic]>
+pub finstack_ai::ResolutionReport::request_source: finstack_ai_kernel::primitives::ids::ComponentId
+impl core::clone::Clone for finstack_ai::ResolutionReport
+pub fn finstack_ai::ResolutionReport::clone(&self) -> finstack_ai::ResolutionReport
+impl core::cmp::Eq for finstack_ai::ResolutionReport
+impl core::cmp::PartialEq for finstack_ai::ResolutionReport
+pub fn finstack_ai::ResolutionReport::eq(&self, &finstack_ai::ResolutionReport) -> bool
+impl core::fmt::Debug for finstack_ai::ResolutionReport
+pub fn finstack_ai::ResolutionReport::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai::ResolutionReport
+pub struct finstack_ai::ResolveRequest
+pub finstack_ai::ResolveRequest::selection: finstack_ai::AgentComponentSelection
+pub finstack_ai::ResolveRequest::source: finstack_ai_kernel::primitives::ids::ComponentId
+impl finstack_ai::ResolveRequest
+pub fn finstack_ai::ResolveRequest::new(finstack_ai_kernel::primitives::ids::ComponentId, finstack_ai::AgentComponentSelection) -> Self
+pub fn finstack_ai::ResolveRequest::with_configuration(self, finstack_ai_kernel::primitives::ids::ComponentId, finstack_ai_kernel::primitives::raw_json::RawJson) -> core::result::Result<Self, finstack_ai::AgentBuildError>
+impl core::clone::Clone for finstack_ai::ResolveRequest
+pub fn finstack_ai::ResolveRequest::clone(&self) -> finstack_ai::ResolveRequest
+impl core::fmt::Debug for finstack_ai::ResolveRequest
+pub fn finstack_ai::ResolveRequest::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct finstack_ai::ResolvedAgent
+impl finstack_ai::ResolvedAgent
+pub async fn finstack_ai::ResolvedAgent::health(&self) -> alloc::sync::Arc<[finstack_ai::registry::ComponentHealthReport]>
+pub fn finstack_ai::ResolvedAgent::lock(&self) -> core::option::Option<&alloc::sync::Arc<finstack_ai::ResolvedAgentLock>>
+pub const fn finstack_ai::ResolvedAgent::resolution_report(&self) -> &finstack_ai::ResolutionReport
+pub fn finstack_ai::ResolvedAgent::run_plan(&self) -> finstack_ai::ResolvedRunPlan
+pub fn finstack_ai::ResolvedAgent::services(&self) -> core::option::Option<&finstack_ai::RuntimeServices>
+pub async fn finstack_ai::ResolvedAgent::shutdown(&self, finstack_ai::AgentConstructionContext) -> alloc::sync::Arc<[finstack_ai::registry::ComponentShutdownReport]>
+pub fn finstack_ai::ResolvedAgent::spec(&self) -> core::option::Option<&alloc::sync::Arc<finstack_ai_runtime::spec::AgentSpec>>
+pub struct finstack_ai::ResolvedAgentLock
+pub finstack_ai::ResolvedAgentLock::agent_spec_digest: finstack_ai_kernel::primitives::digest::Digest
+pub finstack_ai::ResolvedAgentLock::bundle: core::option::Option<finstack_ai::LockedBundle>
+pub finstack_ai::ResolvedAgentLock::capabilities: alloc::sync::Arc<[finstack_ai::LockedCapability]>
+pub finstack_ai::ResolvedAgentLock::components: alloc::sync::Arc<[finstack_ai::LockedComponent]>
+pub finstack_ai::ResolvedAgentLock::effective_config_digest: finstack_ai_kernel::primitives::digest::Digest
+pub finstack_ai::ResolvedAgentLock::engine_version: finstack_ai_kernel::primitives::identity::Version
+pub finstack_ai::ResolvedAgentLock::middleware_chain_digest: finstack_ai_kernel::primitives::digest::Digest
+pub finstack_ai::ResolvedAgentLock::required_services: finstack_ai::RequiredServices
+pub finstack_ai::ResolvedAgentLock::schema_digests: alloc::sync::Arc<[finstack_ai_kernel::primitives::digest::Digest]>
+pub finstack_ai::ResolvedAgentLock::schema_version: u16
+impl finstack_ai::ResolvedAgentLock
+pub fn finstack_ai::ResolvedAgentLock::fingerprint(&self) -> core::result::Result<finstack_ai_kernel::primitives::digest::Digest, finstack_ai::BundleResolutionError>
+pub fn finstack_ai::ResolvedAgentLock::from_json(&[u8]) -> core::result::Result<Self, finstack_ai::BundleResolutionError>
+pub fn finstack_ai::ResolvedAgentLock::to_json(&self) -> core::result::Result<alloc::vec::Vec<u8>, finstack_ai::BundleResolutionError>
+pub fn finstack_ai::ResolvedAgentLock::validate(&self) -> core::result::Result<(), finstack_ai::BundleResolutionError>
+impl core::clone::Clone for finstack_ai::ResolvedAgentLock
+pub fn finstack_ai::ResolvedAgentLock::clone(&self) -> finstack_ai::ResolvedAgentLock
+impl core::cmp::Eq for finstack_ai::ResolvedAgentLock
+impl core::cmp::PartialEq for finstack_ai::ResolvedAgentLock
+pub fn finstack_ai::ResolvedAgentLock::eq(&self, &finstack_ai::ResolvedAgentLock) -> bool
+impl core::fmt::Debug for finstack_ai::ResolvedAgentLock
+pub fn finstack_ai::ResolvedAgentLock::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai::ResolvedAgentLock
+impl serde_core::ser::Serialize for finstack_ai::ResolvedAgentLock
+pub fn finstack_ai::ResolvedAgentLock::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai::ResolvedAgentLock
+pub fn finstack_ai::ResolvedAgentLock::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai::ResolvedComponent<T: ?core::marker::Sized>
+impl<T: ?core::marker::Sized> finstack_ai::ResolvedComponent<T>
+pub const fn finstack_ai::ResolvedComponent<T>::descriptor(&self) -> &finstack_ai::RegisteredComponentDescriptor
+pub const fn finstack_ai::ResolvedComponent<T>::handle(&self) -> &alloc::sync::Arc<T>
+pub fn finstack_ai::ResolvedComponent<T>::shutdown_ownership(&self) -> core::option::Option<finstack_ai::registry::ShutdownOwnership>
+impl<T: ?core::marker::Sized> core::clone::Clone for finstack_ai::ResolvedComponent<T>
+pub fn finstack_ai::ResolvedComponent<T>::clone(&self) -> Self
+pub struct finstack_ai::ResolvedRunPlan
+impl finstack_ai::ResolvedRunPlan
+pub fn finstack_ai::ResolvedRunPlan::context_providers(&self) -> &[finstack_ai::ResolvedComponent<dyn finstack_ai_runtime::ports::context::port::ContextProvider>]
+pub fn finstack_ai::ResolvedRunPlan::middleware(&self) -> &[finstack_ai::ResolvedComponent<dyn finstack_ai_runtime::ports::middleware::port::Middleware>]
+pub fn finstack_ai::ResolvedRunPlan::middleware_chain(&self) -> &alloc::sync::Arc<finstack_ai_runtime::ports::middleware::chain::ResolvedMiddlewareChain>
+pub fn finstack_ai::ResolvedRunPlan::model(&self) -> &finstack_ai::ResolvedComponent<finstack_ai_runtime::ports::model::port::ReadyModel>
+pub fn finstack_ai::ResolvedRunPlan::observers(&self) -> &[finstack_ai::ResolvedComponent<dyn finstack_ai_runtime::ports::observer::Observer>]
+pub fn finstack_ai::ResolvedRunPlan::store(&self) -> &finstack_ai::ResolvedComponent<dyn finstack_ai_runtime::ports::journal::JournalStore>
+pub fn finstack_ai::ResolvedRunPlan::toolsets(&self) -> &[finstack_ai::ResolvedComponent<dyn finstack_ai_runtime::ports::tool::port::Toolset>]
+impl core::clone::Clone for finstack_ai::ResolvedRunPlan
+pub fn finstack_ai::ResolvedRunPlan::clone(&self) -> finstack_ai::ResolvedRunPlan
+pub struct finstack_ai::RunResult
+impl finstack_ai::RunResult
+pub fn finstack_ai::RunResult::decode<T: serde_core::de::DeserializeOwned>(&self) -> core::result::Result<T, finstack_ai::ResultDecodeError>
+pub fn finstack_ai::RunResult::schema(&self) -> &finstack_ai_kernel::records::policy::agent::SchemaRef
+pub fn finstack_ai::RunResult::try_from_committed(&finstack_ai_kernel::records::policy::agent::SchemaRef, &finstack_ai_kernel::records::policy::agent::FinalResultRecorded) -> core::result::Result<Self, finstack_ai::ResultDecodeError>
+pub fn finstack_ai::RunResult::value(&self) -> &finstack_ai_kernel::primitives::raw_json::RawJson
+pub const fn finstack_ai::RunResult::value_digest(&self) -> finstack_ai_kernel::primitives::digest::Digest
+impl core::clone::Clone for finstack_ai::RunResult
+pub fn finstack_ai::RunResult::clone(&self) -> finstack_ai::RunResult
+impl core::cmp::Eq for finstack_ai::RunResult
+impl core::cmp::PartialEq for finstack_ai::RunResult
+pub fn finstack_ai::RunResult::eq(&self, &finstack_ai::RunResult) -> bool
+impl core::fmt::Debug for finstack_ai::RunResult
+pub fn finstack_ai::RunResult::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai::RunResult
+pub struct finstack_ai::RuntimeServices
+pub finstack_ai::RuntimeServices::agent_invoker: core::option::Option<alloc::sync::Arc<dyn finstack_ai_runtime::services::agent_invoker::AgentInvoker>>
+pub finstack_ai::RuntimeServices::artifact_store: core::option::Option<alloc::sync::Arc<dyn finstack_ai_runtime::services::artifact::ArtifactStore>>
+pub finstack_ai::RuntimeServices::budget_ledger: core::option::Option<alloc::sync::Arc<dyn finstack_ai_runtime::services::budget::BudgetLedger>>
+impl core::clone::Clone for finstack_ai::RuntimeServices
+pub fn finstack_ai::RuntimeServices::clone(&self) -> finstack_ai::RuntimeServices
+impl core::default::Default for finstack_ai::RuntimeServices
+pub fn finstack_ai::RuntimeServices::default() -> finstack_ai::RuntimeServices
+pub struct finstack_ai::Session
+impl finstack_ai::Session
+pub fn finstack_ai::Session::bind_external_identity(&self, &dyn finstack_ai_runtime::services::identity_map::ExternalIdentityMap, finstack_ai_runtime::services::identity_map::ExternalIdentityKey, finstack_ai_kernel::primitives::ids::LaneId) -> core::result::Result<(), finstack_ai_runtime::services::session::SessionError>
+pub async fn finstack_ai::Session::create(alloc::sync::Arc<dyn finstack_ai_runtime::ports::journal::JournalStore>, impl core::convert::Into<alloc::sync::Arc<str>>) -> core::result::Result<Self, finstack_ai_runtime::services::session::SessionError>
+pub async fn finstack_ai::Session::create_lane(&self, impl core::convert::Into<alloc::sync::Arc<str>>, core::option::Option<finstack_ai_kernel::primitives::ids::EntryId>) -> core::result::Result<finstack_ai::Lane, finstack_ai_runtime::services::session::SessionError>
+pub fn finstack_ai::Session::from_runtime(alloc::sync::Arc<finstack_ai_runtime::services::session::SessionRuntime>) -> Self
+pub async fn finstack_ai::Session::lane(&self, &str) -> core::result::Result<finstack_ai::Lane, finstack_ai_runtime::services::session::SessionError>
+pub async fn finstack_ai::Session::lane_by_id(&self, finstack_ai_kernel::primitives::ids::LaneId) -> core::result::Result<finstack_ai::Lane, finstack_ai_runtime::services::session::SessionError>
+pub async fn finstack_ai::Session::list_lanes(&self) -> core::result::Result<alloc::vec::Vec<finstack_ai::Lane>, finstack_ai_runtime::services::session::SessionError>
+pub async fn finstack_ai::Session::open(alloc::sync::Arc<dyn finstack_ai_runtime::ports::journal::JournalStore>, finstack_ai_kernel::primitives::ids::SessionId, impl core::convert::Into<alloc::sync::Arc<str>>) -> core::result::Result<Self, finstack_ai_runtime::services::session::SessionError>
+pub fn finstack_ai::Session::resolve_external_identity(&dyn finstack_ai_runtime::services::identity_map::ExternalIdentityMap, &finstack_ai_runtime::services::identity_map::ExternalIdentityKey) -> core::option::Option<(finstack_ai_kernel::primitives::ids::SessionId, finstack_ai_kernel::primitives::ids::LaneId)>
+pub fn finstack_ai::Session::session_id(&self) -> finstack_ai_kernel::primitives::ids::SessionId
+pub fn finstack_ai::Session::tenant_scope(&self) -> &str
+impl core::clone::Clone for finstack_ai::Session
+pub fn finstack_ai::Session::clone(&self) -> finstack_ai::Session
+pub const finstack_ai::AGENT_BUILD_CANCELLED: &str
+pub const finstack_ai::AGENT_BUILD_CONFIGURATION_CONFLICT: &str
+pub const finstack_ai::AGENT_BUILD_DUPLICATE_SELECTION: &str
+pub const finstack_ai::AGENT_BUILD_FACTORY_FAILED: &str
+pub const finstack_ai::AGENT_BUILD_INVALID_DESCRIPTOR: &str
+pub const finstack_ai::AGENT_BUILD_KIND_MISMATCH: &str
+pub const finstack_ai::AGENT_BUILD_MIDDLEWARE_INVALID: &str
+pub const finstack_ai::AGENT_BUILD_MISSING_COMPONENT: &str
+pub const finstack_ai::AGENT_BUILD_VERSION_MISMATCH: &str
+pub const finstack_ai::AGENT_RUN_CANCELLED: &str
+pub const finstack_ai::AGENT_RUN_INVALID_CONFIGURATION: &str
+pub const finstack_ai::AGENT_RUN_RUNTIME_FAILURE: &str
+pub const finstack_ai::AGENT_RUN_TIMEOUT: &str
+pub const finstack_ai::AGENT_RUN_UNSUPPORTED_PLAN: &str
+pub const finstack_ai::BUNDLE_RESOLUTION_CONFLICT: &str
+pub const finstack_ai::BUNDLE_RESOLUTION_INVALID: &str
+pub const finstack_ai::BUNDLE_RESOLUTION_LOCK_MISMATCH: &str
+pub const finstack_ai::BUNDLE_RESOLUTION_MISSING: &str
+pub const finstack_ai::BUNDLE_SCHEMA_VERSION: u16
+pub const finstack_ai::CAPABILITY_ACTIVATION_BOUND: &str
+pub const finstack_ai::CAPABILITY_ACTIVATION_FAILED: &str
+pub const finstack_ai::CHILD_RUN_BRIDGE_FAILED: &str
+pub const finstack_ai::CHILD_RUN_BRIDGE_PLANNER_REJECTED: &str
+pub const finstack_ai::CHILD_RUN_BRIDGE_PLANNER_UNAVAILABLE: &str
+pub const finstack_ai::DEFAULT_MAX_CYCLES: u64
+pub const finstack_ai::DEFAULT_MAX_OUTPUT_RETRIES: u32
+pub const finstack_ai::DEFAULT_RUN_TIMEOUT: core::time::Duration
+pub const finstack_ai::MAX_COMPONENT_ALIASES: usize
+pub const finstack_ai::MAX_CONCURRENT_CAPABILITY_ACTIVATIONS: u16
+pub const finstack_ai::MAX_CONFIGURED_CYCLES: u64
+pub const finstack_ai::MAX_CONFIGURED_OUTPUT_RETRIES: u32
+pub const finstack_ai::MAX_REGISTERED_COMPONENTS: usize
+pub const finstack_ai::MAX_RUN_ATTACHMENTS: usize
+pub const finstack_ai::MAX_SELECTED_COMPONENTS: usize
+pub const finstack_ai::RESULT_DECODE_INVALID_VALUE: &str
+pub const finstack_ai::RESULT_DECODE_SCHEMA_MISMATCH: &str
+pub trait finstack_ai::ChildEventSink: core::marker::Send + core::marker::Sync
+pub fn finstack_ai::ChildEventSink::on_batch(&self, &finstack_ai::ChildEventContext, &finstack_ai_runtime::exec::event_hub::EventBatch) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), ()>>
+pub trait finstack_ai::ChildRunResolver: core::marker::Send + core::marker::Sync
+pub fn finstack_ai::ChildRunResolver::resolve(&self, &finstack_ai_kernel::records::run::child::ChildRunLocator) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai::AgentRun, finstack_ai::ChildRunBridgeError>>
+pub trait finstack_ai::DeferredChildPlanner: core::marker::Send + core::marker::Sync
+pub fn finstack_ai::DeferredChildPlanner::plan(&self, &finstack_ai::ChildPlanContext) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<core::option::Option<finstack_ai_runtime::services::agent_invoker::ChildRunRequest>, finstack_ai::DeferredPlanError>>
+pub trait finstack_ai::Extension: finstack_ai_runtime::ports::PortObject
+pub fn finstack_ai::Extension::descriptor(&self) -> finstack_ai::ExtensionDescriptor
+pub fn finstack_ai::Extension::register(&self, &mut finstack_ai::Registrar) -> core::result::Result<(), finstack_ai::RegistrationError>
+impl finstack_ai::Extension for finstack_ai::NativeAgentBuilder
+pub fn finstack_ai::NativeAgentBuilder::descriptor(&self) -> finstack_ai::ExtensionDescriptor
+pub fn finstack_ai::NativeAgentBuilder::register(&self, &mut finstack_ai::Registrar) -> core::result::Result<(), finstack_ai::RegistrationError>
+pub fn finstack_ai::outstanding_deferrals(&finstack_ai_kernel::state::KernelState) -> alloc::vec::Vec<finstack_ai::OutstandingDeferral>

@@ -720,13 +720,7 @@ async fn run_with_mcp_provider(
             store,
         ),
     )
-    .context_provider(
-        ComponentRef::new(
-            ComponentId::parse("finstack.context.mcp").expect("provider"),
-            Some(version),
-        ),
-        Arc::new(provider),
-    )
+    .context_provider(Arc::new(provider))
     .build()
     .await
     .expect("agent");

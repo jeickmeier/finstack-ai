@@ -25,6 +25,7 @@ FORBIDDEN_WASM = frozenset(
         "wasmtime",
         "hyper",
         "native-tls",
+        "finstack-ai-eval",
         "finstack-ai-provider-openai",
         "finstack-ai-provider-openrouter",
         "finstack-ai-provider-ollama",

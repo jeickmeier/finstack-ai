@@ -2,11 +2,55 @@
   "format_version": 1,
   "extensions": [
     {
+      "crate": "finstack-ai-search-core",
+      "python": {
+        "status": "direct",
+        "surfaces": [
+          "search.SearchScopeRenamed",
+          "search.SearchLimits",
+          "search.SearchQuery"
+        ]
+      },
+      "js": {
+        "status": "unavailable",
+        "reason": "Browser-native search execution is explicitly deferred; applications may supply supported host toolsets. Owner: bindings."
+      }
+    },
+    {
+      "crate": "finstack-ai-search",
+      "python": {
+        "status": "direct",
+        "surfaces": [
+          "search.SearchEngine",
+          "search.SearchToolset",
+          "search.SearchContextProvider"
+        ]
+      },
+      "js": {
+        "status": "unavailable",
+        "reason": "Browser-native search execution is explicitly deferred; applications may supply supported host toolsets. Owner: bindings."
+      }
+    },
+    {
+      "crate": "finstack-ai-index-documents",
+      "python": {
+        "status": "direct",
+        "surfaces": [
+          "search.DocumentSearchSource",
+          "search.DocumentIndexConfig"
+        ]
+      },
+      "js": {
+        "status": "unavailable",
+        "reason": "Browser-native search execution is explicitly deferred; applications may supply supported host toolsets. Owner: bindings."
+      }
+    },
+    {
       "crate": "finstack-ai-store-artifact",
       "python": {
         "status": "direct",
         "surfaces": [
-          "S3ArtifactStoreRenamed"
+          "S3ArtifactStore"
         ]
       },
       "js": {
@@ -46,8 +90,10 @@
     {
       "crate": "finstack-ai-embeddings",
       "python": {
-        "status": "unavailable",
-        "reason": "Shared embedding machinery; cross-language embedder exposure is a staged follow-up."
+        "status": "direct",
+        "surfaces": [
+          "search.HashEmbedder"
+        ]
       },
       "js": {
         "status": "unavailable",
@@ -57,8 +103,10 @@
     {
       "crate": "finstack-ai-embedder-ollama",
       "python": {
-        "status": "unavailable",
-        "reason": "Native Ollama embedder; cross-language embedder exposure is a staged follow-up."
+        "status": "direct",
+        "surfaces": [
+          "search.OllamaEmbedder"
+        ]
       },
       "js": {
         "status": "unavailable",
@@ -479,9 +527,9 @@
       "python": {
         "status": "facade",
         "surfaces": [
-          "Agent.openai"
+          "OpenAiMediaToolset"
         ],
-        "reason": "The native facade composes the media toolset through the OpenAI factory's media_tools option."
+        "reason": "Typed toolset composition is owned by the SDK and exposed independently of model factories."
       },
       "js": {
         "status": "unavailable",
@@ -493,9 +541,9 @@
       "python": {
         "status": "facade",
         "surfaces": [
-          "Agent.openrouter"
+          "OpenRouterMediaToolset"
         ],
-        "reason": "The native facade composes the media toolset through linked provider factory options."
+        "reason": "Typed toolset composition is owned by the SDK and exposed independently of model factories."
       },
       "js": {
         "status": "unavailable",
@@ -507,9 +555,9 @@
       "python": {
         "status": "facade",
         "surfaces": [
-          "Agent.openrouter"
+          "VideoComposeToolset"
         ],
-        "reason": "The native facade composes the compose toolset through the linked factories' video_compose_* options."
+        "reason": "Typed toolset composition is owned by the SDK and exposed independently of model factories."
       },
       "js": {
         "status": "unavailable",
@@ -521,9 +569,9 @@
       "python": {
         "status": "facade",
         "surfaces": [
-          "Agent.openrouter"
+          "MediaPipelineToolset"
         ],
-        "reason": "The native facade composes the pipeline through the linked factories' media_pipeline_* options."
+        "reason": "Typed toolset composition is owned by the SDK and exposed independently of model factories."
       },
       "js": {
         "status": "unavailable",
@@ -583,8 +631,11 @@
     {
       "crate": "finstack-ai-workflow-hitl",
       "python": {
-        "status": "unavailable",
-        "reason": "Native workflow deployment extension; not an in-process binding surface."
+        "status": "facade",
+        "surfaces": [
+          "DurableHost"
+        ],
+        "reason": "The SDK durable host owns worker and approval integration over persistent stores."
       },
       "js": {
         "status": "unavailable",
@@ -605,12 +656,41 @@
     {
       "crate": "finstack-ai-workflow-worker",
       "python": {
-        "status": "unavailable",
-        "reason": "Native workflow deployment extension; not an in-process binding surface."
+        "status": "facade",
+        "surfaces": [
+          "DurableHost"
+        ],
+        "reason": "The SDK durable host owns worker and approval integration over persistent stores."
       },
       "js": {
         "status": "unavailable",
         "reason": "Native workflow deployment extension; not an in-process binding surface."
+      }
+    },
+    {
+      "crate": "finstack-ai-index-journal",
+      "python": {
+        "status": "direct",
+        "surfaces": [
+          "search.JournalSearchSource"
+        ]
+      },
+      "js": {
+        "status": "unavailable",
+        "reason": "Browser-native index execution is deferred to search and WASM maintainers; applications may consume serialized results."
+      }
+    },
+    {
+      "crate": "finstack-ai-index-graph",
+      "python": {
+        "status": "direct",
+        "surfaces": [
+          "search.GraphSearchSource"
+        ]
+      },
+      "js": {
+        "status": "unavailable",
+        "reason": "Browser-native index execution is deferred to search and WASM maintainers; applications may consume serialized results."
       }
     }
   ]

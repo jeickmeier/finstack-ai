@@ -1,20 +1,19 @@
 # Document ingestion
 
-Two released components cooperate:
+The document parser and `BeforeModel` ingest middleware resolve attachments through
+the artifact store, verify digests, and replace model-visible file blocks with
+extracted Markdown plus the exact uploaded blob reference. The journal retains the
+original attachment. Scanned PDFs preserve `requires_ocr`; no OCR is performed.
 
-- **`finstack-ai-tools-document`** — model-callable tools that convert
-  documents (pdf, docx, xlsx, pptx, odf, rtf, epub, csv) to
-  GitHub-Flavored Markdown via a pure-Rust parser. Scanned PDFs succeed
-  with `requires_ocr: true` rather than erroring; OCR is not enabled.
-- **`finstack-ai-middleware-document-ingest`** — a `BeforeModel`
-  middleware. When a run carries attachments
-  (`AgentRunRequest.attachments`, staged through the artifact store),
-  it resolves the bytes, verifies digests, parses, and swaps the
-  model-visible file blocks for extracted Markdown. The journaled
-  conversation keeps the original attachment references, so provenance
-  survives.
+`index_document` is a separate idempotent tool effect. It reads the authorized
+artifact, parses it and stores heading/paragraph-aware chunks in a separate SQLite
+index. Default targets are 4,096 Unicode characters with up to 512 overlap. Repeating
+the same input/configuration returns the same receipt. Citations retain the artifact
+and parsed-character locators; missing sources are excluded and reconciled out.
 
-The knowledge agent's `ingest` flow attaches a file to a run on the
-target session and asks the model to summarize it and `remember` the key
-facts — after that, the document's content is reachable both through the
-session history and through memory recall in later sessions.
+The CLI `ingest` flow attaches a file on the selected session, asks the model to
+index it, summarize it and remember useful facts, then verifies a current indexing
+receipt. A summary without the indexing effect fails explicitly. Global search can
+retrieve document chunks, memory facts and committed session evidence independently.
+The application owns artifact retention; indexing does not pin source artifacts.
+Semantic document retrieval requires an explicit embedder and bounded maintenance.

@@ -56,7 +56,7 @@ use thiserror::Error;
 const COMPONENT_ID: &str = "finstack.middleware.document-ingest";
 const INGEST_VERSION: Version = Version {
     major: 1,
-    minor: 0,
+    minor: 1,
     patch: 0,
 };
 
@@ -357,7 +357,7 @@ impl DocumentIngestMiddleware {
             name: name.clone(),
         };
         if let Some(note) = self.parse_cache.lookup(&key) {
-            return note_block(&note);
+            return attachment_note_block(&note, blob);
         }
         if cancellation.is_cancelled() {
             return Err(cancelled_error());
@@ -387,7 +387,7 @@ impl DocumentIngestMiddleware {
             return Err(cancelled_error());
         }
         self.parse_cache.insert(key, note.clone());
-        note_block(&note)
+        attachment_note_block(&note, blob)
     }
 
     /// Resolve a `BlobRef` to its exact reference and bytes through the
@@ -513,6 +513,20 @@ fn run_scope(ctx: &MiddlewareContext) -> ArtifactScope {
         run_id: None,
         sensitivity: finstack_ai_kernel::Sensitivity::Internal,
     }
+}
+
+// Add reference identity outside the pure parse cache: identical bytes may have
+// different blob IDs. The JSON is citation data in the existing user message.
+fn attachment_note_block(
+    note: &str,
+    blob: &finstack_ai_kernel::BlobRef,
+) -> Result<ContentBlock, MiddlewareError> {
+    let reference = serde_json_canonicalizer::to_string(&std::collections::BTreeMap::from([(
+        "attachment",
+        blob,
+    )]))
+    .map_err(|_| stable_error("document attachment reference encoding failed"))?;
+    note_block(&format!("Document source reference: {reference}\n{note}"))
 }
 
 /// Build a model-visible note block. Oversized caller text falls back to

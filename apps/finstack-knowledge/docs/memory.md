@@ -1,21 +1,17 @@
-# Memory
+# Memory and unified recall
 
-The memory extension (`extensions/context/finstack-ai-memory`) gives the
-agent durable recall across sessions. It is one composition with four
-faces:
+The memory extension stores scoped facts, exposes remember/correct/forget tools,
+and captures facts from committed runs. Standalone users can also register its
+memory search tool and recall provider. Correction, forgetting and expiry invalidate
+derived vectors; unavailable or incomplete embeddings remain visible in coverage.
 
-- **Store** — where memory records live, scoped by tenant.
-- **Toolset** — model-callable tools to remember and search facts
-  explicitly (`remember` and friends).
-- **Context provider** — recall: before each turn, relevant memory
-  records are retrieved (keyword/FTS ranking) and contributed to the
-  model-visible context within an explicit budget. Contributions are
-  data, never instructions.
-- **Observer** — capture: watches committed runs and records durable
-  facts automatically.
+The knowledge application shares this store across sessions and uses one global
+`search` tool plus global recall across memory, documents and authorized committed
+journals. It disables memory's separate read tool and recall provider while keeping
+write/manage tools and capture. Retrieved content is untrusted data, never authority.
 
-In the knowledge agent all four faces are wired, so facts remembered in
-one session (from either the CLI or a notebook) are recalled in later
-sessions against the same data directory. Retrieval is keyword-based in
-this version; the store trait reserves the extension point for vector
-retrieval without changing the composition.
+Lexical retrieval is the offline default. An explicitly configured embedder enables
+exact vector retrieval for memory and documents. A configured graph vocabulary adds
+evidence-backed entity/relationship queries and opt-in expansion. Host maintenance
+runs between settled turns and reports failures and remaining work. Python and CLI
+share persisted sources when configured with the same directory and tenant.

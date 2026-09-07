@@ -13,12 +13,12 @@ use finstack_ai_runtime::ports::PortFuture;
 use crate::record::{MemoryBody, MemoryClock, MemoryId, MemoryRecord, MemoryScope};
 
 use super::{
-    EmbeddingSource, MatchEvidence, MemoryArtifactAction, MemoryHit, MemoryListing, MemoryPage,
-    MemoryQuery, MemoryStore, MemoryStoreDescriptor, MemoryStoreError, MemoryStoreLimits,
-    PutOutcome, artifact_transition_actions, embedding_source_digest, embedding_source_text,
-    normalize_search_tokens, operation_fingerprint, similarity_score, validate_embedder_id,
-    validate_idempotency_key, validate_new_record_lifecycle, validate_query, validate_record,
-    validate_scope,
+    EmbeddingCoverage, EmbeddingSource, MatchEvidence, MemoryArtifactAction, MemoryHit,
+    MemoryListing, MemoryPage, MemoryQuery, MemoryStore, MemoryStoreDescriptor, MemoryStoreError,
+    MemoryStoreLimits, PutOutcome, artifact_transition_actions, embedding_source_digest,
+    embedding_source_text, normalize_search_tokens, operation_fingerprint, similarity_score,
+    validate_embedder_id, validate_idempotency_key, validate_new_record_lifecycle, validate_query,
+    validate_record, validate_scope,
 };
 
 /// Whether `record` is visible to reads at `now`: not tombstoned, not
@@ -222,7 +222,7 @@ impl MemoryStore for InProcessMemoryStore {
                 MemoryQuery::Embedding {
                     embedder_id,
                     vector,
-                } => search_embeddings(&state, &scope, embedder_id, vector, now)?,
+                } => search_embeddings(&state, &scope, embedder_id, vector, now, limit)?,
                 _ => state
                     .records
                     .values()
@@ -392,17 +392,15 @@ impl MemoryStore for InProcessMemoryStore {
             }
             let now = (self.clock)();
             let state = self.state.lock().map_err(|_| lock_error())?;
-            let matching: Vec<MemoryRecord> = state
+            let matching = state
                 .records
                 .values()
-                .filter(|record| scope == record.scope && is_live(record, now))
-                .cloned()
-                .collect();
-            let total = matching.len();
+                .filter(|record| scope == record.scope && is_live(record, now));
+            let total = matching.clone().count();
             let records = matching
-                .into_iter()
                 .skip(page.offset)
                 .take(page.limit)
+                .cloned()
                 .collect();
             Ok(MemoryListing { records, total })
         })();
@@ -437,6 +435,40 @@ impl MemoryStore for InProcessMemoryStore {
                     .retain(|action| action.action_id() != action_id);
             }
             Ok(())
+        })();
+        Box::pin(async move { result })
+    }
+
+    fn embedding_coverage(
+        &self,
+        scope: MemoryScope,
+        embedder_id: Arc<str>,
+    ) -> PortFuture<Result<Option<EmbeddingCoverage>, MemoryStoreError>> {
+        let result = (|| {
+            validate_scope(&scope)?;
+            validate_embedder_id(&embedder_id)?;
+            let now = (self.clock)();
+            let state = self.state.lock().map_err(|_| lock_error())?;
+            let mut coverage = EmbeddingCoverage {
+                live_records: 0,
+                indexed_records: 0,
+            };
+            for record in state
+                .records
+                .values()
+                .filter(|r| r.scope == scope && is_live(r, now))
+            {
+                coverage.live_records += 1;
+                let digest = embedding_source_digest(&embedding_source_text(record))?;
+                if state
+                    .embeddings
+                    .get(&(scope.clone(), record.id.clone(), Arc::clone(&embedder_id)))
+                    .is_some_and(|row| row.source_digest == digest)
+                {
+                    coverage.indexed_records += 1;
+                }
+            }
+            Ok(Some(coverage))
         })();
         Box::pin(async move { result })
     }
@@ -525,8 +557,24 @@ impl MemoryStore for InProcessMemoryStore {
                 return Ok(());
             }
             let dimensions = vector.dimensions();
+            let key = (scope, id, embedder_id);
+            let retained = state
+                .embeddings
+                .iter()
+                .filter(|(existing, _)| **existing != key)
+                .fold(0_u64, |bytes, (_, row)| {
+                    bytes.saturating_add((row.dimensions as u64).saturating_mul(4))
+                });
+            if retained.saturating_add((dimensions as u64).saturating_mul(4))
+                > self.limits.max_embedding_bytes
+            {
+                return Err(MemoryStoreError::CapacityExceeded {
+                    resource: "embedding_bytes",
+                    limit: self.limits.max_embedding_bytes,
+                });
+            }
             state.embeddings.insert(
-                (scope, id, embedder_id),
+                key,
                 StoredEmbedding {
                     unit_vector: vector.unit_normalized(),
                     dimensions,
@@ -597,6 +645,7 @@ fn search_embeddings(
     embedder_id: &Arc<str>,
     vector: &EmbeddingVector,
     now: Timestamp,
+    limit: usize,
 ) -> Result<Vec<MemoryHit>, MemoryStoreError> {
     let Some(dimensions) = space_dimensions(state, embedder_id) else {
         // A space no embedder ever populated holds nothing.
@@ -608,7 +657,7 @@ fn search_embeddings(
         });
     }
     let query = vector.unit_normalized();
-    let mut hits: Vec<MemoryHit> = Vec::new();
+    let mut hits = super::ranking::TopHits::new(limit);
     for ((row_scope, row_id, space), stored) in &state.embeddings {
         if space != embedder_id || row_scope != scope {
             continue;
@@ -628,7 +677,7 @@ fn search_embeddings(
             matched: MatchEvidence::Semantic,
         });
     }
-    Ok(hits)
+    Ok(hits.finish())
 }
 
 fn receipt_replay(

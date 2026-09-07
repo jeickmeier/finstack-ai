@@ -14,6 +14,16 @@ pub(crate) struct PyLocator {
 
 #[pymethods]
 impl PyLocator {
+    /// Reconstruct a validated immutable locator from persisted identifiers.
+    #[staticmethod]
+    fn from_dict(value: &Bound<'_, PyAny>) -> PyResult<Self> {
+        let locator = serde_json::from_value(crate::json_bridge::py_to_json(value)?)
+            .map_err(|error| pyo3::exceptions::PyValueError::new_err(error.to_string()))?;
+        Ok(Self {
+            locator: Arc::new(locator),
+        })
+    }
+
     /// Tenant scope that owns the accepted operation.
     #[getter]
     fn tenant_scope(&self) -> &str {

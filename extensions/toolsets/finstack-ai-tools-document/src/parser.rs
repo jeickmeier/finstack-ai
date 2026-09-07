@@ -6,7 +6,8 @@
 use thiserror::Error;
 
 /// Byte, output, and page ceilings for one parse.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DocumentLimits {
     /// Reject inputs above this size; defaults to the artifact store ceiling
     /// at wiring time.

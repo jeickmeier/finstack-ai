@@ -39,6 +39,7 @@ pub use finstack_ai::SessionInspectPhase
 pub use finstack_ai::SessionInspectSnapshot
 pub use finstack_ai::Version
 pub use finstack_ai::inspect_session
+pub mod finstack_ai::media
 pub mod finstack_ai::registry
 pub enum finstack_ai::registry::AgentBuildError
 pub finstack_ai::registry::AgentBuildError::Cancelled
@@ -1011,6 +1012,7 @@ pub fn finstack_ai::Agent::start(&self, finstack_ai::AgentRunRequest) -> core::r
 pub fn finstack_ai::Agent::try_from_resolved(alloc::sync::Arc<finstack_ai::ResolvedAgent>) -> core::result::Result<Self, finstack_ai::AgentRunError>
 pub fn finstack_ai::Agent::try_with_output_schema(self, &finstack_ai_kernel::primitives::raw_json::RawJson) -> core::result::Result<Self, finstack_ai::AgentRunError>
 pub fn finstack_ai::Agent::with_history_cache_policy(self, finstack_ai::HistoryCachePolicy) -> Self
+pub async fn finstack_ai::Agent::with_limits(&self, finstack_ai_kernel::records::policy::limits::RunLimits) -> core::result::Result<Self, finstack_ai::AgentRunError>
 impl finstack_ai::Agent
 pub async fn finstack_ai::Agent::linked(finstack_ai::LinkedProviderSpec) -> core::result::Result<finstack_ai::LinkedAgent, finstack_ai::AgentRunError>
 impl core::clone::Clone for finstack_ai::Agent
@@ -1317,9 +1319,9 @@ pub finstack_ai::LinkedAgent::model: finstack_ai_runtime::ports::model::identity
 pub finstack_ai::LinkedAgent::settings: finstack_ai_runtime::ports::model::request::ModelSettings
 pub struct finstack_ai::LinkedAgentPorts
 pub finstack_ai::LinkedAgentPorts::artifact_store: core::option::Option<alloc::sync::Arc<dyn finstack_ai_runtime::services::artifact::ArtifactStore>>
-pub finstack_ai::LinkedAgentPorts::context_providers: alloc::vec::Vec<(finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::context::port::ContextProvider>)>
-pub finstack_ai::LinkedAgentPorts::middleware: alloc::vec::Vec<(finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::middleware::port::Middleware>)>
-pub finstack_ai::LinkedAgentPorts::observers: alloc::vec::Vec<(finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::observer::Observer>)>
+pub finstack_ai::LinkedAgentPorts::context_providers: alloc::vec::Vec<alloc::sync::Arc<dyn finstack_ai_runtime::ports::context::port::ContextProvider>>
+pub finstack_ai::LinkedAgentPorts::middleware: alloc::vec::Vec<alloc::sync::Arc<dyn finstack_ai_runtime::ports::middleware::port::Middleware>>
+pub finstack_ai::LinkedAgentPorts::observers: alloc::vec::Vec<alloc::sync::Arc<dyn finstack_ai_runtime::ports::observer::Observer>>
 pub finstack_ai::LinkedAgentPorts::output_schema: core::option::Option<finstack_ai_kernel::primitives::raw_json::RawJson>
 pub finstack_ai::LinkedAgentPorts::toolsets: alloc::vec::Vec<(finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::tool::port::Toolset>)>
 impl core::default::Default for finstack_ai::LinkedAgentPorts
@@ -1330,10 +1332,8 @@ pub finstack_ai::LinkedCommon::approval_grant: finstack_ai_runtime::ports::model
 pub finstack_ai::LinkedCommon::capabilities: alloc::vec::Vec<finstack_ai_runtime::spec::CapabilitySpec>
 pub finstack_ai::LinkedCommon::child_runs: finstack_ai_runtime::services::agent_invoker::ChildRunPolicy
 pub finstack_ai::LinkedCommon::instruction: core::option::Option<alloc::string::String>
-pub finstack_ai::LinkedCommon::media_pipeline: core::option::Option<finstack_ai::MediaPipelineSpec>
-pub finstack_ai::LinkedCommon::openrouter_media: core::option::Option<finstack_ai::OpenRouterMediaToolsSpec>
+pub finstack_ai::LinkedCommon::journal_store: core::option::Option<(finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::journal::JournalStore>)>
 pub finstack_ai::LinkedCommon::ports: finstack_ai::LinkedAgentPorts
-pub finstack_ai::LinkedCommon::video_compose: core::option::Option<finstack_ai::VideoComposeSpec>
 impl core::default::Default for finstack_ai::LinkedCommon
 pub fn finstack_ai::LinkedCommon::default() -> finstack_ai::LinkedCommon
 pub struct finstack_ai::LockedBundle
@@ -1386,11 +1386,6 @@ impl serde_core::ser::Serialize for finstack_ai::LockedComponent
 pub fn finstack_ai::LockedComponent::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for finstack_ai::LockedComponent
 pub fn finstack_ai::LockedComponent::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
-pub struct finstack_ai::MediaPipelineSpec
-pub finstack_ai::MediaPipelineSpec::max_concurrent_jobs: usize
-pub finstack_ai::MediaPipelineSpec::max_scenes: usize
-pub finstack_ai::MediaPipelineSpec::max_total_video_s: u64
-pub finstack_ai::MediaPipelineSpec::sqlite_state_path: core::option::Option<std::path::PathBuf>
 pub struct finstack_ai::NativeAgentBuilder
 impl finstack_ai::NativeAgentBuilder
 pub fn finstack_ai::NativeAgentBuilder::activate_application(self, finstack_ai_kernel::primitives::ids::CapabilityId) -> Self
@@ -1398,14 +1393,14 @@ pub fn finstack_ai::NativeAgentBuilder::artifact_store(self, alloc::sync::Arc<dy
 pub async fn finstack_ai::NativeAgentBuilder::build(self) -> core::result::Result<finstack_ai::Agent, finstack_ai::AgentRunError>
 pub fn finstack_ai::NativeAgentBuilder::capability(self, finstack_ai_runtime::spec::CapabilitySpec) -> Self
 pub fn finstack_ai::NativeAgentBuilder::capability_activation_host(self, alloc::sync::Arc<finstack_ai::NativeCapabilityHost>) -> Self
-pub fn finstack_ai::NativeAgentBuilder::capability_context_provider(self, finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::context::port::ContextProvider>) -> Self
-pub fn finstack_ai::NativeAgentBuilder::capability_middleware(self, finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::middleware::port::Middleware>) -> Self
+pub fn finstack_ai::NativeAgentBuilder::capability_context_provider(self, alloc::sync::Arc<dyn finstack_ai_runtime::ports::context::port::ContextProvider>) -> Self
+pub fn finstack_ai::NativeAgentBuilder::capability_middleware(self, alloc::sync::Arc<dyn finstack_ai_runtime::ports::middleware::port::Middleware>) -> Self
 pub fn finstack_ai::NativeAgentBuilder::capability_toolset(self, finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::tool::port::Toolset>) -> Self
-pub fn finstack_ai::NativeAgentBuilder::context_provider(self, finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::context::port::ContextProvider>) -> Self
+pub fn finstack_ai::NativeAgentBuilder::context_provider(self, alloc::sync::Arc<dyn finstack_ai_runtime::ports::context::port::ContextProvider>) -> Self
 pub fn finstack_ai::NativeAgentBuilder::history_cache_policy(self, finstack_ai::HistoryCachePolicy) -> Self
 pub fn finstack_ai::NativeAgentBuilder::limits(self, finstack_ai_kernel::records::policy::limits::RunLimits) -> Self
-pub fn finstack_ai::NativeAgentBuilder::middleware(self, finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::middleware::port::Middleware>) -> Self
-pub fn finstack_ai::NativeAgentBuilder::observer(self, finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::observer::Observer>) -> Self
+pub fn finstack_ai::NativeAgentBuilder::middleware(self, alloc::sync::Arc<dyn finstack_ai_runtime::ports::middleware::port::Middleware>) -> Self
+pub fn finstack_ai::NativeAgentBuilder::observer(self, alloc::sync::Arc<dyn finstack_ai_runtime::ports::observer::Observer>) -> Self
 pub fn finstack_ai::NativeAgentBuilder::policy(self, finstack_ai_runtime::spec::RunPolicy) -> Self
 pub fn finstack_ai::NativeAgentBuilder::toolset(self, finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::ports::tool::port::Toolset>) -> Self
 pub fn finstack_ai::NativeAgentBuilder::try_child_toolset<F, E>(self, finstack_ai_kernel::primitives::identity::ComponentRef, alloc::sync::Arc<dyn finstack_ai_runtime::services::agent_invoker::AgentInvoker>, F) -> core::result::Result<Self, finstack_ai::AgentRunError> where F: core::ops::function::FnOnce(alloc::sync::Arc<finstack_ai_runtime::services::child_starter::ChildRunStarter>) -> core::result::Result<alloc::sync::Arc<dyn finstack_ai_runtime::ports::tool::port::Toolset>, E>, E: core::fmt::Display
@@ -1436,23 +1431,17 @@ pub finstack_ai::OllamaAgentSpec::model: alloc::string::String
 pub struct finstack_ai::OpenAiAgentSpec
 pub finstack_ai::OpenAiAgentSpec::api_key: alloc::string::String
 pub finstack_ai::OpenAiAgentSpec::common: finstack_ai::LinkedCommon
-pub finstack_ai::OpenAiAgentSpec::media_tools: bool
 pub finstack_ai::OpenAiAgentSpec::model: alloc::string::String
 pub finstack_ai::OpenAiAgentSpec::reasoning_effort: core::option::Option<alloc::string::String>
 pub finstack_ai::OpenAiAgentSpec::reasoning_summary: core::option::Option<alloc::string::String>
 pub struct finstack_ai::OpenRouterAgentSpec
 pub finstack_ai::OpenRouterAgentSpec::api_key: alloc::string::String
 pub finstack_ai::OpenRouterAgentSpec::common: finstack_ai::LinkedCommon
-pub finstack_ai::OpenRouterAgentSpec::media_tools: bool
 pub finstack_ai::OpenRouterAgentSpec::model: alloc::string::String
 pub finstack_ai::OpenRouterAgentSpec::reasoning_effort: core::option::Option<alloc::string::String>
 pub finstack_ai::OpenRouterAgentSpec::reasoning_summary: core::option::Option<alloc::string::String>
 pub finstack_ai::OpenRouterAgentSpec::referer: core::option::Option<alloc::string::String>
 pub finstack_ai::OpenRouterAgentSpec::title: core::option::Option<alloc::string::String>
-pub struct finstack_ai::OpenRouterMediaToolsSpec
-pub finstack_ai::OpenRouterMediaToolsSpec::api_key: alloc::string::String
-pub finstack_ai::OpenRouterMediaToolsSpec::referer: core::option::Option<alloc::string::String>
-pub finstack_ai::OpenRouterMediaToolsSpec::title: core::option::Option<alloc::string::String>
 pub struct finstack_ai::OutstandingDeferral
 pub finstack_ai::OutstandingDeferral::deferred: finstack_ai_kernel::effects::lifecycle::EffectDeferred
 impl core::clone::Clone for finstack_ai::OutstandingDeferral
@@ -1680,11 +1669,6 @@ pub fn finstack_ai::Session::session_id(&self) -> finstack_ai_kernel::primitives
 pub fn finstack_ai::Session::tenant_scope(&self) -> &str
 impl core::clone::Clone for finstack_ai::Session
 pub fn finstack_ai::Session::clone(&self) -> finstack_ai::Session
-pub struct finstack_ai::VideoComposeSpec
-pub finstack_ai::VideoComposeSpec::ffmpeg_path: std::path::PathBuf
-pub finstack_ai::VideoComposeSpec::ffprobe_path: std::path::PathBuf
-pub finstack_ai::VideoComposeSpec::render_timeout_s: u64
-pub finstack_ai::VideoComposeSpec::scratch_dir: std::path::PathBuf
 pub const finstack_ai::AGENT_BUILD_CANCELLED: &str
 pub const finstack_ai::AGENT_BUILD_CONFIGURATION_CONFLICT: &str
 pub const finstack_ai::AGENT_BUILD_DUPLICATE_SELECTION: &str

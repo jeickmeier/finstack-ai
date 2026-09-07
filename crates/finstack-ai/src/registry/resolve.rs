@@ -805,7 +805,10 @@ fn validate_invocation(
         return Err(invalid_descriptor(
             descriptor,
             request_source,
-            "port invocation identity does not match its registration",
+            format!(
+                "port invocation {}@{}.{}.{} does not match its registration {:?}",
+                component, version.major, version.minor, version.patch, descriptor.component,
+            ),
         ));
     }
     Ok(())

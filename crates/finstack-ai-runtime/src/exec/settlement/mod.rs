@@ -19,7 +19,7 @@ use std::sync::{Arc, Mutex};
 
 use finstack_ai_kernel::{
     ArtifactRef, EventId, Id, IdTag, InteractionId, InteractionKind, InteractionTerminal,
-    InteractionTerminalOutcome, OperationLocator, Sensitivity, StageCursor, ToolCallId,
+    InteractionTerminalOutcome, OperationLocator, StageCursor, ToolCallId,
 };
 
 use crate::coordinator::{
@@ -205,27 +205,11 @@ impl<C: Clock, R: RandomSource> SettlementSources<C, R> {
             crate::artifact::ArtifactOwnerId::try_new(format!("journal:{}", locator.session_id))
                 .map_err(|error| RunHandleError::Artifact { code: error.code() })?;
         for artifact in artifacts {
-            let scope = [
-                Sensitivity::Public,
-                Sensitivity::Internal,
-                Sensitivity::Confidential,
-                Sensitivity::Secret,
-                Sensitivity::Credential,
-            ]
-            .into_iter()
-            .flat_map(|sensitivity| {
-                [Some(locator.run_id), None].map(|run_id| (sensitivity, run_id))
-            })
-            .map(|(sensitivity, run_id)| crate::artifact::ArtifactScope {
-                tenant_scope: Arc::clone(&locator.tenant_scope),
-                session_id: locator.session_id,
-                run_id,
-                sensitivity,
-            })
-            .find(|scope| scope.digest().ok() == Some(artifact.scope_digest()))
-            .ok_or(RunHandleError::Artifact {
-                code: crate::artifact::ARTIFACT_SCOPE_MISMATCH,
-            })?;
+            let scope = crate::artifact::artifact_scope_for_locator(locator, artifact).ok_or(
+                RunHandleError::Artifact {
+                    code: crate::artifact::ARTIFACT_SCOPE_MISMATCH,
+                },
+            )?;
             store
                 .pin(scope, artifact.clone(), owner.clone())
                 .await

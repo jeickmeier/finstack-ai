@@ -33,16 +33,18 @@ mod compose;
 mod config;
 mod docs;
 mod golden;
+mod search;
 
 pub use compose::{
-    build_agent, build_agent_with_journal, build_agent_with_stores, model_name,
-    open_artifact_store, open_journal, open_journal_sqlite,
+    KnowledgeAgent, build_agent, build_agent_with_journal, build_agent_with_stores,
+    local_search_config, model_name, open_artifact_store, open_journal, open_journal_sqlite,
 };
 pub use config::{
     EmbedderChoice, KnowledgeConfig, KnowledgeError, ProviderChoice, default_data_dir, security,
 };
 pub use docs::{SELF_DOCS, materialize_self_docs};
 pub use golden::{GoldenEntry, GoldenMemorySeed, golden_entries};
+pub use search::{KnowledgeSearch, SearchMaintenanceReport};
 
 #[cfg(test)]
 mod tests;

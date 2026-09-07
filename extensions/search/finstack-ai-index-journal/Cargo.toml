@@ -1,0 +1,36 @@
+[package]
+name = "finstack-ai-index-journal"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+description = "Committed-journal retrieval and bounded indexing hints"
+publish = false
+
+[dependencies]
+finstack-ai-kernel.workspace = true
+finstack-ai-runtime.workspace = true
+finstack-ai-protocol.workspace = true
+finstack-ai-store-common.workspace = true
+finstack-ai-search-core.workspace = true
+finstack-ai-embeddings.workspace = true
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+finstack-ai-search-core = { workspace = true, features = ["test-support"] }
+finstack-ai = { workspace = true, features = ["native-tokio"] }
+finstack-ai-search.workspace = true
+finstack-ai-store-memory.workspace = true
+finstack-ai-store-sqlite.workspace = true
+finstack-ai-test.workspace = true
+futures-util.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

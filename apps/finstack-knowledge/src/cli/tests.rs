@@ -27,7 +27,7 @@ async fn capture_run(answer: &str) -> (Vec<RunEvent>, String) {
         security("render-test").expect("security"),
     )
     .expect("request");
-    let run = agent.start(request).expect("start");
+    let run = agent.agent.start(request).expect("start");
     let mut events = Vec::new();
     while let Some(batch) = run.next_event_batch().await.expect("batch") {
         events.extend(batch.events().iter().cloned());
@@ -172,7 +172,7 @@ async fn ingest_attaches_summarizes_and_captures_memory() {
     )
     .expect("fixture doc");
 
-    let (base_url, server) = loopback::serve_ndjson(vec![
+    let (base_url, server) = loopback::serve_ingest_capture(vec![
         remember_tool_response(),
         loopback::text_response("Summary: Acme revenue rose 12 percent."),
         loopback::text_response("It rose 12 percent (see report.md)."),
@@ -208,7 +208,9 @@ async fn ingest_attaches_summarizes_and_captures_memory() {
     .expect("follow-up ask");
     let plain = render_markup_plain(&sink.into_markup());
     assert!(plain.contains("12 percent"), "follow-up answered: {plain}");
-    server.await.expect("join").expect("served");
+    let requests = server.await.expect("join").expect("served");
+    assert!(requests[1].contains("index_document"));
+    assert!(requests[1].contains("indexed"));
 
     // The memory store holds at least one captured record for the tenant.
     let memory =
@@ -563,4 +565,119 @@ fn docs_unknown_topic_is_a_config_error() {
         super::docs_command(Some("no-such-topic")),
         Err(crate::KnowledgeError::Config { .. })
     ));
+}
+
+#[tokio::test]
+async fn ingest_summary_without_index_effect_is_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("source.csv");
+    std::fs::write(&path, "fact\nAcme owns Beta\n").unwrap();
+    let (base_url, server) = loopback::serve_ndjson(vec![loopback::text_response("Summary only")])
+        .await
+        .unwrap();
+    let config = crate::KnowledgeConfig::new(
+        dir.path().into(),
+        crate::ProviderChoice::Ollama {
+            base_url,
+            model: "offline".into(),
+        },
+    );
+    let error =
+        super::ingest::run_ingest(&config, &path, None, "fixture", &mut TextRenderer::new())
+            .await
+            .unwrap_err();
+    assert!(matches!(
+        error,
+        crate::KnowledgeError::Run {
+            reason
+        } if reason == "document_index_effect_not_completed"
+    ));
+    server.await.unwrap().unwrap();
+    let app = build_agent(&config).await.unwrap();
+    assert!(
+        app.search
+            .documents
+            .inputs(None, 16)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn knowledge_rebuilds_and_queries_all_four_sources() {
+    use finstack_ai_index_graph::{EdgeKind, EdgeRule, EntityRule, GraphVocabulary};
+    use finstack_ai_search::SearchRequest;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("source.csv");
+    std::fs::write(&path, "fact\nBeta owns Gamma\n").unwrap();
+    let remember = remember_tool_response().replace(
+        "Acme Corp revenue rose 12 percent in Q1 per ingested report.",
+        "Acme owns Beta",
+    );
+    let (base_url, server) =
+        loopback::serve_ingest_capture(vec![remember, loopback::text_response("Gamma owns Delta")])
+            .await
+            .unwrap();
+    let vocabulary = GraphVocabulary {
+        version: 1,
+        entity_kinds: vec!["company".into()],
+        edge_kinds: vec![EdgeKind {
+            kind: "owns".into(),
+            source_kind: "company".into(),
+            target_kind: "company".into(),
+        }],
+        entity_rules: vec![EntityRule {
+            kind: "company".into(),
+            pattern: "(?P<label>Acme|Beta|Gamma|Delta)".into(),
+            canonical_label: None,
+        }],
+        edge_rules: vec![EdgeRule {
+            kind: "owns".into(),
+            pattern: "(?P<source>Acme|Beta|Gamma|Delta) owns (?P<target>Acme|Beta|Gamma|Delta)"
+                .into(),
+        }],
+    };
+    let config = crate::KnowledgeConfig::new(
+        dir.path().into(),
+        crate::ProviderChoice::Ollama {
+            base_url,
+            model: "offline".into(),
+        },
+    )
+    .with_graph(vocabulary);
+    let outcome =
+        super::ingest::run_ingest(&config, &path, None, "fixture", &mut TextRenderer::new())
+            .await
+            .unwrap();
+    assert!(
+        outcome
+            .maintenance
+            .iter()
+            .all(|report| report.failures.is_empty())
+    );
+    server.await.unwrap().unwrap();
+    // Fresh composition performs backfill/rebuild using only persisted sources.
+    let mut app = build_agent(&config).await.unwrap();
+    for _ in 0..16 {
+        let report = app.search.maintain(256).await.unwrap();
+        assert!(report.failures.is_empty(), "{report:?}");
+        if !report.more {
+            break;
+        }
+    }
+    let result = app
+        .search
+        .engine
+        .search(SearchRequest::text("Acme"))
+        .await
+        .unwrap();
+    let sources: std::collections::BTreeSet<_> =
+        result.hits.iter().map(|h| h.source.as_ref()).collect();
+    assert_eq!(
+        sources,
+        std::collections::BTreeSet::from(["memory", "documents", "journal", "graph"])
+    );
+    assert!(result.hits.iter().all(|hit| !hit.evidence.is_empty()));
+    assert!(app.search.maintain(257).await.is_err());
 }

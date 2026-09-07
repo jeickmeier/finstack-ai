@@ -1,0 +1,118 @@
+{
+  "counts": {
+    "expected": 8,
+    "completed": 8,
+    "subject_failed": 0,
+    "infrastructure_failed": 0,
+    "indeterminate": 0,
+    "pending": 0,
+    "unattempted": 0,
+    "attempts": 8,
+    "infrastructure_attempts": 0,
+    "scoring_failed": 0,
+    "scoring_pending": 0,
+    "graders_pending": 0
+  },
+  "spending": {
+    "subject_micros": {
+      "USD": "68"
+    },
+    "grader_micros": {},
+    "total_micros": {
+      "USD": "68"
+    },
+    "subject_unknown": 0,
+    "grader_unknown": 0
+  },
+  "aggregates": [
+    {
+      "subject": "baseline",
+      "metric": {
+        "scorer": "exact_match",
+        "scorer_version": 1,
+        "name": "exact_match"
+      },
+      "statistics": {
+        "n": 2,
+        "mean": "0",
+        "stderr": "0"
+      },
+      "expected_tasks": 2,
+      "complete_tasks": 2,
+      "scored_cells": 4,
+      "expected_cells": 4
+    },
+    {
+      "subject": "candidate",
+      "metric": {
+        "scorer": "exact_match",
+        "scorer_version": 1,
+        "name": "exact_match"
+      },
+      "statistics": {
+        "n": 2,
+        "mean": "1",
+        "stderr": "0"
+      },
+      "expected_tasks": 2,
+      "complete_tasks": 2,
+      "scored_cells": 4,
+      "expected_cells": 4
+    }
+  ],
+  "comparisons": [
+    {
+      "baseline": "baseline",
+      "candidate": "candidate",
+      "expected_pairs": 4,
+      "execution_pairs": 4,
+      "metrics": [
+        {
+          "metric": {
+            "scorer": "exact_match",
+            "scorer_version": 1,
+            "name": "exact_match"
+          },
+          "delta": {
+            "n": 4,
+            "mean": "1",
+            "stderr": "0"
+          },
+          "wins": 4,
+          "ties": 0,
+          "losses": 0,
+          "baseline_only": 0,
+          "candidate_only": 0,
+          "missing_pairs": 0
+        }
+      ],
+      "input_token_delta": {
+        "n": 4,
+        "mean": "-2",
+        "stderr": "0"
+      },
+      "output_token_delta": {
+        "n": 4,
+        "mean": "0",
+        "stderr": "0"
+      },
+      "total_token_delta": {
+        "n": 4,
+        "mean": "-2",
+        "stderr": "0"
+      },
+      "costs": [
+        {
+          "unit": "USD",
+          "total_delta_micros": "-12",
+          "delta_micros": {
+            "n": 4,
+            "mean": "-3",
+            "stderr": "0"
+          }
+        }
+      ],
+      "missing_cost_pairs": 0
+    }
+  ]
+}

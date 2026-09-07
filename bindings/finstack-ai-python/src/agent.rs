@@ -5,7 +5,9 @@ use std::sync::Arc;
 
 use crate::approval_grant::PyApprovalGrantMode;
 use crate::child_policy::PyChildRunPolicy;
-use crate::store::{PyS3ArtifactStore, PySqliteDurability, open_journal_store};
+use crate::store::{
+    PyArtifactStore, PyArtifactStoreArg, PySqliteDurability, open_journal_registration,
+};
 use finstack_ai::runtime::artifact::{ArtifactStore, InProcessArtifactStore};
 use finstack_ai::runtime::ports::context::ContextProvider;
 use finstack_ai::runtime::ports::middleware::Middleware;
@@ -16,8 +18,7 @@ use finstack_ai::{
     Agent, AgentRun, AgentRunError, AgentRunRequest, AnthropicAgentSpec, ApprovalGrantMode,
     CapabilitySpec, ChildRunPolicy, DEFAULT_MAX_CYCLES, DEFAULT_RUN_TIMEOUT, GatewayAgentSpec,
     GeminiAgentSpec, HistoryCachePolicy, LinkedAgent, LinkedAgentPorts, LinkedCommon,
-    LinkedProviderSpec, MediaPipelineSpec, OllamaAgentSpec, OpenAiAgentSpec, OpenRouterAgentSpec,
-    OpenRouterMediaToolsSpec, Session, VideoComposeSpec,
+    LinkedProviderSpec, OllamaAgentSpec, OpenAiAgentSpec, OpenRouterAgentSpec, Session,
 };
 use finstack_ai_kernel::{
     AgentId, ArtifactRef, BundleId, CapabilityId, CompactionAuthorization, ComponentId,
@@ -39,6 +40,10 @@ use crate::e2b::PyE2bSandboxToolset;
 use crate::elicitation::PyElicitationToolset;
 use crate::errors::{agent_error, configuration_error, run_error, session_py_error};
 use crate::fetch::PyHttpFetchToolset;
+use crate::media::{
+    MediaRegistrations, PyMediaPipelineToolset, PyOpenAiMediaToolset, PyOpenRouterMediaToolset,
+    PyVideoComposeToolset,
+};
 use crate::memory::{PyMemoryContextProvider, PyMemoryObserver, PyMemoryToolset};
 use crate::middleware::{
     PyCompactionMiddleware, PyInstructionsMiddleware, PyRedactionMiddleware,
@@ -59,6 +64,18 @@ use crate::toolsets::{PyCalculatorToolset, PyFileSystemToolset, PyMcpToolset, Py
 /// Toolset argument accepted by every agent factory.
 #[derive(FromPyObject)]
 pub(crate) enum PyToolsetArg {
+    /// Unified native search.
+    Search(Py<crate::search::PySearchToolset>),
+    /// Explicit document indexing effect.
+    DocumentIndex(Py<crate::search::PyDocumentIndexToolset>),
+    /// Explicit `OpenAI` media tools.
+    OpenAiMedia(Py<PyOpenAiMediaToolset>),
+    /// Explicit `OpenRouter` media tools.
+    OpenRouterMedia(Py<PyOpenRouterMediaToolset>),
+    /// Local composition tools.
+    VideoCompose(Py<PyVideoComposeToolset>),
+    /// `MoviePlan` orchestration.
+    MediaPipeline(Py<PyMediaPipelineToolset>),
     /// Trusted Python callback toolset.
     Python(Py<PyPythonToolset>),
     /// Rust elicitation toolset.
@@ -88,8 +105,15 @@ impl PyToolsetArg {
         &self,
         py: Python<'_>,
         artifact_store: &Arc<dyn ArtifactStore>,
+        media: &mut MediaRegistrations,
     ) -> PyResult<(ComponentRef, Arc<dyn Toolset>)> {
         match self {
+            Self::Search(tools) => tools.bind(py).borrow().registration(),
+            Self::DocumentIndex(tools) => tools.bind(py).borrow().registration(artifact_store),
+            Self::OpenAiMedia(tools) => media.openai(&tools.bind(py).borrow()),
+            Self::OpenRouterMedia(tools) => media.openrouter(&tools.bind(py).borrow()),
+            Self::VideoCompose(tools) => media.compose(&tools.bind(py).borrow()),
+            Self::MediaPipeline(tools) => media.pipeline(&tools.bind(py).borrow()),
             Self::Python(toolset) => Ok(toolset.bind(py).borrow().registration()),
             Self::Elicitation(toolset) => Ok(toolset.bind(py).borrow().registration()),
             Self::Memory(toolset) => toolset
@@ -112,6 +136,8 @@ impl PyToolsetArg {
 /// Context-provider argument accepted by every agent factory.
 #[derive(FromPyObject)]
 pub(crate) enum PyContextProviderArg {
+    /// Global native recall.
+    Search(Py<crate::search::PySearchContextProvider>),
     /// Trusted Python callback context provider.
     Python(Py<PyPythonContextProvider>),
     /// Rust memory recall provider from `MemoryExtension.context_provider()`.
@@ -127,6 +153,7 @@ impl PyContextProviderArg {
         artifact_store: &Arc<dyn ArtifactStore>,
     ) -> PyResult<(ComponentRef, Arc<dyn ContextProvider>)> {
         match self {
+            Self::Search(provider) => Ok(provider.bind(py).borrow().registration()),
             Self::Python(provider) => Ok(provider.bind(py).borrow().registration()),
             Self::Memory(provider) => provider.bind(py).borrow().registration(artifact_store),
             Self::Repository(provider) => Ok(provider.bind(py).borrow().registration()),
@@ -167,6 +194,8 @@ impl PyMiddlewareArg {
 /// Observer argument accepted by every agent factory.
 #[derive(FromPyObject)]
 pub(crate) enum PyObserverArg {
+    /// Committed journal indexing hints.
+    JournalIndex(Py<crate::search::PyJournalIndexObserver>),
     /// Trusted Python callback observer.
     Python(Py<PyPythonObserver>),
     /// Rust memory capture observer from `MemoryExtension.observer()`.
@@ -186,6 +215,7 @@ pub(crate) enum PyObserverArg {
 impl PyObserverArg {
     fn registration(&self, py: Python<'_>) -> (ComponentRef, Arc<dyn Observer>) {
         match self {
+            Self::JournalIndex(observer) => observer.bind(py).borrow().registration(),
             Self::Python(observer) => observer.bind(py).borrow().registration(),
             Self::Memory(observer) => observer.bind(py).borrow().registration(),
             Self::Log(observer) => observer.bind(py).borrow().registration(),
@@ -269,6 +299,36 @@ pub(crate) struct PyAgent {
 
 #[pymethods]
 impl PyAgent {
+    /// Share this agent's exact artifact store with other agent compositions.
+    #[getter]
+    fn artifact_store(&self) -> PyArtifactStore {
+        PyArtifactStore {
+            inner: self.artifact_store.clone(),
+        }
+    }
+
+    /// Return a newly resolved agent with explicit accepted limits and pricing policy.
+    /// Existing runs keep their original limits; no model or tool is dispatched.
+    fn with_limits<'py>(
+        &self,
+        py: Python<'py>,
+        limits: &Bound<'py, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let limits = crate::json_bridge::py_to_json(limits)?;
+        let limits: finstack_ai_kernel::RunLimits = serde_json::from_value(limits)
+            .map_err(|_| PyValueError::new_err("invalid run limits"))?;
+        let mut agent = self.clone_ref(py);
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            agent.inner = Arc::new(
+                agent
+                    .inner
+                    .with_limits(limits)
+                    .await
+                    .map_err(|error| agent_error(&error, None))?,
+            );
+            Ok(agent)
+        })
+    }
     /// Compose an agent with a fresh bounded process-local history cache.
     fn with_history_cache(&self, py: Python<'_>, policy: &Bound<'_, PyHistoryCachePolicy>) -> Self {
         let inner = self
@@ -288,7 +348,7 @@ impl PyAgent {
     /// `https://api.openai.com/v1/responses` and does not read environment
     /// variables.
     #[staticmethod]
-    #[pyo3(signature = (model, instruction = None, capabilities = None, active_capabilities = None, *, api_key, reasoning_effort = None, reasoning_summary = None, media_tools = false, openrouter_media_api_key = None, openrouter_media_referer = None, openrouter_media_title = None, video_compose_ffmpeg_path = None, video_compose_ffprobe_path = None, video_compose_scratch_dir = None, video_compose_render_timeout_s = None, media_pipeline_max_scenes = None, media_pipeline_max_total_video_s = None, media_pipeline_max_concurrent_jobs = None, media_pipeline_sqlite_state_path = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None, approval_grant = None, artifact_path = None, artifact_store = None))]
+    #[pyo3(signature = (model, instruction = None, capabilities = None, active_capabilities = None, *, api_key, reasoning_effort = None, reasoning_summary = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None, approval_grant = None, artifact_path = None, artifact_store = None, document_tools = true, sqlite_path = None, sqlite_durability = None, postgres_dsn = None))]
     #[expect(
         clippy::too_many_arguments,
         reason = "linked factory forwards provider auth, reasoning, media toolsets, and primary port components distinctly"
@@ -302,18 +362,7 @@ impl PyAgent {
         api_key: String,
         reasoning_effort: Option<String>,
         reasoning_summary: Option<String>,
-        media_tools: bool,
-        openrouter_media_api_key: Option<String>,
-        openrouter_media_referer: Option<String>,
-        openrouter_media_title: Option<String>,
-        video_compose_ffmpeg_path: Option<String>,
-        video_compose_ffprobe_path: Option<String>,
-        video_compose_scratch_dir: Option<String>,
-        video_compose_render_timeout_s: Option<u64>,
-        media_pipeline_max_scenes: Option<usize>,
-        media_pipeline_max_total_video_s: Option<u64>,
-        media_pipeline_max_concurrent_jobs: Option<usize>,
-        media_pipeline_sqlite_state_path: Option<String>,
+
         toolsets: Option<Vec<PyToolsetArg>>,
         context_providers: Option<Vec<PyContextProviderArg>>,
         middleware: Option<Vec<PyMiddlewareArg>>,
@@ -322,24 +371,17 @@ impl PyAgent {
         child_runs: Option<Py<PyChildRunPolicy>>,
         approval_grant: Option<Py<PyApprovalGrantMode>>,
         artifact_path: Option<String>,
-        artifact_store: Option<Py<PyS3ArtifactStore>>,
+        artifact_store: Option<PyArtifactStoreArg>,
+        document_tools: bool,
+        sqlite_path: Option<String>,
+        sqlite_durability: Option<PySqliteDurability>,
+        postgres_dsn: Option<String>,
     ) -> PyResult<Bound<'_, PyAny>> {
         let (common, sidecar) = linked_common(
             py,
             instruction,
             capabilities,
             active_capabilities,
-            openrouter_media_api_key,
-            openrouter_media_referer,
-            openrouter_media_title,
-            video_compose_ffmpeg_path,
-            video_compose_ffprobe_path,
-            video_compose_scratch_dir,
-            video_compose_render_timeout_s,
-            media_pipeline_max_scenes,
-            media_pipeline_max_total_video_s,
-            media_pipeline_max_concurrent_jobs,
-            media_pipeline_sqlite_state_path,
             toolsets,
             context_providers,
             middleware,
@@ -349,17 +391,21 @@ impl PyAgent {
             approval_grant,
             artifact_path,
             artifact_store,
+            document_tools,
         )?;
         sidecar.build(
             py,
-            Agent::linked(LinkedProviderSpec::OpenAi(OpenAiAgentSpec {
-                model,
-                api_key,
-                reasoning_effort,
-                reasoning_summary,
-                media_tools,
-                common,
-            })),
+            build_linked_agent(
+                LinkedProviderSpec::OpenAi(OpenAiAgentSpec {
+                    model,
+                    api_key,
+                    reasoning_effort,
+                    reasoning_summary,
+
+                    common,
+                }),
+                (sqlite_path, sqlite_durability, postgres_dsn),
+            ),
         )
     }
 
@@ -371,14 +417,11 @@ impl PyAgent {
     /// headers. Does not attach a `MediaResolver`; vision, file, and audio
     /// input require a host-built provider because Python factories do not
     /// accept host callback resolvers across FFI.
-    /// `media_tools` registers outbound media-generation tools only.
-    /// `openrouter_media_*` registers the same toolset from an explicit key
-    /// and cannot be combined with `media_tools`.
     #[staticmethod]
-    #[pyo3(signature = (model, instruction = None, capabilities = None, active_capabilities = None, *, api_key, referer = None, title = None, reasoning_effort = None, reasoning_summary = None, media_tools = false, openrouter_media_api_key = None, openrouter_media_referer = None, openrouter_media_title = None, video_compose_ffmpeg_path = None, video_compose_ffprobe_path = None, video_compose_scratch_dir = None, video_compose_render_timeout_s = None, media_pipeline_max_scenes = None, media_pipeline_max_total_video_s = None, media_pipeline_max_concurrent_jobs = None, media_pipeline_sqlite_state_path = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None, approval_grant = None, artifact_path = None, artifact_store = None))]
+    #[pyo3(signature = (model, instruction = None, capabilities = None, active_capabilities = None, *, api_key, referer = None, title = None, reasoning_effort = None, reasoning_summary = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None, approval_grant = None, artifact_path = None, artifact_store = None, document_tools = true, sqlite_path = None, sqlite_durability = None, postgres_dsn = None))]
     #[expect(
         clippy::too_many_arguments,
-        reason = "linked factory forwards provider auth, attribution, reasoning, media toolset, and primary port components distinctly"
+        reason = "linked factory forwards provider auth, attribution, reasoning, and primary port components distinctly"
     )]
     fn openrouter(
         py: Python<'_>,
@@ -391,18 +434,7 @@ impl PyAgent {
         title: Option<String>,
         reasoning_effort: Option<String>,
         reasoning_summary: Option<String>,
-        media_tools: bool,
-        openrouter_media_api_key: Option<String>,
-        openrouter_media_referer: Option<String>,
-        openrouter_media_title: Option<String>,
-        video_compose_ffmpeg_path: Option<String>,
-        video_compose_ffprobe_path: Option<String>,
-        video_compose_scratch_dir: Option<String>,
-        video_compose_render_timeout_s: Option<u64>,
-        media_pipeline_max_scenes: Option<usize>,
-        media_pipeline_max_total_video_s: Option<u64>,
-        media_pipeline_max_concurrent_jobs: Option<usize>,
-        media_pipeline_sqlite_state_path: Option<String>,
+
         toolsets: Option<Vec<PyToolsetArg>>,
         context_providers: Option<Vec<PyContextProviderArg>>,
         middleware: Option<Vec<PyMiddlewareArg>>,
@@ -411,24 +443,17 @@ impl PyAgent {
         child_runs: Option<Py<PyChildRunPolicy>>,
         approval_grant: Option<Py<PyApprovalGrantMode>>,
         artifact_path: Option<String>,
-        artifact_store: Option<Py<PyS3ArtifactStore>>,
+        artifact_store: Option<PyArtifactStoreArg>,
+        document_tools: bool,
+        sqlite_path: Option<String>,
+        sqlite_durability: Option<PySqliteDurability>,
+        postgres_dsn: Option<String>,
     ) -> PyResult<Bound<'_, PyAny>> {
         let (common, sidecar) = linked_common(
             py,
             instruction,
             capabilities,
             active_capabilities,
-            openrouter_media_api_key,
-            openrouter_media_referer,
-            openrouter_media_title,
-            video_compose_ffmpeg_path,
-            video_compose_ffprobe_path,
-            video_compose_scratch_dir,
-            video_compose_render_timeout_s,
-            media_pipeline_max_scenes,
-            media_pipeline_max_total_video_s,
-            media_pipeline_max_concurrent_jobs,
-            media_pipeline_sqlite_state_path,
             toolsets,
             context_providers,
             middleware,
@@ -438,19 +463,23 @@ impl PyAgent {
             approval_grant,
             artifact_path,
             artifact_store,
+            document_tools,
         )?;
         sidecar.build(
             py,
-            Agent::linked(LinkedProviderSpec::OpenRouter(OpenRouterAgentSpec {
-                model,
-                api_key,
-                referer,
-                title,
-                reasoning_effort,
-                reasoning_summary,
-                media_tools,
-                common,
-            })),
+            build_linked_agent(
+                LinkedProviderSpec::OpenRouter(OpenRouterAgentSpec {
+                    model,
+                    api_key,
+                    referer,
+                    title,
+                    reasoning_effort,
+                    reasoning_summary,
+
+                    common,
+                }),
+                (sqlite_path, sqlite_durability, postgres_dsn),
+            ),
         )
     }
 
@@ -460,10 +489,10 @@ impl PyAgent {
     /// required when `api_key` is set; the binding does not read environment
     /// variables.
     #[staticmethod]
-    #[pyo3(signature = (base_url, model, api_key = None, instruction = None, capabilities = None, active_capabilities = None, *, openrouter_media_api_key = None, openrouter_media_referer = None, openrouter_media_title = None, video_compose_ffmpeg_path = None, video_compose_ffprobe_path = None, video_compose_scratch_dir = None, video_compose_render_timeout_s = None, media_pipeline_max_scenes = None, media_pipeline_max_total_video_s = None, media_pipeline_max_concurrent_jobs = None, media_pipeline_sqlite_state_path = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None, approval_grant = None, artifact_path = None, artifact_store = None))]
+    #[pyo3(signature = (base_url, model, api_key = None, instruction = None, capabilities = None, active_capabilities = None, *, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None, approval_grant = None, artifact_path = None, artifact_store = None, document_tools = true, sqlite_path = None, sqlite_durability = None, postgres_dsn = None))]
     #[expect(
         clippy::too_many_arguments,
-        reason = "linked factory forwards provider auth, media toolset, and primary port components distinctly"
+        reason = "linked factory forwards provider auth and primary port components distinctly"
     )]
     fn anthropic(
         py: Python<'_>,
@@ -473,17 +502,7 @@ impl PyAgent {
         instruction: Option<String>,
         capabilities: Option<Vec<Py<PyCapability>>>,
         active_capabilities: Option<Vec<String>>,
-        openrouter_media_api_key: Option<String>,
-        openrouter_media_referer: Option<String>,
-        openrouter_media_title: Option<String>,
-        video_compose_ffmpeg_path: Option<String>,
-        video_compose_ffprobe_path: Option<String>,
-        video_compose_scratch_dir: Option<String>,
-        video_compose_render_timeout_s: Option<u64>,
-        media_pipeline_max_scenes: Option<usize>,
-        media_pipeline_max_total_video_s: Option<u64>,
-        media_pipeline_max_concurrent_jobs: Option<usize>,
-        media_pipeline_sqlite_state_path: Option<String>,
+
         toolsets: Option<Vec<PyToolsetArg>>,
         context_providers: Option<Vec<PyContextProviderArg>>,
         middleware: Option<Vec<PyMiddlewareArg>>,
@@ -492,24 +511,17 @@ impl PyAgent {
         child_runs: Option<Py<PyChildRunPolicy>>,
         approval_grant: Option<Py<PyApprovalGrantMode>>,
         artifact_path: Option<String>,
-        artifact_store: Option<Py<PyS3ArtifactStore>>,
+        artifact_store: Option<PyArtifactStoreArg>,
+        document_tools: bool,
+        sqlite_path: Option<String>,
+        sqlite_durability: Option<PySqliteDurability>,
+        postgres_dsn: Option<String>,
     ) -> PyResult<Bound<'_, PyAny>> {
         let (common, sidecar) = linked_common(
             py,
             instruction,
             capabilities,
             active_capabilities,
-            openrouter_media_api_key,
-            openrouter_media_referer,
-            openrouter_media_title,
-            video_compose_ffmpeg_path,
-            video_compose_ffprobe_path,
-            video_compose_scratch_dir,
-            video_compose_render_timeout_s,
-            media_pipeline_max_scenes,
-            media_pipeline_max_total_video_s,
-            media_pipeline_max_concurrent_jobs,
-            media_pipeline_sqlite_state_path,
             toolsets,
             context_providers,
             middleware,
@@ -519,15 +531,19 @@ impl PyAgent {
             approval_grant,
             artifact_path,
             artifact_store,
+            document_tools,
         )?;
         sidecar.build(
             py,
-            Agent::linked(LinkedProviderSpec::Anthropic(AnthropicAgentSpec {
-                base_url,
-                model,
-                api_key,
-                common,
-            })),
+            build_linked_agent(
+                LinkedProviderSpec::Anthropic(AnthropicAgentSpec {
+                    base_url,
+                    model,
+                    api_key,
+                    common,
+                }),
+                (sqlite_path, sqlite_durability, postgres_dsn),
+            ),
         )
     }
 
@@ -538,10 +554,10 @@ impl PyAgent {
     /// variables. Does not hardcode the Google host: `endpoint` is passed
     /// straight into the provider's `GeminiConfig::try_new`.
     #[staticmethod]
-    #[pyo3(signature = (endpoint, model, api_key = None, instruction = None, capabilities = None, active_capabilities = None, *, openrouter_media_api_key = None, openrouter_media_referer = None, openrouter_media_title = None, video_compose_ffmpeg_path = None, video_compose_ffprobe_path = None, video_compose_scratch_dir = None, video_compose_render_timeout_s = None, media_pipeline_max_scenes = None, media_pipeline_max_total_video_s = None, media_pipeline_max_concurrent_jobs = None, media_pipeline_sqlite_state_path = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None, approval_grant = None, artifact_path = None, artifact_store = None))]
+    #[pyo3(signature = (endpoint, model, api_key = None, instruction = None, capabilities = None, active_capabilities = None, *, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None, approval_grant = None, artifact_path = None, artifact_store = None, document_tools = true, sqlite_path = None, sqlite_durability = None, postgres_dsn = None))]
     #[expect(
         clippy::too_many_arguments,
-        reason = "linked factory forwards provider auth, media toolset, and primary port components distinctly"
+        reason = "linked factory forwards provider auth and primary port components distinctly"
     )]
     fn gemini(
         py: Python<'_>,
@@ -551,17 +567,7 @@ impl PyAgent {
         instruction: Option<String>,
         capabilities: Option<Vec<Py<PyCapability>>>,
         active_capabilities: Option<Vec<String>>,
-        openrouter_media_api_key: Option<String>,
-        openrouter_media_referer: Option<String>,
-        openrouter_media_title: Option<String>,
-        video_compose_ffmpeg_path: Option<String>,
-        video_compose_ffprobe_path: Option<String>,
-        video_compose_scratch_dir: Option<String>,
-        video_compose_render_timeout_s: Option<u64>,
-        media_pipeline_max_scenes: Option<usize>,
-        media_pipeline_max_total_video_s: Option<u64>,
-        media_pipeline_max_concurrent_jobs: Option<usize>,
-        media_pipeline_sqlite_state_path: Option<String>,
+
         toolsets: Option<Vec<PyToolsetArg>>,
         context_providers: Option<Vec<PyContextProviderArg>>,
         middleware: Option<Vec<PyMiddlewareArg>>,
@@ -570,24 +576,17 @@ impl PyAgent {
         child_runs: Option<Py<PyChildRunPolicy>>,
         approval_grant: Option<Py<PyApprovalGrantMode>>,
         artifact_path: Option<String>,
-        artifact_store: Option<Py<PyS3ArtifactStore>>,
+        artifact_store: Option<PyArtifactStoreArg>,
+        document_tools: bool,
+        sqlite_path: Option<String>,
+        sqlite_durability: Option<PySqliteDurability>,
+        postgres_dsn: Option<String>,
     ) -> PyResult<Bound<'_, PyAny>> {
         let (common, sidecar) = linked_common(
             py,
             instruction,
             capabilities,
             active_capabilities,
-            openrouter_media_api_key,
-            openrouter_media_referer,
-            openrouter_media_title,
-            video_compose_ffmpeg_path,
-            video_compose_ffprobe_path,
-            video_compose_scratch_dir,
-            video_compose_render_timeout_s,
-            media_pipeline_max_scenes,
-            media_pipeline_max_total_video_s,
-            media_pipeline_max_concurrent_jobs,
-            media_pipeline_sqlite_state_path,
             toolsets,
             context_providers,
             middleware,
@@ -597,15 +596,19 @@ impl PyAgent {
             approval_grant,
             artifact_path,
             artifact_store,
+            document_tools,
         )?;
         sidecar.build(
             py,
-            Agent::linked(LinkedProviderSpec::Gemini(GeminiAgentSpec {
-                endpoint,
-                model,
-                api_key,
-                common,
-            })),
+            build_linked_agent(
+                LinkedProviderSpec::Gemini(GeminiAgentSpec {
+                    endpoint,
+                    model,
+                    api_key,
+                    common,
+                }),
+                (sqlite_path, sqlite_durability, postgres_dsn),
+            ),
         )
     }
 
@@ -614,7 +617,7 @@ impl PyAgent {
     /// Python port lists are keyword-only. This factory does not accept an
     /// API key.
     #[staticmethod]
-    #[pyo3(signature = (base_url, model, instruction = None, capabilities = None, active_capabilities = None, *, openrouter_media_api_key = None, openrouter_media_referer = None, openrouter_media_title = None, video_compose_ffmpeg_path = None, video_compose_ffprobe_path = None, video_compose_scratch_dir = None, video_compose_render_timeout_s = None, media_pipeline_max_scenes = None, media_pipeline_max_total_video_s = None, media_pipeline_max_concurrent_jobs = None, media_pipeline_sqlite_state_path = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None, approval_grant = None, artifact_path = None, artifact_store = None))]
+    #[pyo3(signature = (base_url, model, instruction = None, capabilities = None, active_capabilities = None, *, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None, approval_grant = None, artifact_path = None, artifact_store = None, document_tools = true, sqlite_path = None, sqlite_durability = None, postgres_dsn = None))]
     #[expect(
         clippy::too_many_arguments,
         reason = "linked factory forwards media toolset and primary port components distinctly"
@@ -626,17 +629,7 @@ impl PyAgent {
         instruction: Option<String>,
         capabilities: Option<Vec<Py<PyCapability>>>,
         active_capabilities: Option<Vec<String>>,
-        openrouter_media_api_key: Option<String>,
-        openrouter_media_referer: Option<String>,
-        openrouter_media_title: Option<String>,
-        video_compose_ffmpeg_path: Option<String>,
-        video_compose_ffprobe_path: Option<String>,
-        video_compose_scratch_dir: Option<String>,
-        video_compose_render_timeout_s: Option<u64>,
-        media_pipeline_max_scenes: Option<usize>,
-        media_pipeline_max_total_video_s: Option<u64>,
-        media_pipeline_max_concurrent_jobs: Option<usize>,
-        media_pipeline_sqlite_state_path: Option<String>,
+
         toolsets: Option<Vec<PyToolsetArg>>,
         context_providers: Option<Vec<PyContextProviderArg>>,
         middleware: Option<Vec<PyMiddlewareArg>>,
@@ -645,24 +638,17 @@ impl PyAgent {
         child_runs: Option<Py<PyChildRunPolicy>>,
         approval_grant: Option<Py<PyApprovalGrantMode>>,
         artifact_path: Option<String>,
-        artifact_store: Option<Py<PyS3ArtifactStore>>,
+        artifact_store: Option<PyArtifactStoreArg>,
+        document_tools: bool,
+        sqlite_path: Option<String>,
+        sqlite_durability: Option<PySqliteDurability>,
+        postgres_dsn: Option<String>,
     ) -> PyResult<Bound<'_, PyAny>> {
         let (common, sidecar) = linked_common(
             py,
             instruction,
             capabilities,
             active_capabilities,
-            openrouter_media_api_key,
-            openrouter_media_referer,
-            openrouter_media_title,
-            video_compose_ffmpeg_path,
-            video_compose_ffprobe_path,
-            video_compose_scratch_dir,
-            video_compose_render_timeout_s,
-            media_pipeline_max_scenes,
-            media_pipeline_max_total_video_s,
-            media_pipeline_max_concurrent_jobs,
-            media_pipeline_sqlite_state_path,
             toolsets,
             context_providers,
             middleware,
@@ -672,14 +658,18 @@ impl PyAgent {
             approval_grant,
             artifact_path,
             artifact_store,
+            document_tools,
         )?;
         sidecar.build(
             py,
-            Agent::linked(LinkedProviderSpec::Ollama(OllamaAgentSpec {
-                base_url,
-                model,
-                common,
-            })),
+            build_linked_agent(
+                LinkedProviderSpec::Ollama(OllamaAgentSpec {
+                    base_url,
+                    model,
+                    common,
+                }),
+                (sqlite_path, sqlite_durability, postgres_dsn),
+            ),
         )
     }
 
@@ -689,10 +679,10 @@ impl PyAgent {
     /// required. `openai_chat` is a configuration error. The binding does
     /// not read environment variables.
     #[staticmethod]
-    #[pyo3(signature = (endpoint, model, instruction = None, capabilities = None, active_capabilities = None, *, wire_protocol, credential_name, hard_input_bytes = None, auth = None, api_key = None, openrouter_media_api_key = None, openrouter_media_referer = None, openrouter_media_title = None, video_compose_ffmpeg_path = None, video_compose_ffprobe_path = None, video_compose_scratch_dir = None, video_compose_render_timeout_s = None, media_pipeline_max_scenes = None, media_pipeline_max_total_video_s = None, media_pipeline_max_concurrent_jobs = None, media_pipeline_sqlite_state_path = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None, approval_grant = None, artifact_path = None, artifact_store = None))]
+    #[pyo3(signature = (endpoint, model, instruction = None, capabilities = None, active_capabilities = None, *, wire_protocol, credential_name, hard_input_bytes = None, auth = None, api_key = None, toolsets = None, context_providers = None, middleware = None, observers = None, output_type = None, child_runs = None, approval_grant = None, artifact_path = None, artifact_store = None, document_tools = true, sqlite_path = None, sqlite_durability = None, postgres_dsn = None))]
     #[expect(
         clippy::too_many_arguments,
-        reason = "linked factory forwards gateway route, auth, media toolset, and primary port components distinctly"
+        reason = "linked factory forwards gateway route, auth and primary port components distinctly"
     )]
     fn gateway(
         py: Python<'_>,
@@ -706,17 +696,7 @@ impl PyAgent {
         hard_input_bytes: Option<u64>,
         auth: Option<String>,
         api_key: Option<String>,
-        openrouter_media_api_key: Option<String>,
-        openrouter_media_referer: Option<String>,
-        openrouter_media_title: Option<String>,
-        video_compose_ffmpeg_path: Option<String>,
-        video_compose_ffprobe_path: Option<String>,
-        video_compose_scratch_dir: Option<String>,
-        video_compose_render_timeout_s: Option<u64>,
-        media_pipeline_max_scenes: Option<usize>,
-        media_pipeline_max_total_video_s: Option<u64>,
-        media_pipeline_max_concurrent_jobs: Option<usize>,
-        media_pipeline_sqlite_state_path: Option<String>,
+
         toolsets: Option<Vec<PyToolsetArg>>,
         context_providers: Option<Vec<PyContextProviderArg>>,
         middleware: Option<Vec<PyMiddlewareArg>>,
@@ -725,24 +705,17 @@ impl PyAgent {
         child_runs: Option<Py<PyChildRunPolicy>>,
         approval_grant: Option<Py<PyApprovalGrantMode>>,
         artifact_path: Option<String>,
-        artifact_store: Option<Py<PyS3ArtifactStore>>,
+        artifact_store: Option<PyArtifactStoreArg>,
+        document_tools: bool,
+        sqlite_path: Option<String>,
+        sqlite_durability: Option<PySqliteDurability>,
+        postgres_dsn: Option<String>,
     ) -> PyResult<Bound<'_, PyAny>> {
         let (common, sidecar) = linked_common(
             py,
             instruction,
             capabilities,
             active_capabilities,
-            openrouter_media_api_key,
-            openrouter_media_referer,
-            openrouter_media_title,
-            video_compose_ffmpeg_path,
-            video_compose_ffprobe_path,
-            video_compose_scratch_dir,
-            video_compose_render_timeout_s,
-            media_pipeline_max_scenes,
-            media_pipeline_max_total_video_s,
-            media_pipeline_max_concurrent_jobs,
-            media_pipeline_sqlite_state_path,
             toolsets,
             context_providers,
             middleware,
@@ -752,25 +725,29 @@ impl PyAgent {
             approval_grant,
             artifact_path,
             artifact_store,
+            document_tools,
         )?;
         sidecar.build(
             py,
-            Agent::linked(LinkedProviderSpec::Gateway(GatewayAgentSpec {
-                endpoint,
-                model,
-                wire_protocol,
-                credential_name,
-                hard_input_bytes,
-                auth_kind: auth,
-                api_key,
-                common,
-            })),
+            build_linked_agent(
+                LinkedProviderSpec::Gateway(GatewayAgentSpec {
+                    endpoint,
+                    model,
+                    wire_protocol,
+                    credential_name,
+                    hard_input_bytes,
+                    auth_kind: auth,
+                    api_key,
+                    common,
+                }),
+                (sqlite_path, sqlite_durability, postgres_dsn),
+            ),
         )
     }
 
     /// Construct an agent from trusted coarse Python model and Toolset callbacks.
     #[staticmethod]
-    #[pyo3(signature = (model, toolsets = None, instruction = None, output_type = None, capabilities = None, active_capabilities = None, context_providers = None, middleware = None, observers = None, *, child_runs = None, approval_grant = None, sqlite_path = None, sqlite_durability = None, artifact_path = None, artifact_store = None, capability_toolsets = None, postgres_dsn = None))]
+    #[pyo3(signature = (model, toolsets = None, instruction = None, output_type = None, capabilities = None, active_capabilities = None, context_providers = None, middleware = None, observers = None, *, child_runs = None, approval_grant = None, sqlite_path = None, sqlite_durability = None, artifact_path = None, artifact_store = None, document_tools = true, capability_toolsets = None, postgres_dsn = None))]
     #[expect(
         clippy::too_many_arguments,
         reason = "Python callback factory forwards all primary port components distinctly"
@@ -791,7 +768,8 @@ impl PyAgent {
         sqlite_path: Option<String>,
         sqlite_durability: Option<PySqliteDurability>,
         artifact_path: Option<String>,
-        artifact_store: Option<Py<PyS3ArtifactStore>>,
+        artifact_store: Option<PyArtifactStoreArg>,
+        document_tools: bool,
         capability_toolsets: Option<Vec<PyToolsetArg>>,
         postgres_dsn: Option<String>,
     ) -> PyResult<Bound<'py, PyAny>> {
@@ -799,6 +777,7 @@ impl PyAgent {
         let model_name = model.model_name();
         let model = model.registration();
         let LinkedPorts {
+            mut media,
             ports,
             sidecar,
             skills,
@@ -811,24 +790,23 @@ impl PyAgent {
             output_type,
             artifact_path,
             artifact_store,
+            document_tools,
         )?;
         let capability_toolsets = capability_toolsets
             .unwrap_or_default()
             .into_iter()
-            .map(|toolset| toolset.registration(py, &sidecar.artifact_store))
+            .map(|toolset| toolset.registration(py, &sidecar.artifact_store, &mut media))
             .collect::<PyResult<Vec<_>>>()?;
         let (capabilities, active_capabilities) =
             capability_configuration(py, capabilities, active_capabilities)?;
         let common = LinkedCommon {
+            journal_store: None,
             instruction,
             capabilities,
             active_capabilities,
             ports,
             child_runs: child_runs_or_deny(py, child_runs),
             approval_grant: approval_grant_or_per_call(py, approval_grant),
-            openrouter_media: None,
-            video_compose: None,
-            media_pipeline: None,
         };
         sidecar.build(
             py,
@@ -1220,6 +1198,7 @@ impl AgentSidecar {
 
 /// Port registrations assembled from the factory keyword arguments.
 struct LinkedPorts {
+    media: MediaRegistrations,
     ports: LinkedAgentPorts,
     sidecar: AgentSidecar,
     /// Deferred skills toolset: its catalog depends on the declared
@@ -1230,8 +1209,11 @@ struct LinkedPorts {
 /// Build the shared artifact store plus the
 /// `DocumentToolset`/`DocumentIngestMiddleware` registrations that share it.
 ///
-/// Every agent factory registers these unconditionally (mirroring the
-/// document-ingest lane test's wiring) so `Agent.run`/`start` can stage
+/// Every agent factory registers the shared store and ingestion middleware.
+/// The document toolset is optional (`document_tools=false` creates tool-free
+/// grader compositions when no explicit toolsets/capabilities are supplied).
+/// The default preserves the
+/// document-ingest lane test's wiring, so `Agent.run`/`start` can stage
 /// `Attachment` inputs against the exact store instance the toolset and
 /// middleware read from. Without `artifact_path` the store is a fresh
 /// process-local `InProcessArtifactStore`; with it, a filesystem-backed
@@ -1245,15 +1227,8 @@ type DocumentIngestPorts = (
     (ComponentRef, Arc<dyn Middleware>),
 );
 
-/// `DocumentIngestMiddleware`'s checked-in invocation version
-/// (`INGEST_VERSION` in `finstack-ai-middleware-document-ingest::lib`).
-/// `validate_middleware_descriptor` requires the registered `ComponentRef`
-/// to match the handle's own reported `(component id, version)` exactly, so
-/// this must track that crate's constant rather than the binding's generic
-/// `PREVIEW_VERSION`. `DocumentToolset` has no equivalent version check, but
-/// the same value is reused for its registration for consistency (mirrors
-/// `crates/finstack-ai-test/tests/lanes/document_ingest.rs`).
-const DOCUMENT_INGEST_VERSION: Version = Version {
+/// Explicit registration version of the native document toolset.
+const DOCUMENT_TOOLSET_VERSION: Version = Version {
     major: 1,
     minor: 0,
     patch: 0,
@@ -1278,14 +1253,14 @@ fn document_ingest_ports(
     Ok((
         Arc::clone(&dyn_store),
         (
-            component("finstack.tools.document", DOCUMENT_INGEST_VERSION)?,
+            component("finstack.tools.document", DOCUMENT_TOOLSET_VERSION)?,
             Arc::new(toolset) as Arc<dyn Toolset>,
         ),
         (
-            component(
-                "finstack.middleware.document-ingest",
-                DOCUMENT_INGEST_VERSION,
-            )?,
+            ComponentRef::new(
+                middleware.descriptor().invocation.component,
+                Some(middleware.descriptor().invocation.version),
+            ),
             Arc::new(middleware) as Arc<dyn Middleware>,
         ),
     ))
@@ -1303,14 +1278,15 @@ fn linked_ports(
     observers: Option<Vec<PyObserverArg>>,
     output_type: Option<Py<PyAny>>,
     artifact_path: Option<String>,
-    artifact_store: Option<Py<PyS3ArtifactStore>>,
+    artifact_store: Option<PyArtifactStoreArg>,
+    document_tools: bool,
 ) -> PyResult<LinkedPorts> {
     if artifact_path.is_some() && artifact_store.is_some() {
         return Err(PyValueError::new_err(
             "artifact_path and artifact_store are mutually exclusive",
         ));
     }
-    let explicit_store = artifact_store.map(|store| Arc::clone(&store.bind(py).borrow().inner));
+    let explicit_store = artifact_store.map(|store| store.inner(py));
     let (artifact_store, document_toolset, document_middleware) =
         document_ingest_ports(artifact_path, explicit_store)
             .map_err(|error| agent_error(&error, None))?;
@@ -1329,11 +1305,14 @@ fn linked_ports(
             other => plain.push(other),
         }
     }
+    let mut media = MediaRegistrations::new(Arc::clone(&artifact_store));
     let mut toolsets = plain
         .into_iter()
-        .map(|toolset| toolset.registration(py, &artifact_store))
+        .map(|toolset| toolset.registration(py, &artifact_store, &mut media))
         .collect::<PyResult<Vec<_>>>()?;
-    toolsets.push(document_toolset);
+    if document_tools {
+        toolsets.push(document_toolset);
+    }
     let middleware_args = middleware.unwrap_or_default();
     let compaction_authorization = middleware_args.iter().find_map(|entry| match entry {
         PyMiddlewareArg::Compaction(handle) => handle.bind(py).borrow().authorization(),
@@ -1349,7 +1328,7 @@ fn linked_ports(
         .into_iter()
         .map(|provider| provider.registration(py, &artifact_store))
         .collect::<PyResult<Vec<_>>>()?;
-    let observers = observers
+    let observers: Vec<_> = observers
         .unwrap_or_default()
         .into_iter()
         .map(|observer| observer.registration(py))
@@ -1359,12 +1338,16 @@ fn linked_ports(
         .transpose()?
         .unzip();
     Ok(LinkedPorts {
+        media,
         ports: LinkedAgentPorts {
             toolsets,
             artifact_store: Some(Arc::clone(&artifact_store)),
-            context_providers,
-            middleware,
-            observers,
+            context_providers: context_providers
+                .into_iter()
+                .map(|(_, handle)| handle)
+                .collect(),
+            middleware: middleware.into_iter().map(|(_, handle)| handle).collect(),
+            observers: observers.into_iter().map(|(_, handle)| handle).collect(),
             output_schema,
         },
         sidecar: AgentSidecar {
@@ -1387,17 +1370,7 @@ fn linked_common(
     instruction: Option<String>,
     capabilities: Option<Vec<Py<PyCapability>>>,
     active_capabilities: Option<Vec<String>>,
-    openrouter_media_api_key: Option<String>,
-    openrouter_media_referer: Option<String>,
-    openrouter_media_title: Option<String>,
-    video_compose_ffmpeg_path: Option<String>,
-    video_compose_ffprobe_path: Option<String>,
-    video_compose_scratch_dir: Option<String>,
-    video_compose_render_timeout_s: Option<u64>,
-    media_pipeline_max_scenes: Option<usize>,
-    media_pipeline_max_total_video_s: Option<u64>,
-    media_pipeline_max_concurrent_jobs: Option<usize>,
-    media_pipeline_sqlite_state_path: Option<String>,
+
     toolsets: Option<Vec<PyToolsetArg>>,
     context_providers: Option<Vec<PyContextProviderArg>>,
     middleware: Option<Vec<PyMiddlewareArg>>,
@@ -1406,28 +1379,13 @@ fn linked_common(
     child_runs: Option<Py<PyChildRunPolicy>>,
     approval_grant: Option<Py<PyApprovalGrantMode>>,
     artifact_path: Option<String>,
-    artifact_store: Option<Py<PyS3ArtifactStore>>,
+    artifact_store: Option<PyArtifactStoreArg>,
+    document_tools: bool,
 ) -> PyResult<(LinkedCommon, AgentSidecar)> {
     let (capabilities, active_capabilities) =
         capability_configuration(py, capabilities, active_capabilities)?;
-    let openrouter_media = openrouter_media_spec(
-        openrouter_media_api_key,
-        openrouter_media_referer,
-        openrouter_media_title,
-    )?;
-    let video_compose = video_compose_spec(
-        video_compose_ffmpeg_path,
-        video_compose_ffprobe_path,
-        video_compose_scratch_dir,
-        video_compose_render_timeout_s,
-    )?;
-    let media_pipeline = media_pipeline_spec(
-        media_pipeline_max_scenes,
-        media_pipeline_max_total_video_s,
-        media_pipeline_max_concurrent_jobs,
-        media_pipeline_sqlite_state_path,
-    )?;
     let LinkedPorts {
+        media: _,
         ports,
         sidecar,
         skills,
@@ -1440,6 +1398,7 @@ fn linked_common(
         output_type,
         artifact_path,
         artifact_store,
+        document_tools,
     )?;
     // The linked provider factories build through `Agent::linked`, which has
     // no builder access, so the deferred skills toolset cannot attach its
@@ -1451,18 +1410,34 @@ fn linked_common(
     }
     Ok((
         LinkedCommon {
+            journal_store: None,
             instruction,
             capabilities,
             active_capabilities,
             ports,
             child_runs: child_runs_or_deny(py, child_runs),
             approval_grant: approval_grant_or_per_call(py, approval_grant),
-            openrouter_media,
-            video_compose,
-            media_pipeline,
         },
         sidecar,
     ))
+}
+
+/// Open the same explicit journal choices for every linked provider.
+async fn build_linked_agent(
+    mut spec: LinkedProviderSpec,
+    journal: (Option<String>, Option<PySqliteDurability>, Option<String>),
+) -> Result<LinkedAgent, AgentRunError> {
+    let store = open_journal_registration(journal).await?;
+    let common = match &mut spec {
+        LinkedProviderSpec::OpenAi(spec) => &mut spec.common,
+        LinkedProviderSpec::OpenRouter(spec) => &mut spec.common,
+        LinkedProviderSpec::Anthropic(spec) => &mut spec.common,
+        LinkedProviderSpec::Gemini(spec) => &mut spec.common,
+        LinkedProviderSpec::Ollama(spec) => &mut spec.common,
+        LinkedProviderSpec::Gateway(spec) => &mut spec.common,
+    };
+    common.journal_store = Some(store);
+    Agent::linked(spec).await
 }
 
 async fn build_python_agent(
@@ -1473,22 +1448,14 @@ async fn build_python_agent(
     skills: Option<ComponentRef>,
     capability_toolsets: Vec<(ComponentRef, Arc<dyn Toolset>)>,
 ) -> Result<LinkedAgent, AgentRunError> {
-    let (sqlite_path, sqlite_durability, postgres_dsn) = journal;
-    let store_component = if postgres_dsn.is_some() {
-        "python.store.postgres"
-    } else if sqlite_path.is_some() {
-        "python.store.sqlite"
-    } else {
-        "python.store.memory"
-    };
-    let store = open_journal_store(sqlite_path, sqlite_durability, postgres_dsn).await?;
+    let store = open_journal_registration(journal).await?;
     let mut builder = Agent::builder(
         AgentId::parse("python.agent.callbacks")
             .map_err(|error| configuration_error(error.to_string()))?,
         BundleId::parse("python.bundle.callbacks")
             .map_err(|error| configuration_error(error.to_string()))?,
         model,
-        (component(store_component, PREVIEW_VERSION)?, store),
+        store,
     );
     if let Some(skills_component) = skills {
         let (registration, host) = build_skills_ports(skills_component, &common.capabilities)?;
@@ -1522,84 +1489,6 @@ fn approval_grant_or_per_call(
     approval_grant.map_or(ApprovalGrantMode::PerCall, |mode| {
         mode.bind(py).borrow().to_rust()
     })
-}
-
-/// Build an optional `OpenRouter` media-toolset spec from the keyword-only
-/// binding arguments. `api_key = None` with `referer`/`title` set is a
-/// configuration error, since attribution without a credential is nonsensical.
-fn openrouter_media_spec(
-    api_key: Option<String>,
-    referer: Option<String>,
-    title: Option<String>,
-) -> PyResult<Option<OpenRouterMediaToolsSpec>> {
-    match api_key {
-        Some(api_key) => Ok(Some(OpenRouterMediaToolsSpec {
-            api_key,
-            referer,
-            title,
-        })),
-        None if referer.is_some() || title.is_some() => Err(PyValueError::new_err(
-            "openrouter_media_referer/openrouter_media_title require openrouter_media_api_key",
-        )),
-        None => Ok(None),
-    }
-}
-
-/// Map the `video_compose_*` kwargs onto the facade spec.
-///
-/// The four fields are one unit: a partial route would have to invent an
-/// ffprobe path, a scratch directory, or a render ceiling, and this binding
-/// never invents host paths.
-fn video_compose_spec(
-    ffmpeg_path: Option<String>,
-    ffprobe_path: Option<String>,
-    scratch_dir: Option<String>,
-    render_timeout_s: Option<u64>,
-) -> PyResult<Option<VideoComposeSpec>> {
-    match (ffmpeg_path, ffprobe_path, scratch_dir, render_timeout_s) {
-        (None, None, None, None) => Ok(None),
-        (Some(ffmpeg_path), Some(ffprobe_path), Some(scratch_dir), Some(render_timeout_s)) => {
-            Ok(Some(VideoComposeSpec {
-                ffmpeg_path: ffmpeg_path.into(),
-                ffprobe_path: ffprobe_path.into(),
-                scratch_dir: scratch_dir.into(),
-                render_timeout_s,
-            }))
-        }
-        _ => Err(PyValueError::new_err(
-            "video_compose_ffmpeg_path, video_compose_ffprobe_path, \
-             video_compose_scratch_dir, and video_compose_render_timeout_s \
-             must be set together",
-        )),
-    }
-}
-
-/// Map the `media_pipeline_*` kwargs onto the facade spec.
-///
-/// The three limits are one unit; the sqlite path stays optional because
-/// process-local render state is a valid, documented choice.
-fn media_pipeline_spec(
-    max_scenes: Option<usize>,
-    max_total_video_s: Option<u64>,
-    max_concurrent_jobs: Option<usize>,
-    sqlite_state_path: Option<String>,
-) -> PyResult<Option<MediaPipelineSpec>> {
-    match (max_scenes, max_total_video_s, max_concurrent_jobs) {
-        (None, None, None) if sqlite_state_path.is_none() => Ok(None),
-        (Some(max_scenes), Some(max_total_video_s), Some(max_concurrent_jobs)) => {
-            Ok(Some(MediaPipelineSpec {
-                max_scenes,
-                max_total_video_s,
-                max_concurrent_jobs,
-                sqlite_state_path: sqlite_state_path.map(Into::into),
-            }))
-        }
-        _ => Err(PyValueError::new_err(
-            "media_pipeline_max_scenes, media_pipeline_max_total_video_s, and \
-             media_pipeline_max_concurrent_jobs must be set together to enable \
-             the media pipeline",
-        )),
-    }
 }
 
 pub(crate) fn empty_model_settings() -> Result<ModelSettings, AgentRunError> {

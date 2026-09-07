@@ -41,6 +41,31 @@ pub trait PortsFactory: Send + Sync {
     fn bind(&self, session: WorkflowSession) -> Result<WorkflowSession, WorkerError>;
 }
 
+/// Host-owned stage advancement for an already accepted workflow.
+///
+/// The worker owns leases, inbox settlement and parking. Implementations own
+/// application stage decisions and return at the next durable wait. They must
+/// not accept another run or append the original input on recovery.
+pub trait WorkflowExecution: Send + Sync {
+    /// Validate asynchronous reconstruction dependencies before any owner
+    /// is spawned or external effect can be dispatched.
+    fn prepare<'a>(
+        &'a self,
+        _session: &'a WorkflowSession,
+    ) -> Pin<Box<dyn Future<Output = Result<(), WorkerError>> + Send + 'a>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    /// Drive bound ports to a durable wait or terminal state.
+    ///
+    /// # Errors
+    /// Returns reconstruction, configuration or execution failures explicitly.
+    fn advance<'a>(
+        &'a self,
+        session: &'a mut WorkflowSession,
+    ) -> Pin<Box<dyn Future<Output = Result<WorkflowWait, WorkerError>> + Send + 'a>>;
+}
+
 /// Runtime-authoritative disposition of one buffered interaction command.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InteractionDeliveryOutcome {
@@ -236,7 +261,9 @@ impl WorkerBuilder {
                 wake,
                 fires,
                 inbox,
+                tenant_scope: None,
                 ports: BTreeMap::new(),
+                executions: BTreeMap::new(),
                 starters: BTreeMap::new(),
                 interaction_lifecycle: None,
                 clock: ExternalClock::new(UNIX_EPOCH),
@@ -248,6 +275,13 @@ impl WorkerBuilder {
                 start_backoff: Mutex::new(BTreeMap::new()),
             },
         }
+    }
+
+    /// Restrict wake processing to one application-authorized tenant.
+    #[must_use]
+    pub fn tenant_scope(mut self, tenant_scope: &str) -> Self {
+        self.worker.tenant_scope = Some(Arc::from(tenant_scope));
+        self
     }
 
     /// Lease holder identity. Defaults to `"worker-1"`.
@@ -285,10 +319,27 @@ impl WorkerBuilder {
         self
     }
 
+    /// Read wall time during direct ticks, including lease checks and timers.
+    /// Omit this for deterministic hosts that own the injected clock.
+    #[must_use]
+    pub fn system_clock(self) -> Self {
+        self.worker.pump_clock.store(true, Ordering::Release);
+        self
+    }
+
     /// Register the ports factory used to resume one workflow kind.
     #[must_use]
     pub fn register_ports(mut self, kind: &str, factory: Arc<dyn PortsFactory>) -> Self {
         self.worker.ports.insert(Arc::from(kind), factory);
+        self
+    }
+
+    /// Register application stage advancement for one workflow kind.
+    /// The matching ports factory must reject invalid recovery configuration
+    /// before any owner is spawned.
+    #[must_use]
+    pub fn register_execution(mut self, kind: &str, execution: Arc<dyn WorkflowExecution>) -> Self {
+        self.worker.executions.insert(Arc::from(kind), execution);
         self
     }
 
@@ -347,19 +398,10 @@ impl WorkerBuilder {
 ///
 /// # Scope of a resume
 ///
-/// Registering a [`PortsFactory`] is necessary to resume a run, but it is not
-/// sufficient to carry every run to its next wait. This worker fires timers,
-/// applies inbox responses to the journal, and re-parks (or completes) runs
-/// whose next wait is reachable without a facade decision. A run whose next
-/// step needs an externally submitted
-/// `KernelInput::StageSettled { .. AfterModel | AfterToolBatch .., Continue }`
-/// — the decision made by the application-level facade in the `finstack-ai`
-/// agent layer, on which this crate does not depend — cannot be advanced
-/// here. Such a run is left mid-flight in the stage loop: its response stays
-/// in the inbox, its wake row survives, and the attempt is recorded as one
-/// counted failure with backoff, preserved for a host that can drive it.
-/// Hosts embedding a facade see those runs complete; hosts that do not see
-/// them held safely rather than resumed.
+/// A [`PortsFactory`] reinstalls trusted ports. An optional
+/// [`WorkflowExecution`] advances application stages using the host's driver.
+/// Without it, the worker advances only runtime-owned transitions and preserves
+/// inbox and wake hints when an application stage cannot be advanced.
 pub struct WorkflowWorker {
     /// Authoritative kernel journal.
     journal: Arc<dyn JournalStore>,
@@ -371,8 +413,12 @@ pub struct WorkflowWorker {
     fires: Arc<dyn FireStore>,
     /// Adapter-owned response inbox.
     inbox: Arc<dyn InboxStore>,
+    /// Optional application-authorized tenant restriction.
+    tenant_scope: Option<Arc<str>>,
     /// Ports factories keyed by workflow kind.
     ports: BTreeMap<Arc<str>, Arc<dyn PortsFactory>>,
+    /// Host-owned stage advancement keyed by workflow kind.
+    executions: BTreeMap<Arc<str>, Arc<dyn WorkflowExecution>>,
     /// Run starters keyed by schedule id.
     starters: BTreeMap<Arc<str>, Arc<dyn RunStarter>>,
     /// Optional adapter bridge for HITL capture and delivery outcomes.
@@ -593,6 +639,13 @@ impl WorkflowWorker {
     async fn tick_wake(&self, now: Timestamp, report: &mut TickReport) -> Result<(), WorkerError> {
         let due = self.wake.load_due(now, self.batch_limit)?;
         for row in due {
+            if self
+                .tenant_scope
+                .as_ref()
+                .is_some_and(|tenant| *tenant != row.tenant_scope)
+            {
+                continue;
+            }
             let Ok(entry) = self.inbox.load(
                 row.tenant_scope.as_ref(),
                 row.session_id,
@@ -607,7 +660,10 @@ impl WorkflowWorker {
             // rows without a deadline, and every other inbox-driven reason,
             // still wait for a buffered response.
             let expiring = expiry_due(&row, now);
-            if row.reason != WakeReason::Timer && entry.is_none() && !expiring {
+            if !matches!(row.reason, WakeReason::Timer | WakeReason::Runnable)
+                && entry.is_none()
+                && !expiring
+            {
                 continue;
             }
             // Both the lease this takes out and the backoff written below are
@@ -744,6 +800,12 @@ impl WorkflowWorker {
             .bind(session)?
             .with_drive_timeout(self.drive_timeout);
         self.ensure_lease(row, now)?;
+        if let Some(execution) = self.executions.get(row.workflow_kind.as_ref()) {
+            tokio::time::timeout(self.drive_timeout, execution.prepare(&session))
+                .await
+                .map_err(|_| WorkerError::Driver(WorkflowDriverError::DriveTimeout))??;
+        }
+        self.ensure_lease(row, self.row_now(now))?;
         if let Some(entry) = inbox_entry
             && let Some(outcome) = self.apply_inbox_entry(&session, entry, now).await?
         {
@@ -777,7 +839,13 @@ impl WorkflowWorker {
             session.ensure_owner().await?;
             *expired = !pending_matches_row(&session, row);
         }
-        let wait = self.drive_past_wait(&mut session, row, now).await?;
+        let driven = self.drive_leased(&mut session, row, now).await;
+        // Always join local work before handing control back, including lease
+        // loss and timeout. Shutdown cannot undo already dispatched effects.
+        let shutdown = session.shutdown_owner().await;
+        let wait = driven?;
+        shutdown?;
+        self.ensure_lease(row, self.row_now(now))?;
         let terminal = matches!(wait, WorkflowWait::Terminal { .. });
         let security = session
             .last_state()
@@ -821,6 +889,34 @@ impl WorkflowWorker {
         } else {
             ResumeOutcome::Reparked
         })
+    }
+
+    async fn drive_leased(
+        &self,
+        session: &mut WorkflowSession,
+        row: &WakeRow,
+        now: Timestamp,
+    ) -> Result<WorkflowWait, WorkerError> {
+        let drive = async {
+            if let Some(execution) = self.executions.get(row.workflow_kind.as_ref()) {
+                execution.advance(session).await
+            } else {
+                self.drive_past_wait(session, row, now).await
+            }
+        };
+        let lease = async {
+            loop {
+                self.ensure_lease(row, self.row_now(now))?;
+                tokio::time::sleep(POLL_INTERVAL).await;
+            }
+        };
+        tokio::select! {
+            biased;
+            result = lease => result,
+            result = tokio::time::timeout(self.drive_timeout, drive) => {
+                result.map_err(|_| WorkerError::Driver(WorkflowDriverError::DriveTimeout))?
+            }
+        }
     }
 
     /// Poll until the state parks on a wait other than the one recorded on

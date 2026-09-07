@@ -53,10 +53,12 @@ async fn run_repl_inner(
     interrupt: Arc<AtomicBool>,
 ) -> Result<(), KnowledgeError> {
     let journal = open_journal(config)?;
-    let agent = build_agent_with_journal(config, journal.clone()).await?;
     let security = security(os_user)?;
 
-    let (session, lane, _created) = super::session_lane(journal, session).await?;
+    let (session, lane, _created) = super::session_lane(journal.clone(), session).await?;
+    let config = crate::local_search_config(config).await?;
+    let mut composition = build_agent_with_journal(&config, journal).await?;
+    report_maintenance(output, &composition.initial_maintenance);
     let session_id = session.session_id().to_string();
     write_line(output, &format!("session: {session_id}"));
 
@@ -70,9 +72,17 @@ async fn run_repl_inner(
             ":session" => write_line(output, &session_id),
             question => {
                 run_turn(
-                    &agent, &lane, &security, config, question, input, output, &interrupt,
+                    &composition.agent,
+                    &lane,
+                    &security,
+                    &config,
+                    question,
+                    input,
+                    output,
+                    &interrupt,
                 )
                 .await?;
+                report_maintenance(output, &composition.search.maintain(256).await?);
             }
         }
     }
@@ -191,5 +201,18 @@ fn read_line(input: &mut dyn BufRead) -> Option<String> {
     match input.read_line(&mut line) {
         Ok(count) if count > 0 => Some(line),
         Ok(_) | Err(_) => None,
+    }
+}
+
+fn report_maintenance(output: &mut dyn Write, report: &crate::SearchMaintenanceReport) {
+    if !report.failures.is_empty() || report.more {
+        write_line(
+            output,
+            &format!(
+                "search maintenance: more={}, failures={}",
+                report.more,
+                report.failures.join(",")
+            ),
+        );
     }
 }

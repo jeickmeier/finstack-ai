@@ -155,14 +155,18 @@ pub(super) async fn build_agent(
     )
     .build_linked(
         LinkedCommon {
+            journal_store: None,
             instruction,
             capabilities,
             active_capabilities,
             ports: LinkedAgentPorts {
                 toolsets,
-                context_providers,
-                middleware,
-                observers,
+                context_providers: context_providers
+                    .into_iter()
+                    .map(|(_, handle)| handle)
+                    .collect(),
+                middleware: middleware.into_iter().map(|(_, handle)| handle).collect(),
+                observers: observers.into_iter().map(|(_, handle)| handle).collect(),
                 artifact_store: Some(Arc::clone(&document_ingest.artifact_store)),
                 output_schema,
             },
@@ -171,9 +175,6 @@ pub(super) async fn build_agent(
             // Native-only toolsets. `Agent.create` exposes no field for
             // them, and the facade rejects a non-`None` value on
             // `wasm-host` with `agent_run_unsupported_plan`.
-            openrouter_media: None,
-            video_compose: None,
-            media_pipeline: None,
         },
         model_name.clone(),
         settings,

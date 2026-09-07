@@ -1,10 +1,100 @@
 """Native Rust-backed finstack-ai control and observation handles."""
 
 from collections.abc import AsyncIterator, Awaitable, Callable
-from typing import Any, Literal, NotRequired, TypedDict
+from typing import Any, Literal, NotRequired, TypeAlias, TypedDict
+
+from .search._types import JournalIndexReport
+
+from .durable import (
+    DurableInspection,
+    DurableInteraction,
+    DurableTickReport,
+    ResolutionInput,
+)
+from .limits import RunLimits
 
 __version__: str
 __engine_version__: str
+
+class OpenAiMediaToolset:
+    """OpenAI media tools with an explicit credential separate from the chat model.
+
+    Pass through ``toolsets``. Materialization uses the agent artifact store;
+    validation errors occur during agent construction. No ambient credentials.
+    """
+
+    def __init__(self, api_key: str, *, max_result_bytes: int = 262144) -> None:
+        """Configure media credentials and the bounded result size (at most 8 MiB)."""
+    @property
+    def component(self) -> str:
+        """Stable registration identity: ``python.toolset.openai_media``."""
+
+class OpenRouterMediaToolset:
+    """OpenRouter image, speech, video, and transcription tools for any model provider.
+
+    Pass through ``toolsets``. Shares the receiving agent artifact store and
+    preserves native approval requirements, limits, and artifact ownership.
+    """
+
+    def __init__(
+        self,
+        api_key: str,
+        *,
+        referer: str | None = None,
+        title: str | None = None,
+        max_result_bytes: int = 262144,
+    ) -> None:
+        """Configure explicit media credentials, attribution, and bounded results."""
+    @property
+    def component(self) -> str:
+        """Stable registration identity: ``python.toolset.openrouter_media``."""
+
+class VideoComposeToolset:
+    """Local ffmpeg composition over the receiving agent's artifact store.
+
+    Paths are host-supplied; PATH is never searched. This is trusted native
+    process execution with the toolset's fixed argument construction.
+    """
+
+    def __init__(
+        self,
+        ffmpeg_path: str,
+        ffprobe_path: str,
+        scratch_dir: str,
+        *,
+        render_timeout_s: int,
+    ) -> None:
+        """Configure absolute binary paths, scratch directory, and timeout in (0, 3600]."""
+    @property
+    def component(self) -> str:
+        """Stable registration identity: ``python.toolset.video_compose``."""
+
+class MediaPipelineToolset:
+    """Bounded MoviePlan orchestration over explicit media and compose objects.
+
+    Dependencies are constructed once per receiving agent and share its artifact
+    store. Also list those objects in ``toolsets`` to expose their individual
+    tools. No media credential is copied from a model provider.
+    """
+
+    def __init__(
+        self,
+        media: OpenRouterMediaToolset,
+        compose: VideoComposeToolset,
+        *,
+        max_scenes: int,
+        max_total_video_s: int,
+        max_concurrent_jobs: int,
+        sqlite_state_path: str | None = None,
+    ) -> None:
+        """Set positive bounds and optional durable SQLite render state.
+
+        Omitting sqlite_state_path keeps render state process-local. Use a
+        persistent agent artifact store to retain inputs and rendered outputs.
+        """
+    @property
+    def component(self) -> str:
+        """Stable registration identity: ``python.toolset.media_pipeline``."""
 
 class FileSystemToolset:
     """Capability-confined filesystem toolset backed by the Rust implementation.
@@ -146,11 +236,11 @@ class CallbackContext:
             RuntimeError: The context is already settled.
         """
 
-Callback = Callable[
+Callback: TypeAlias = Callable[
     [CallbackContext, dict[str, Any]], dict[str, Any] | Awaitable[dict[str, Any]]
 ]
 
-CapabilityActivation = Literal["always", "application", "model", "disabled"]
+CapabilityActivation: TypeAlias = Literal["always", "application", "model", "disabled"]
 
 class CapabilityCatalogItem(TypedDict):
     """One compact model-visible capability entry."""
@@ -208,7 +298,9 @@ class PythonModel:
     """Trusted coarse Python implementation of the Rust Model port.
 
     The callback receives one normalized model draft and returns a mapping
-    containing ``text``, ``completion_id``, and optional ``tool_calls``.
+    containing ``completion_id``, ``text`` or ``json``, and optional ``tool_calls``
+    and canonical ``usage`` (see ``finstack_ai.ModelOutput``). Reported costs
+    must match the accepted pricing policy configured with ``Agent.with_limits``.
     Python callbacks run in-process and therefore have access to process memory.
     """
 
@@ -320,7 +412,7 @@ class MemoryExtension:
     def context_provider(self, *, max_hits: int | None = None) -> MemoryContextProvider:
         """Return the recall provider handle for ``context_providers``."""
 
-    def toolset(self) -> MemoryToolset:
+    def toolset(self, *, read: bool = True) -> MemoryToolset:
         """Return the memory toolset handle for ``toolsets``."""
 
     def observer(self) -> MemoryObserver:
@@ -750,7 +842,7 @@ class PythonMiddleware:
     def component(self) -> str:
         """Stable component identifier registered with the agent."""
 
-ObserverCallback = Callable[[list[dict[str, Any]]], None | Awaitable[None]]
+ObserverCallback: TypeAlias = Callable[[list[dict[str, Any]]], None | Awaitable[None]]
 
 class PythonObserver:
     """Trusted read-only batched Python observer.
@@ -774,6 +866,10 @@ class PythonObserver:
 
 class Locator:
     """Immutable identifiers for one accepted operation."""
+
+    @staticmethod
+    def from_dict(value: dict[str, str]) -> Locator:
+        """Reconstruct a validated locator from persisted identifiers."""
 
     @property
     def tenant_scope(self) -> str:
@@ -988,7 +1084,7 @@ class Session:
             ``None``.
         """
 
-SessionInspectPhase = Literal[
+SessionInspectPhase: TypeAlias = Literal[
     "empty",
     "in_progress",
     "completed",
@@ -1686,32 +1782,29 @@ class Agent:
         api_key: str,
         reasoning_effort: str | None = None,
         reasoning_summary: str | None = None,
-        media_tools: bool = False,
-        openrouter_media_api_key: str | None = None,
-        openrouter_media_referer: str | None = None,
-        openrouter_media_title: str | None = None,
-        video_compose_ffmpeg_path: str | None = None,
-        video_compose_ffprobe_path: str | None = None,
-        video_compose_scratch_dir: str | None = None,
-        video_compose_render_timeout_s: int | None = None,
-        media_pipeline_max_scenes: int | None = None,
-        media_pipeline_max_total_video_s: int | None = None,
-        media_pipeline_max_concurrent_jobs: int | None = None,
-        media_pipeline_sqlite_state_path: str | None = None,
         toolsets: list[
             PythonToolset
             | ElicitationToolset
             | MemoryToolset
+            | SearchToolset
+            | DocumentIndexToolset
             | HttpFetchToolset
             | E2bSandboxToolset
             | CalculatorToolset
             | FileSystemToolset
             | ShellToolset
             | McpToolset
+            | OpenAiMediaToolset
+            | OpenRouterMediaToolset
+            | VideoComposeToolset
+            | MediaPipelineToolset
         ]
         | None = None,
         context_providers: list[
-            PythonContextProvider | MemoryContextProvider | RepositoryContextProvider
+            PythonContextProvider
+            | MemoryContextProvider
+            | SearchContextProvider
+            | RepositoryContextProvider
         ]
         | None = None,
         middleware: list[
@@ -1726,6 +1819,7 @@ class Agent:
         observers: list[
             PythonObserver
             | MemoryObserver
+            | JournalIndexObserver
             | LogObserver
             | MetricsObserver
             | OtelObserver
@@ -1737,7 +1831,11 @@ class Agent:
         child_runs: ChildRunPolicy | None = None,
         approval_grant: ApprovalGrantMode | None = None,
         artifact_path: str | None = None,
-        artifact_store: S3ArtifactStore | None = None,
+        artifact_store: S3ArtifactStore | ArtifactStore | None = None,
+        document_tools: bool = True,
+        sqlite_path: str | None = None,
+        sqlite_durability: SqliteDurability | None = None,
+        postgres_dsn: str | None = None,
     ) -> Agent:
         """Build a Rust-backed official OpenAI Responses agent.
 
@@ -1750,6 +1848,11 @@ class Agent:
         capped at 128,000 tokens while the linked context window is
         1,050,000 tokens.
 
+        Journals default to bounded memory. Set ``sqlite_path`` (and optional
+        ``sqlite_durability``) or ``postgres_dsn`` for persistent history; these
+        choices are mutually exclusive. Pair a persistent journal with
+        ``artifact_path`` or ``artifact_store`` to retain attachments on restart.
+
         Args:
             model: Official OpenAI model name.
             instruction: Optional stable instruction prefix.
@@ -1761,45 +1864,8 @@ class Agent:
                 ``medium``, ``high``, ``xhigh``, and ``max``. Omit to use the
                 provider default.
             reasoning_summary: Optional Responses ``reasoning.summary``.
-            media_tools: Register the native OpenAI media toolset
-                (``openai_generate_image``, ``openai_generate_speech``,
-                ``openai_transcribe_audio``) alongside the model, reusing
-                ``api_key``.
-            openrouter_media_api_key: Optional explicit OpenRouter API key.
-                When set, registers the OpenRouter media-generation toolset
-                (image, speech, video, and transcription tools) billed to
-                this key, independent of ``api_key``.
-            openrouter_media_referer: Optional non-secret ``HTTP-Referer``
-                attribution header for the OpenRouter media toolset.
-                Requires ``openrouter_media_api_key``.
-            openrouter_media_title: Optional non-secret ``X-Title``
-                attribution header for the OpenRouter media toolset.
-                Requires ``openrouter_media_api_key``.
-            video_compose_ffmpeg_path: Absolute path to ``ffmpeg``.
-                Registers the local composition toolset
-                (``compose_video``, ``probe_media``). Set together with
-                ``video_compose_ffprobe_path``,
-                ``video_compose_scratch_dir``, and
-                ``video_compose_render_timeout_s``.
-            video_compose_ffprobe_path: Absolute path to ``ffprobe``.
-            video_compose_scratch_dir: Directory for per-render scratch
-                files. Created when missing.
-            video_compose_render_timeout_s: Wall-clock ceiling for one
-                render, in seconds. At most one hour.
-            media_pipeline_max_scenes: Maximum scenes in one MoviePlan.
-                Registers the pipeline toolset (``render_movie``,
-                ``advance_render``, ``get_render_status``). Set together
-                with ``media_pipeline_max_total_video_s`` and
-                ``media_pipeline_max_concurrent_jobs``. Requires the
-                OpenRouter media toolset and the compose kwargs above.
-            media_pipeline_max_total_video_s: Maximum total video
-                duration, in seconds, across all scenes.
-            media_pipeline_max_concurrent_jobs: Maximum concurrent
-                render jobs.
-            media_pipeline_sqlite_state_path: Optional sqlite file for
-                durable render state. ``None`` keeps process-local
-                state that a restart cannot resume.
-            toolsets: Optional trusted Python toolset callbacks.
+            toolsets: Optional native toolsets or trusted Python callbacks, including
+                separately configured media tools sharing the agent artifact store.
             context_providers: Optional trusted context-provider callbacks.
             middleware: Optional trusted middleware callbacks.
             observers: Optional trusted observer callbacks.
@@ -1825,11 +1891,6 @@ class Agent:
         Raises:
             ConfigurationError: The credential, model, capability set, or
                 port registration is invalid.
-            ValueError: ``openrouter_media_referer`` or
-                ``openrouter_media_title`` is set without
-                ``openrouter_media_api_key``, or the
-                ``video_compose_*`` or ``media_pipeline_*`` limit
-                kwargs are set only partially.
         """
     @staticmethod
     async def openrouter(
@@ -1843,32 +1904,29 @@ class Agent:
         title: str | None = None,
         reasoning_effort: str | None = None,
         reasoning_summary: str | None = None,
-        media_tools: bool = False,
-        openrouter_media_api_key: str | None = None,
-        openrouter_media_referer: str | None = None,
-        openrouter_media_title: str | None = None,
-        video_compose_ffmpeg_path: str | None = None,
-        video_compose_ffprobe_path: str | None = None,
-        video_compose_scratch_dir: str | None = None,
-        video_compose_render_timeout_s: int | None = None,
-        media_pipeline_max_scenes: int | None = None,
-        media_pipeline_max_total_video_s: int | None = None,
-        media_pipeline_max_concurrent_jobs: int | None = None,
-        media_pipeline_sqlite_state_path: str | None = None,
         toolsets: list[
             PythonToolset
             | ElicitationToolset
             | MemoryToolset
+            | SearchToolset
+            | DocumentIndexToolset
             | HttpFetchToolset
             | E2bSandboxToolset
             | CalculatorToolset
             | FileSystemToolset
             | ShellToolset
             | McpToolset
+            | OpenAiMediaToolset
+            | OpenRouterMediaToolset
+            | VideoComposeToolset
+            | MediaPipelineToolset
         ]
         | None = None,
         context_providers: list[
-            PythonContextProvider | MemoryContextProvider | RepositoryContextProvider
+            PythonContextProvider
+            | MemoryContextProvider
+            | SearchContextProvider
+            | RepositoryContextProvider
         ]
         | None = None,
         middleware: list[
@@ -1883,6 +1941,7 @@ class Agent:
         observers: list[
             PythonObserver
             | MemoryObserver
+            | JournalIndexObserver
             | LogObserver
             | MetricsObserver
             | OtelObserver
@@ -1894,7 +1953,11 @@ class Agent:
         child_runs: ChildRunPolicy | None = None,
         approval_grant: ApprovalGrantMode | None = None,
         artifact_path: str | None = None,
-        artifact_store: S3ArtifactStore | None = None,
+        artifact_store: S3ArtifactStore | ArtifactStore | None = None,
+        document_tools: bool = True,
+        sqlite_path: str | None = None,
+        sqlite_durability: SqliteDurability | None = None,
+        postgres_dsn: str | None = None,
     ) -> Agent:
         """Build a Rust-backed OpenRouter Responses agent.
 
@@ -1910,8 +1973,13 @@ class Agent:
         context window is 1,050,000 tokens. This factory does not attach
         a ``MediaResolver``. Vision, file, and audio input require a
         host-built Rust provider with ``with_media_resolver``. ADR-049
-        rejected FFI resolvers on linked constructors. ``media_tools``
-        registers outbound media-generation tools only.
+        rejected FFI resolvers on linked constructors. Compose outbound media
+        generation through typed objects in ``toolsets``.
+
+        Journals default to bounded memory. Set ``sqlite_path`` (and optional
+        ``sqlite_durability``) or ``postgres_dsn`` for persistent history; these
+        choices are mutually exclusive. Pair a persistent journal with
+        ``artifact_path`` or ``artifact_store`` to retain attachments on restart.
 
         Args:
             model: OpenRouter model name.
@@ -1926,44 +1994,8 @@ class Agent:
                 ``medium``, ``high``, ``xhigh``, and ``max``. Omit to use the
                 provider default.
             reasoning_summary: Optional Responses ``reasoning.summary``.
-            media_tools: Register the OpenRouter media-generation toolset
-                (image, speech, video, and transcription tools) alongside
-                the model, reusing ``api_key``, ``referer``, and ``title``.
-                Cannot be combined with ``openrouter_media_api_key``.
-            openrouter_media_api_key: Optional explicit OpenRouter API key
-                for the media-generation toolset. Cannot be combined with
-                ``media_tools``.
-            openrouter_media_referer: Optional non-secret ``HTTP-Referer``
-                attribution header for the OpenRouter media toolset.
-                Requires ``openrouter_media_api_key``.
-            openrouter_media_title: Optional non-secret ``X-Title``
-                attribution header for the OpenRouter media toolset.
-                Requires ``openrouter_media_api_key``.
-            video_compose_ffmpeg_path: Absolute path to ``ffmpeg``.
-                Registers the local composition toolset
-                (``compose_video``, ``probe_media``). Set together with
-                ``video_compose_ffprobe_path``,
-                ``video_compose_scratch_dir``, and
-                ``video_compose_render_timeout_s``.
-            video_compose_ffprobe_path: Absolute path to ``ffprobe``.
-            video_compose_scratch_dir: Directory for per-render scratch
-                files. Created when missing.
-            video_compose_render_timeout_s: Wall-clock ceiling for one
-                render, in seconds. At most one hour.
-            media_pipeline_max_scenes: Maximum scenes in one MoviePlan.
-                Registers the pipeline toolset (``render_movie``,
-                ``advance_render``, ``get_render_status``). Set together
-                with ``media_pipeline_max_total_video_s`` and
-                ``media_pipeline_max_concurrent_jobs``. Requires the
-                OpenRouter media toolset and the compose kwargs above.
-            media_pipeline_max_total_video_s: Maximum total video
-                duration, in seconds, across all scenes.
-            media_pipeline_max_concurrent_jobs: Maximum concurrent
-                render jobs.
-            media_pipeline_sqlite_state_path: Optional sqlite file for
-                durable render state. ``None`` keeps process-local
-                state that a restart cannot resume.
-            toolsets: Optional trusted Python toolset callbacks.
+            toolsets: Optional native toolsets or trusted Python callbacks, including
+                separately configured media tools sharing the agent artifact store.
             context_providers: Optional trusted context-provider callbacks.
             middleware: Optional trusted middleware callbacks.
             observers: Optional trusted observer callbacks.
@@ -1988,14 +2020,7 @@ class Agent:
 
         Raises:
             ConfigurationError: The credential, model, capability set, or
-                port registration is invalid. Also raised when
-                ``media_tools`` and ``openrouter_media_api_key`` are both
-                set.
-            ValueError: ``openrouter_media_referer`` or
-                ``openrouter_media_title`` is set without
-                ``openrouter_media_api_key``, or the
-                ``video_compose_*`` or ``media_pipeline_*`` limit
-                kwargs are set only partially.
+                port registration is invalid.
         """
     @staticmethod
     async def anthropic(
@@ -2006,31 +2031,29 @@ class Agent:
         capabilities: list[Capability] | None = None,
         active_capabilities: list[str] | None = None,
         *,
-        openrouter_media_api_key: str | None = None,
-        openrouter_media_referer: str | None = None,
-        openrouter_media_title: str | None = None,
-        video_compose_ffmpeg_path: str | None = None,
-        video_compose_ffprobe_path: str | None = None,
-        video_compose_scratch_dir: str | None = None,
-        video_compose_render_timeout_s: int | None = None,
-        media_pipeline_max_scenes: int | None = None,
-        media_pipeline_max_total_video_s: int | None = None,
-        media_pipeline_max_concurrent_jobs: int | None = None,
-        media_pipeline_sqlite_state_path: str | None = None,
         toolsets: list[
             PythonToolset
             | ElicitationToolset
             | MemoryToolset
+            | SearchToolset
+            | DocumentIndexToolset
             | HttpFetchToolset
             | E2bSandboxToolset
             | CalculatorToolset
             | FileSystemToolset
             | ShellToolset
             | McpToolset
+            | OpenAiMediaToolset
+            | OpenRouterMediaToolset
+            | VideoComposeToolset
+            | MediaPipelineToolset
         ]
         | None = None,
         context_providers: list[
-            PythonContextProvider | MemoryContextProvider | RepositoryContextProvider
+            PythonContextProvider
+            | MemoryContextProvider
+            | SearchContextProvider
+            | RepositoryContextProvider
         ]
         | None = None,
         middleware: list[
@@ -2045,6 +2068,7 @@ class Agent:
         observers: list[
             PythonObserver
             | MemoryObserver
+            | JournalIndexObserver
             | LogObserver
             | MetricsObserver
             | OtelObserver
@@ -2056,7 +2080,11 @@ class Agent:
         child_runs: ChildRunPolicy | None = None,
         approval_grant: ApprovalGrantMode | None = None,
         artifact_path: str | None = None,
-        artifact_store: S3ArtifactStore | None = None,
+        artifact_store: S3ArtifactStore | ArtifactStore | None = None,
+        document_tools: bool = True,
+        sqlite_path: str | None = None,
+        sqlite_durability: SqliteDurability | None = None,
+        postgres_dsn: str | None = None,
     ) -> Agent:
         """Build a Rust-backed Anthropic Messages agent.
 
@@ -2066,6 +2094,11 @@ class Agent:
         callbacks as :meth:`Agent.from_python`. This factory does not read
         environment variables. Output is capped at 64,000 tokens, the current
         Claude ceiling, while the linked context window is 1,050,000 tokens.
+
+        Journals default to bounded memory. Set ``sqlite_path`` (and optional
+        ``sqlite_durability``) or ``postgres_dsn`` for persistent history; these
+        choices are mutually exclusive. Pair a persistent journal with
+        ``artifact_path`` or ``artifact_store`` to retain attachments on restart.
 
         Args:
             base_url: Anthropic Messages base URL.
@@ -2077,41 +2110,8 @@ class Agent:
             instruction: Optional stable instruction prefix.
             capabilities: Optional declarative capability catalog.
             active_capabilities: Application capability ids to activate.
-            openrouter_media_api_key: Optional explicit OpenRouter API key.
-                When set, registers the OpenRouter media-generation toolset
-                (image, speech, video, and transcription tools) billed to
-                this key.
-            openrouter_media_referer: Optional non-secret ``HTTP-Referer``
-                attribution header for the OpenRouter media toolset.
-                Requires ``openrouter_media_api_key``.
-            openrouter_media_title: Optional non-secret ``X-Title``
-                attribution header for the OpenRouter media toolset.
-                Requires ``openrouter_media_api_key``.
-            video_compose_ffmpeg_path: Absolute path to ``ffmpeg``.
-                Registers the local composition toolset
-                (``compose_video``, ``probe_media``). Set together with
-                ``video_compose_ffprobe_path``,
-                ``video_compose_scratch_dir``, and
-                ``video_compose_render_timeout_s``.
-            video_compose_ffprobe_path: Absolute path to ``ffprobe``.
-            video_compose_scratch_dir: Directory for per-render scratch
-                files. Created when missing.
-            video_compose_render_timeout_s: Wall-clock ceiling for one
-                render, in seconds. At most one hour.
-            media_pipeline_max_scenes: Maximum scenes in one MoviePlan.
-                Registers the pipeline toolset (``render_movie``,
-                ``advance_render``, ``get_render_status``). Set together
-                with ``media_pipeline_max_total_video_s`` and
-                ``media_pipeline_max_concurrent_jobs``. Requires the
-                OpenRouter media toolset and the compose kwargs above.
-            media_pipeline_max_total_video_s: Maximum total video
-                duration, in seconds, across all scenes.
-            media_pipeline_max_concurrent_jobs: Maximum concurrent
-                render jobs.
-            media_pipeline_sqlite_state_path: Optional sqlite file for
-                durable render state. ``None`` keeps process-local
-                state that a restart cannot resume.
-            toolsets: Optional trusted Python toolset callbacks.
+            toolsets: Optional native toolsets or trusted Python callbacks, including
+                separately configured media tools sharing the agent artifact store.
             context_providers: Optional trusted context-provider callbacks.
             middleware: Optional trusted middleware callbacks.
             observers: Optional trusted observer callbacks.
@@ -2137,11 +2137,6 @@ class Agent:
         Raises:
             ConfigurationError: The endpoint, credential, model, capability
                 set, or port registration is invalid.
-            ValueError: ``openrouter_media_referer`` or
-                ``openrouter_media_title`` is set without
-                ``openrouter_media_api_key``, or the
-                ``video_compose_*`` or ``media_pipeline_*`` limit
-                kwargs are set only partially.
         """
     @staticmethod
     async def gemini(
@@ -2152,31 +2147,29 @@ class Agent:
         capabilities: list[Capability] | None = None,
         active_capabilities: list[str] | None = None,
         *,
-        openrouter_media_api_key: str | None = None,
-        openrouter_media_referer: str | None = None,
-        openrouter_media_title: str | None = None,
-        video_compose_ffmpeg_path: str | None = None,
-        video_compose_ffprobe_path: str | None = None,
-        video_compose_scratch_dir: str | None = None,
-        video_compose_render_timeout_s: int | None = None,
-        media_pipeline_max_scenes: int | None = None,
-        media_pipeline_max_total_video_s: int | None = None,
-        media_pipeline_max_concurrent_jobs: int | None = None,
-        media_pipeline_sqlite_state_path: str | None = None,
         toolsets: list[
             PythonToolset
             | ElicitationToolset
             | MemoryToolset
+            | SearchToolset
+            | DocumentIndexToolset
             | HttpFetchToolset
             | E2bSandboxToolset
             | CalculatorToolset
             | FileSystemToolset
             | ShellToolset
             | McpToolset
+            | OpenAiMediaToolset
+            | OpenRouterMediaToolset
+            | VideoComposeToolset
+            | MediaPipelineToolset
         ]
         | None = None,
         context_providers: list[
-            PythonContextProvider | MemoryContextProvider | RepositoryContextProvider
+            PythonContextProvider
+            | MemoryContextProvider
+            | SearchContextProvider
+            | RepositoryContextProvider
         ]
         | None = None,
         middleware: list[
@@ -2191,6 +2184,7 @@ class Agent:
         observers: list[
             PythonObserver
             | MemoryObserver
+            | JournalIndexObserver
             | LogObserver
             | MetricsObserver
             | OtelObserver
@@ -2202,7 +2196,11 @@ class Agent:
         child_runs: ChildRunPolicy | None = None,
         approval_grant: ApprovalGrantMode | None = None,
         artifact_path: str | None = None,
-        artifact_store: S3ArtifactStore | None = None,
+        artifact_store: S3ArtifactStore | ArtifactStore | None = None,
+        document_tools: bool = True,
+        sqlite_path: str | None = None,
+        sqlite_durability: SqliteDurability | None = None,
+        postgres_dsn: str | None = None,
     ) -> Agent:
         """Build a Rust-backed Gemini ``generateContent`` agent.
 
@@ -2212,6 +2210,11 @@ class Agent:
         :meth:`Agent.from_python`. This factory does not read environment
         variables and does not hardcode the Google host: ``endpoint`` is
         passed straight into the provider's ``GeminiConfig::try_new``.
+
+        Journals default to bounded memory. Set ``sqlite_path`` (and optional
+        ``sqlite_durability``) or ``postgres_dsn`` for persistent history; these
+        choices are mutually exclusive. Pair a persistent journal with
+        ``artifact_path`` or ``artifact_store`` to retain attachments on restart.
 
         Args:
             endpoint: Gemini ``generateContent`` base URL (Generative
@@ -2224,41 +2227,8 @@ class Agent:
             instruction: Optional stable instruction prefix.
             capabilities: Optional declarative capability catalog.
             active_capabilities: Application capability ids to activate.
-            openrouter_media_api_key: Optional explicit OpenRouter API key.
-                When set, registers the OpenRouter media-generation toolset
-                (image, speech, video, and transcription tools) billed to
-                this key.
-            openrouter_media_referer: Optional non-secret ``HTTP-Referer``
-                attribution header for the OpenRouter media toolset.
-                Requires ``openrouter_media_api_key``.
-            openrouter_media_title: Optional non-secret ``X-Title``
-                attribution header for the OpenRouter media toolset.
-                Requires ``openrouter_media_api_key``.
-            video_compose_ffmpeg_path: Absolute path to ``ffmpeg``.
-                Registers the local composition toolset
-                (``compose_video``, ``probe_media``). Set together with
-                ``video_compose_ffprobe_path``,
-                ``video_compose_scratch_dir``, and
-                ``video_compose_render_timeout_s``.
-            video_compose_ffprobe_path: Absolute path to ``ffprobe``.
-            video_compose_scratch_dir: Directory for per-render scratch
-                files. Created when missing.
-            video_compose_render_timeout_s: Wall-clock ceiling for one
-                render, in seconds. At most one hour.
-            media_pipeline_max_scenes: Maximum scenes in one MoviePlan.
-                Registers the pipeline toolset (``render_movie``,
-                ``advance_render``, ``get_render_status``). Set together
-                with ``media_pipeline_max_total_video_s`` and
-                ``media_pipeline_max_concurrent_jobs``. Requires the
-                OpenRouter media toolset and the compose kwargs above.
-            media_pipeline_max_total_video_s: Maximum total video
-                duration, in seconds, across all scenes.
-            media_pipeline_max_concurrent_jobs: Maximum concurrent
-                render jobs.
-            media_pipeline_sqlite_state_path: Optional sqlite file for
-                durable render state. ``None`` keeps process-local
-                state that a restart cannot resume.
-            toolsets: Optional trusted Python toolset callbacks.
+            toolsets: Optional native toolsets or trusted Python callbacks, including
+                separately configured media tools sharing the agent artifact store.
             context_providers: Optional trusted context-provider callbacks.
             middleware: Optional trusted middleware callbacks.
             observers: Optional trusted observer callbacks.
@@ -2284,11 +2254,6 @@ class Agent:
         Raises:
             ConfigurationError: The endpoint, credential, model, capability
                 set, or port registration is invalid.
-            ValueError: ``openrouter_media_referer`` or
-                ``openrouter_media_title`` is set without
-                ``openrouter_media_api_key``, or the
-                ``video_compose_*`` or ``media_pipeline_*`` limit
-                kwargs are set only partially.
         """
     @staticmethod
     async def ollama(
@@ -2298,31 +2263,29 @@ class Agent:
         capabilities: list[Capability] | None = None,
         active_capabilities: list[str] | None = None,
         *,
-        openrouter_media_api_key: str | None = None,
-        openrouter_media_referer: str | None = None,
-        openrouter_media_title: str | None = None,
-        video_compose_ffmpeg_path: str | None = None,
-        video_compose_ffprobe_path: str | None = None,
-        video_compose_scratch_dir: str | None = None,
-        video_compose_render_timeout_s: int | None = None,
-        media_pipeline_max_scenes: int | None = None,
-        media_pipeline_max_total_video_s: int | None = None,
-        media_pipeline_max_concurrent_jobs: int | None = None,
-        media_pipeline_sqlite_state_path: str | None = None,
         toolsets: list[
             PythonToolset
             | ElicitationToolset
             | MemoryToolset
+            | SearchToolset
+            | DocumentIndexToolset
             | HttpFetchToolset
             | E2bSandboxToolset
             | CalculatorToolset
             | FileSystemToolset
             | ShellToolset
             | McpToolset
+            | OpenAiMediaToolset
+            | OpenRouterMediaToolset
+            | VideoComposeToolset
+            | MediaPipelineToolset
         ]
         | None = None,
         context_providers: list[
-            PythonContextProvider | MemoryContextProvider | RepositoryContextProvider
+            PythonContextProvider
+            | MemoryContextProvider
+            | SearchContextProvider
+            | RepositoryContextProvider
         ]
         | None = None,
         middleware: list[
@@ -2337,6 +2300,7 @@ class Agent:
         observers: list[
             PythonObserver
             | MemoryObserver
+            | JournalIndexObserver
             | LogObserver
             | MetricsObserver
             | OtelObserver
@@ -2348,7 +2312,11 @@ class Agent:
         child_runs: ChildRunPolicy | None = None,
         approval_grant: ApprovalGrantMode | None = None,
         artifact_path: str | None = None,
-        artifact_store: S3ArtifactStore | None = None,
+        artifact_store: S3ArtifactStore | ArtifactStore | None = None,
+        document_tools: bool = True,
+        sqlite_path: str | None = None,
+        sqlite_durability: SqliteDurability | None = None,
+        postgres_dsn: str | None = None,
     ) -> Agent:
         """Build a keyless Rust-backed native Ollama agent.
 
@@ -2356,47 +2324,19 @@ class Agent:
         Keyword-only port lists register the same T2 Python callbacks as
         :meth:`Agent.from_python`.
 
+        Journals default to bounded memory. Set ``sqlite_path`` (and optional
+        ``sqlite_durability``) or ``postgres_dsn`` for persistent history; these
+        choices are mutually exclusive. Pair a persistent journal with
+        ``artifact_path`` or ``artifact_store`` to retain attachments on restart.
+
         Args:
             base_url: Ollama base URL, typically ``http://127.0.0.1:11434``.
             model: Provider model name.
             instruction: Optional stable instruction prefix.
             capabilities: Optional declarative capability catalog.
             active_capabilities: Application capability ids to activate.
-            openrouter_media_api_key: Optional explicit OpenRouter API key.
-                When set, registers the OpenRouter media-generation toolset
-                (image, speech, video, and transcription tools) billed to
-                this key.
-            openrouter_media_referer: Optional non-secret ``HTTP-Referer``
-                attribution header for the OpenRouter media toolset.
-                Requires ``openrouter_media_api_key``.
-            openrouter_media_title: Optional non-secret ``X-Title``
-                attribution header for the OpenRouter media toolset.
-                Requires ``openrouter_media_api_key``.
-            video_compose_ffmpeg_path: Absolute path to ``ffmpeg``.
-                Registers the local composition toolset
-                (``compose_video``, ``probe_media``). Set together with
-                ``video_compose_ffprobe_path``,
-                ``video_compose_scratch_dir``, and
-                ``video_compose_render_timeout_s``.
-            video_compose_ffprobe_path: Absolute path to ``ffprobe``.
-            video_compose_scratch_dir: Directory for per-render scratch
-                files. Created when missing.
-            video_compose_render_timeout_s: Wall-clock ceiling for one
-                render, in seconds. At most one hour.
-            media_pipeline_max_scenes: Maximum scenes in one MoviePlan.
-                Registers the pipeline toolset (``render_movie``,
-                ``advance_render``, ``get_render_status``). Set together
-                with ``media_pipeline_max_total_video_s`` and
-                ``media_pipeline_max_concurrent_jobs``. Requires the
-                OpenRouter media toolset and the compose kwargs above.
-            media_pipeline_max_total_video_s: Maximum total video
-                duration, in seconds, across all scenes.
-            media_pipeline_max_concurrent_jobs: Maximum concurrent
-                render jobs.
-            media_pipeline_sqlite_state_path: Optional sqlite file for
-                durable render state. ``None`` keeps process-local
-                state that a restart cannot resume.
-            toolsets: Optional trusted Python toolset callbacks.
+            toolsets: Optional native toolsets or trusted Python callbacks, including
+                separately configured media tools sharing the agent artifact store.
             context_providers: Optional trusted context-provider callbacks.
             middleware: Optional trusted middleware callbacks.
             observers: Optional trusted observer callbacks.
@@ -2422,11 +2362,6 @@ class Agent:
         Raises:
             ConfigurationError: The endpoint, model, capability set, or port
                 registration is invalid.
-            ValueError: ``openrouter_media_referer`` or
-                ``openrouter_media_title`` is set without
-                ``openrouter_media_api_key``, or the
-                ``video_compose_*`` or ``media_pipeline_*`` limit
-                kwargs are set only partially.
         """
     @staticmethod
     async def gateway(
@@ -2441,31 +2376,29 @@ class Agent:
         hard_input_bytes: int | None = None,
         auth: str | None = None,
         api_key: str | None = None,
-        openrouter_media_api_key: str | None = None,
-        openrouter_media_referer: str | None = None,
-        openrouter_media_title: str | None = None,
-        video_compose_ffmpeg_path: str | None = None,
-        video_compose_ffprobe_path: str | None = None,
-        video_compose_scratch_dir: str | None = None,
-        video_compose_render_timeout_s: int | None = None,
-        media_pipeline_max_scenes: int | None = None,
-        media_pipeline_max_total_video_s: int | None = None,
-        media_pipeline_max_concurrent_jobs: int | None = None,
-        media_pipeline_sqlite_state_path: str | None = None,
         toolsets: list[
             PythonToolset
             | ElicitationToolset
             | MemoryToolset
+            | SearchToolset
+            | DocumentIndexToolset
             | HttpFetchToolset
             | E2bSandboxToolset
             | CalculatorToolset
             | FileSystemToolset
             | ShellToolset
             | McpToolset
+            | OpenAiMediaToolset
+            | OpenRouterMediaToolset
+            | VideoComposeToolset
+            | MediaPipelineToolset
         ]
         | None = None,
         context_providers: list[
-            PythonContextProvider | MemoryContextProvider | RepositoryContextProvider
+            PythonContextProvider
+            | MemoryContextProvider
+            | SearchContextProvider
+            | RepositoryContextProvider
         ]
         | None = None,
         middleware: list[
@@ -2480,6 +2413,7 @@ class Agent:
         observers: list[
             PythonObserver
             | MemoryObserver
+            | JournalIndexObserver
             | LogObserver
             | MetricsObserver
             | OtelObserver
@@ -2491,7 +2425,11 @@ class Agent:
         child_runs: ChildRunPolicy | None = None,
         approval_grant: ApprovalGrantMode | None = None,
         artifact_path: str | None = None,
-        artifact_store: S3ArtifactStore | None = None,
+        artifact_store: S3ArtifactStore | ArtifactStore | None = None,
+        document_tools: bool = True,
+        sqlite_path: str | None = None,
+        sqlite_durability: SqliteDurability | None = None,
+        postgres_dsn: str | None = None,
     ) -> Agent:
         """Build a Rust-backed agent that dispatches to a dedicated provider.
 
@@ -2500,6 +2438,11 @@ class Agent:
         environment variables. HTTPS is required off loopback and whenever
         ``api_key`` is set. Construction fails without ``hard_input_bytes``.
         ``openai_chat`` is a configuration error.
+
+        Journals default to bounded memory. Set ``sqlite_path`` (and optional
+        ``sqlite_durability``) or ``postgres_dsn`` for persistent history; these
+        choices are mutually exclusive. Pair a persistent journal with
+        ``artifact_path`` or ``artifact_store`` to retain attachments on restart.
 
         Args:
             endpoint: Provider endpoint URL.
@@ -2514,41 +2457,8 @@ class Agent:
             auth: ``none``, ``bearer``, or ``api_key``. Defaults from
                 ``api_key``.
             api_key: Explicit credential. HTTPS is required when set.
-            openrouter_media_api_key: Optional explicit OpenRouter API key.
-                When set, registers the OpenRouter media-generation toolset
-                (image, speech, video, and transcription tools) billed to
-                this key, independent of ``api_key``.
-            openrouter_media_referer: Optional non-secret ``HTTP-Referer``
-                attribution header for the OpenRouter media toolset.
-                Requires ``openrouter_media_api_key``.
-            openrouter_media_title: Optional non-secret ``X-Title``
-                attribution header for the OpenRouter media toolset.
-                Requires ``openrouter_media_api_key``.
-            video_compose_ffmpeg_path: Absolute path to ``ffmpeg``.
-                Registers the local composition toolset
-                (``compose_video``, ``probe_media``). Set together with
-                ``video_compose_ffprobe_path``,
-                ``video_compose_scratch_dir``, and
-                ``video_compose_render_timeout_s``.
-            video_compose_ffprobe_path: Absolute path to ``ffprobe``.
-            video_compose_scratch_dir: Directory for per-render scratch
-                files. Created when missing.
-            video_compose_render_timeout_s: Wall-clock ceiling for one
-                render, in seconds. At most one hour.
-            media_pipeline_max_scenes: Maximum scenes in one MoviePlan.
-                Registers the pipeline toolset (``render_movie``,
-                ``advance_render``, ``get_render_status``). Set together
-                with ``media_pipeline_max_total_video_s`` and
-                ``media_pipeline_max_concurrent_jobs``. Requires the
-                OpenRouter media toolset and the compose kwargs above.
-            media_pipeline_max_total_video_s: Maximum total video
-                duration, in seconds, across all scenes.
-            media_pipeline_max_concurrent_jobs: Maximum concurrent
-                render jobs.
-            media_pipeline_sqlite_state_path: Optional sqlite file for
-                durable render state. ``None`` keeps process-local
-                state that a restart cannot resume.
-            toolsets: Optional trusted Python toolset callbacks.
+            toolsets: Optional native toolsets or trusted Python callbacks, including
+                separately configured media tools sharing the agent artifact store.
             context_providers: Optional trusted context-provider callbacks.
             middleware: Optional trusted middleware callbacks.
             observers: Optional trusted observer callbacks.
@@ -2575,11 +2485,6 @@ class Agent:
             ConfigurationError: The route, protocol, ``hard_input_bytes``,
                 credential pairing, capability set, or port registration is
                 invalid.
-            ValueError: ``openrouter_media_referer`` or
-                ``openrouter_media_title`` is set without
-                ``openrouter_media_api_key``, or the
-                ``video_compose_*`` or ``media_pipeline_*`` limit
-                kwargs are set only partially.
         """
     @staticmethod
     async def from_python(
@@ -2588,6 +2493,8 @@ class Agent:
             PythonToolset
             | ElicitationToolset
             | MemoryToolset
+            | SearchToolset
+            | DocumentIndexToolset
             | HttpFetchToolset
             | E2bSandboxToolset
             | SkillsToolset
@@ -2595,6 +2502,10 @@ class Agent:
             | FileSystemToolset
             | ShellToolset
             | McpToolset
+            | OpenAiMediaToolset
+            | OpenRouterMediaToolset
+            | VideoComposeToolset
+            | MediaPipelineToolset
         ]
         | None = None,
         instruction: str | None = None,
@@ -2602,7 +2513,10 @@ class Agent:
         capabilities: list[Capability] | None = None,
         active_capabilities: list[str] | None = None,
         context_providers: list[
-            PythonContextProvider | MemoryContextProvider | RepositoryContextProvider
+            PythonContextProvider
+            | MemoryContextProvider
+            | SearchContextProvider
+            | RepositoryContextProvider
         ]
         | None = None,
         middleware: list[
@@ -2617,6 +2531,7 @@ class Agent:
         observers: list[
             PythonObserver
             | MemoryObserver
+            | JournalIndexObserver
             | LogObserver
             | MetricsObserver
             | OtelObserver
@@ -2630,17 +2545,24 @@ class Agent:
         sqlite_path: str | None = None,
         sqlite_durability: SqliteDurability | None = None,
         artifact_path: str | None = None,
-        artifact_store: S3ArtifactStore | None = None,
+        artifact_store: S3ArtifactStore | ArtifactStore | None = None,
+        document_tools: bool = True,
         capability_toolsets: list[
             PythonToolset
             | ElicitationToolset
             | MemoryToolset
+            | SearchToolset
+            | DocumentIndexToolset
             | HttpFetchToolset
             | E2bSandboxToolset
             | CalculatorToolset
             | FileSystemToolset
             | ShellToolset
             | McpToolset
+            | OpenAiMediaToolset
+            | OpenRouterMediaToolset
+            | VideoComposeToolset
+            | MediaPipelineToolset
         ]
         | None = None,
         postgres_dsn: str | None = None,
@@ -2693,6 +2615,18 @@ class Agent:
             ConfigurationError: The callbacks, capability set, or SQLite
                 store are invalid.
         """
+    @property
+    def artifact_store(self) -> ArtifactStore:
+        """Share the exact native store in another agent's artifact_store argument."""
+
+    def with_limits(self, limits: RunLimits) -> Awaitable[Agent]:
+        """Resolve a new composition with accepted token/tool/cost ceilings.
+
+        The same stores, output schema and native components are retained. Existing
+        runs keep their original lock and limits. Raises FinstackError on invalid
+        composition. This operation dispatches no models or tools.
+        """
+
     def capability_catalog(self) -> list[CapabilityCatalogItem]:
         """Return the bounded model-activated catalog in identity order.
 
@@ -3000,4 +2934,224 @@ def parse_document(
         ValueError: Neither or both of ``data``/``path`` are given,
             ``path`` cannot be read or exceeds 4 MiB, or parsing fails
             with a stable ``document_*`` error code.
+    """
+
+class DurableHost:
+    """Rust-owned embedded SQLite execution and recovery.
+
+    Register the same definitions against the same database in each process.
+    The host owns the journal; credentials and artifact stores stay on agents.
+    """
+
+    @staticmethod
+    def open(
+        path: str,
+        agents: dict[str, Agent],
+        *,
+        tenant_scope: str = "python-local",
+        worker_id: str | None = None,
+        drive_timeout_seconds: float = 30.0,
+        lease_ttl_seconds: float = 60.0,
+    ) -> Awaitable[DurableHost]:
+        """Open journal/adapter tables and resolve registered workflow kinds.
+
+        Uses durable SQLite with 1024 sessions, 16384 batches and 65536 records
+        per session, and an 8 MiB snapshot ceiling. No execution starts here.
+        """
+    def start(
+        self,
+        workflow_kind: str,
+        input: str,
+        *,
+        timeout_seconds: float | None = None,
+        max_cycles: int = 16,
+        max_output_retries: int = 1,
+        attachments: list[Attachment] | None = None,
+    ) -> Awaitable[Locator]:
+        """Persist admission and its descriptor; call tick to dispatch effects."""
+    def tick(self) -> Awaitable[DurableTickReport]:
+        """Advance due work under leases. Cancelling the await detaches observation."""
+    def inspect(self, locator: Locator) -> Awaitable[DurableInspection]:
+        """Read committed state, rejecting drift, missing artifacts and uncertainty."""
+    def pending(self) -> list[DurableInteraction]:
+        """List pending interactions and their exact accepted authority context."""
+    def resolve(self, interaction_id: str, resolution: ResolutionInput) -> None:
+        """Buffer an authorized resolution for the next tick."""
+    def shutdown(self) -> Awaitable[None]:
+        """Stop new admissions and wait for local driving to join; runs remain durable."""
+
+# Private coarse handles used by the typed finstack_ai.eval package.
+class _EvalStore:
+    @staticmethod
+    def memory() -> _EvalStore: ...
+    @staticmethod
+    def sqlite(path: str) -> _EvalStore: ...
+    def snapshot(self) -> _EvalResult: ...
+
+class _EvalSubject:
+    def __init__(
+        self,
+        subject_id: str,
+        agent: Agent,
+        *,
+        tenant_scope: str = "python-local",
+        prepare: object = None,
+        callback_timeout_seconds: float = 30.0,
+    ) -> None: ...
+
+class _EvalScorer:
+    @staticmethod
+    def builtin(scorer_id: str, version: int, config_json: str) -> _EvalScorer: ...
+    @staticmethod
+    def judge(
+        scorer_id: str,
+        version: int,
+        agent: Agent,
+        rubric_json: str,
+        *,
+        tenant_scope: str = "python-local",
+    ) -> _EvalScorer: ...
+    @staticmethod
+    def python(
+        scorer_id: str,
+        version: int,
+        callback: object,
+        *,
+        callback_timeout_seconds: float = 30.0,
+    ) -> _EvalScorer: ...
+    @staticmethod
+    def parse_number(value: str) -> str: ...
+
+class _EvalResult:
+    @property
+    def stop_reason(self) -> str | None: ...
+    def report(self) -> dict[str, object]: ...
+    def snapshot(self) -> dict[str, object]: ...
+    def gate(self, policy_json: str) -> dict[str, object]: ...
+    def export_jsonl(self, path: str) -> None: ...
+    def write_summary(self, path: str) -> None: ...
+
+class _EvalRunner:
+    def __init__(
+        self,
+        spec_json: str,
+        store: _EvalStore,
+        subjects: list[_EvalSubject],
+        scorers: list[_EvalScorer],
+    ) -> None: ...
+    def cancel(self) -> None: ...
+    def run(self) -> Awaitable[_EvalResult]: ...
+    def resume(self) -> Awaitable[_EvalResult]: ...
+    def rescore(self) -> Awaitable[_EvalResult]: ...
+
+def _eval_spec_digest(spec_json: str) -> str: ...
+
+# Native search components accepted by the existing composition collections.
+class SearchToolset:
+    """Read-only unified search tool; construct with SearchEngine.toolset()."""
+
+class SearchContextProvider:
+    """Global recall; construct with SearchEngine.context_provider()."""
+
+class DocumentIndexToolset:
+    """Idempotent indexing effect; construct with DocumentSearchSource.toolset()."""
+    def __init__(self, source: _SearchSource) -> None: ...
+
+class JournalIndexObserver:
+    """Metadata-only hints; indexing reads committed journal records on drain."""
+    @property
+    def dropped_hints(self) -> int:
+        """Number of omitted hints; schedule authorized backfill after loss."""
+    def drain(
+        self, max_sessions: int, max_records: int
+    ) -> Awaitable[list[JournalIndexReport]]:
+        """Index bounded hinted sessions; failed/incomplete hints remain pending."""
+
+class _TextEmbedder:
+    @staticmethod
+    def hash(dimensions: int) -> _TextEmbedder: ...
+    @staticmethod
+    def ollama(base_url: str, model: str, dimensions: int) -> _TextEmbedder: ...
+    @property
+    def space(self) -> str: ...
+
+class _SearchSource:
+    @staticmethod
+    def memory(
+        memory: MemoryExtension,
+        config_json: str,
+        embedder_handle: _TextEmbedder | None = None,
+    ) -> _SearchSource: ...
+    @staticmethod
+    def documents(
+        agent: Agent,
+        path: str,
+        config_json: str,
+        embedder_handle: _TextEmbedder | None = None,
+    ) -> _SearchSource: ...
+    @staticmethod
+    def journal(agent: Agent, path: str, config_json: str) -> _SearchSource: ...
+    @staticmethod
+    def graph(
+        path: str, config_json: str, source_handles: list[_SearchSource]
+    ) -> _SearchSource: ...
+    def references(
+        self, cursor: str | None, limit: int
+    ) -> Awaitable[dict[str, object]]: ...
+    def descriptor(self) -> dict[str, object]: ...
+    def search(self, query_json: str, limit: int) -> Awaitable[dict[str, object]]: ...
+    def read_evidence(
+        self, reference_json: str
+    ) -> Awaitable[dict[str, object] | None]: ...
+    def index_document(self, input_json: str) -> Awaitable[dict[str, object]]: ...
+    def indexed_document(self, input_json: str) -> Awaitable[object]: ...
+    def document_inputs(
+        self, after: str | None, limit: int
+    ) -> Awaitable[list[tuple[str, dict[str, object]]]]: ...
+    def reconcile_documents(
+        self, after: str | None, limit: int
+    ) -> Awaitable[dict[str, object]]: ...
+    def reconcile_memory_embeddings(
+        self, offset: int, limit: int
+    ) -> Awaitable[dict[str, object]]: ...
+    def reconcile_embeddings(self, limit: int) -> Awaitable[int]: ...
+    def sync_session(
+        self, session_json: str, max_records: int
+    ) -> Awaitable[dict[str, object]]: ...
+    def index_reference(
+        self, source_id: str, reference_json: str
+    ) -> Awaitable[dict[str, object]]: ...
+    def rebuild_graph(
+        self, cursor_json: str, limit: int
+    ) -> Awaitable[dict[str, object]]: ...
+    def reconcile_graph(
+        self, after: str | None, limit: int
+    ) -> Awaitable[dict[str, object]]: ...
+    def observer(self) -> JournalIndexObserver: ...
+
+class _SearchEngine:
+    def __init__(self, config_json: str, sources: list[_SearchSource]) -> None: ...
+    def search(self, request_json: str) -> Awaitable[dict[str, object]]: ...
+    def toolset(self) -> SearchToolset: ...
+    def context_provider(self, max_hits: int) -> SearchContextProvider: ...
+
+class ArtifactStore:
+    """Opaque shared store from Agent.artifact_store; keeps its lifecycle owner alive.
+
+    Pass to any agent factory's artifact_store parameter to share the exact native
+    store, including process-local artifacts. Construction/opening remains with
+    existing agent artifact_path and S3ArtifactStore configuration.
+    """
+
+def sqlite_session_ids(path: str, *, limit: int = 256) -> Awaitable[list[str]]:
+    """List sorted session IDs from an application-owned SQLite journal.
+
+    Args:
+        path: Existing local journal file owned by the caller's application.
+        limit: Maximum accepted catalog size, between 1 and 256.
+    Returns:
+        Committed session IDs; search separately verifies record authority.
+    Raises:
+        ConfigurationError: For an unreadable journal or a catalog exceeding limit.
+            Supply explicit selected IDs when sqlite_session_selection_required occurs.
     """

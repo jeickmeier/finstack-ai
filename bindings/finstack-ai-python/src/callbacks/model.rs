@@ -26,6 +26,8 @@ const PYTHON_ESTIMATOR_ID: &str = "finstack.python.bytes-upper-bound";
 #[serde(deny_unknown_fields)]
 struct PythonModelOutput {
     #[serde(default)]
+    usage: Option<Usage>,
+    #[serde(default)]
     text: String,
     #[serde(default)]
     json: Option<serde_json::Value>,
@@ -166,7 +168,7 @@ fn model_response(output: PythonModelOutput) -> Result<ModelResponse, ()> {
     Ok(ModelResponse {
         assistant_content,
         tool_calls: tool_calls.into(),
-        usage: Usage::empty(),
+        usage: output.usage.unwrap_or_else(Usage::empty),
         provider_ids: ProviderIds::empty(),
         completion_id: Arc::from(output.completion_id),
         continuation_state: None,

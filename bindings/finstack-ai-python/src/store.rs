@@ -175,3 +175,85 @@ impl PyS3ArtifactStore {
         })
     }
 }
+
+/// Open a journal together with the exact registration identity used by all factories.
+pub(crate) async fn open_journal_registration(
+    (sqlite_path, sqlite_durability, postgres_dsn): (
+        Option<String>,
+        Option<PySqliteDurability>,
+        Option<String>,
+    ),
+) -> Result<(finstack_ai_kernel::ComponentRef, Arc<dyn JournalStore>), AgentRunError> {
+    let id = if postgres_dsn.is_some() {
+        "python.store.postgres"
+    } else if sqlite_path.is_some() {
+        "python.store.sqlite"
+    } else {
+        "python.store.memory"
+    };
+    let store = open_journal_store(sqlite_path, sqlite_durability, postgres_dsn).await?;
+    Ok((
+        crate::agent::component(id, crate::agent::PREVIEW_VERSION)?,
+        store,
+    ))
+}
+
+/// Shared artifact-store ownership for composing agents and native indexing tools.
+#[pyclass(module = "finstack_ai._finstack_ai", name = "ArtifactStore", frozen)]
+pub(crate) struct PyArtifactStore {
+    pub(crate) inner: Arc<dyn finstack_ai::runtime::artifact::ArtifactStore>,
+}
+/// Explicit configured S3 backend or an existing agent's exact shared store.
+#[derive(FromPyObject)]
+pub(crate) enum PyArtifactStoreArg {
+    S3(Py<PyS3ArtifactStore>),
+    Shared(Py<PyArtifactStore>),
+}
+impl PyArtifactStoreArg {
+    pub(crate) fn inner(
+        &self,
+        py: Python<'_>,
+    ) -> Arc<dyn finstack_ai::runtime::artifact::ArtifactStore> {
+        match self {
+            Self::S3(store) => store.bind(py).borrow().inner.clone(),
+            Self::Shared(store) => store.bind(py).borrow().inner.clone(),
+        }
+    }
+}
+
+/// Enumerate IDs from an application-owned `SQLite` journal, outside the journal
+/// port. Uses the same native `SQLite` library as the writer. The caller owns the
+/// file selection; search still independently validates committed authority.
+#[pyfunction]
+#[pyo3(signature=(path, *, limit=256))]
+pub(crate) fn sqlite_session_ids(
+    py: Python<'_>,
+    path: PathBuf,
+    limit: u32,
+) -> PyResult<Bound<'_, PyAny>> {
+    pyo3_async_runtimes::tokio::future_into_py(py, async move {
+        let failure = |reason| crate::errors::agent_error(&configuration_error(reason), None);
+        if limit == 0 || limit > 256 || !path.is_file() {
+            return Err(failure("sqlite_session_catalog_request"));
+        }
+        let store = SqliteJournalStore::try_open(SqliteStoreConfig::new(
+            path,
+            SqliteDurability::Durable,
+            STORE_LIMITS,
+        ))
+        .map_err(|_| failure("sqlite_session_catalog_unavailable"))?;
+        let rows = store
+            .list_sessions(limit + 1)
+            .await
+            .map_err(|_| failure("sqlite_session_catalog_unavailable"))?;
+        if rows.len() > limit as usize {
+            return Err(failure("sqlite_session_selection_required"));
+        }
+        let mut ids: Vec<_> = rows
+            .into_iter()
+            .map(|row| row.session_id.to_string())
+            .collect();
+        ids.sort();
+        Ok(ids)
+    })
+}

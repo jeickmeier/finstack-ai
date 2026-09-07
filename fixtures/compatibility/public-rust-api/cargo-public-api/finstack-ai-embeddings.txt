@@ -62,4 +62,5 @@ pub fn finstack_ai_embeddings::vector::EmbeddingVector::fmt(&self, &mut core::fm
 impl core::hash::Hash for finstack_ai_embeddings::vector::EmbeddingVector
 pub fn finstack_ai_embeddings::vector::EmbeddingVector::hash<H: core::hash::Hasher>(&self, &mut H)
 pub const finstack_ai_embeddings::vector::EMBEDDING_MAX_DIMENSIONS: usize
+pub fn finstack_ai_embeddings::vector::similarity_score(f32) -> u32
 pub fn finstack_ai_embeddings::vector::truncate_to_bytes(&str, usize) -> &str

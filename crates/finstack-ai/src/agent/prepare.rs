@@ -694,7 +694,7 @@ pub(super) async fn submit(
     Ok(())
 }
 
-async fn settle_deadline_timeout(
+pub(super) async fn settle_deadline_timeout(
     handle: &RunHandle,
     locator: OperationLocator,
     timeout: Duration,
@@ -1009,7 +1009,7 @@ fn kernel_duration(timeout: Duration) -> Result<finstack_ai_kernel::Duration, Ag
     Ok(finstack_ai_kernel::Duration::from_millis(millis))
 }
 
-async fn append_lane_input(
+pub(super) async fn append_lane_input(
     runtime: &SessionRuntime,
     lane_id: LaneId,
     run_id: finstack_ai_kernel::RunId,
@@ -1039,7 +1039,7 @@ async fn append_lane_input(
         .map_err(|error| session_error(&error))
 }
 
-async fn create_session_runtime(
+pub(super) async fn create_session_runtime(
     store: Arc<dyn finstack_ai_runtime::ports::journal::JournalStore>,
     tenant_scope: &str,
     session_id: SessionId,
@@ -1117,7 +1117,7 @@ async fn attach_plan_observers(
     }
 }
 
-fn event_subscription(max_sensitivity: Sensitivity) -> EventSubscriptionConfig {
+pub(super) fn event_subscription(max_sensitivity: Sensitivity) -> EventSubscriptionConfig {
     EventSubscriptionConfig {
         queue_capacity: DEFAULT_QUEUE_CAPACITY,
         filter: EventFilter {

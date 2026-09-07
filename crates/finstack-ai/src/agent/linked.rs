@@ -3,64 +3,97 @@
 //! Python and WASM only map arguments. `wasm-host` methods exist and return
 //! [`crate::AGENT_RUN_UNSUPPORTED_PLAN`]. Constructors never read ambient env.
 
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
 #[cfg(any(
-    feature = "linked-providers",
-    feature = "tool-openrouter-media",
-    feature = "tool-video-compose"
+    feature = "provider-openai",
+    feature = "provider-openrouter",
+    feature = "provider-anthropic",
+    feature = "provider-gemini",
+    feature = "provider-ollama"
 ))]
 use finstack_ai_kernel::ComponentId;
-#[cfg(feature = "linked-providers")]
-use finstack_ai_kernel::{AgentId, BundleId};
 use finstack_ai_kernel::{CapabilityId, ComponentRef, RawJson};
 use finstack_ai_runtime::artifact::ArtifactStore;
 use finstack_ai_runtime::ports::context::ContextProvider;
-#[cfg(feature = "linked-providers")]
 use finstack_ai_runtime::ports::journal::JournalStore;
 use finstack_ai_runtime::ports::middleware::Middleware;
-#[cfg(feature = "linked-providers")]
+#[cfg(any(
+    feature = "provider-openai",
+    feature = "provider-openrouter",
+    feature = "provider-anthropic",
+    feature = "provider-gemini",
+    feature = "provider-ollama"
+))]
 use finstack_ai_runtime::ports::model::Model;
 use finstack_ai_runtime::ports::model::{ModelName, ModelSettings};
 use finstack_ai_runtime::ports::observer::Observer;
 use finstack_ai_runtime::ports::tool::Toolset;
 
-use crate::{ApprovalGrantMode, CapabilitySpec, ChildRunPolicy, RunPolicy};
+use crate::{ApprovalGrantMode, CapabilitySpec, ChildRunPolicy};
 
-use super::builder::NativeAgentBuilder;
 use super::handle::Agent;
 #[cfg(any(
-    feature = "linked-providers",
-    feature = "tool-openrouter-media",
-    feature = "tool-video-compose"
+    feature = "provider-openai",
+    feature = "provider-openrouter",
+    feature = "provider-anthropic",
+    feature = "provider-gemini",
+    feature = "provider-ollama"
+))]
+use super::linked_composition::build_linked_provider;
+#[cfg(any(
+    feature = "provider-openai",
+    feature = "provider-openrouter",
+    feature = "provider-anthropic",
+    feature = "provider-gemini",
+    feature = "provider-ollama"
 ))]
 use super::types::AGENT_RUN_INVALID_CONFIGURATION;
-#[cfg(not(feature = "linked-providers"))]
 use super::types::AGENT_RUN_UNSUPPORTED_PLAN;
 use super::types::AgentRunError;
 
-#[cfg(feature = "linked-providers")]
-const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
-#[cfg(feature = "linked-providers")]
-const OPENAI_TIMEOUT: Duration = Duration::from_mins(2);
-#[cfg(feature = "linked-providers")]
-const LINKED_CONTEXT_WINDOW_TOKENS: u64 = 1_050_000;
-#[cfg(feature = "linked-providers")]
-const LINKED_RESERVED_OUTPUT_TOKENS: u64 = 128_000;
-#[cfg(feature = "linked-providers")]
-const LINKED_ANTHROPIC_OUTPUT_TOKENS: u64 = 64_000;
-#[cfg(feature = "linked-providers")]
-const LINKED_PROVIDER_OVERHEAD_TOKENS: u64 = 64;
 #[cfg(any(
-    all(feature = "linked-providers", feature = "tool-openai-media"),
-    feature = "tool-openrouter-media"
+    feature = "provider-anthropic",
+    feature = "provider-gemini",
+    feature = "provider-ollama"
 ))]
-const LINKED_MEDIA_MAX_RESULT_BYTES: usize = 262_144;
-#[cfg(feature = "linked-providers")]
+const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
+#[cfg(any(
+    feature = "provider-openai",
+    feature = "provider-openrouter",
+    feature = "provider-anthropic",
+    feature = "provider-gemini",
+    feature = "provider-ollama"
+))]
+const OPENAI_TIMEOUT: Duration = Duration::from_mins(2);
+#[cfg(any(
+    feature = "provider-openai",
+    feature = "provider-openrouter",
+    feature = "provider-anthropic",
+    feature = "provider-gemini",
+    feature = "provider-ollama"
+))]
+const LINKED_CONTEXT_WINDOW_TOKENS: u64 = 1_050_000;
+#[cfg(any(
+    feature = "provider-openai",
+    feature = "provider-openrouter",
+    feature = "provider-ollama"
+))]
+const LINKED_RESERVED_OUTPUT_TOKENS: u64 = 128_000;
+#[cfg(any(feature = "provider-anthropic", feature = "provider-gemini"))]
+const LINKED_ANTHROPIC_OUTPUT_TOKENS: u64 = 64_000;
+#[cfg(any(
+    feature = "provider-openai",
+    feature = "provider-openrouter",
+    feature = "provider-anthropic",
+    feature = "provider-gemini",
+    feature = "provider-ollama"
+))]
+const LINKED_PROVIDER_OVERHEAD_TOKENS: u64 = 64;
+#[cfg(any(feature = "provider-openai", feature = "provider-openrouter"))]
 const REASONING_EFFORTS: &[&str] = &["none", "minimal", "low", "medium", "high", "xhigh", "max"];
-#[cfg(feature = "linked-providers")]
+#[cfg(any(feature = "provider-openai", feature = "provider-openrouter"))]
 const REASONING_SUMMARIES: &[&str] = &["auto", "concise", "detailed"];
 
 /// Already-resolved port handles supplied by a language binding.
@@ -69,11 +102,11 @@ pub struct LinkedAgentPorts {
     /// Toolset registrations.
     pub toolsets: Vec<(ComponentRef, Arc<dyn Toolset>)>,
     /// Context-provider registrations.
-    pub context_providers: Vec<(ComponentRef, Arc<dyn ContextProvider>)>,
+    pub context_providers: Vec<Arc<dyn ContextProvider>>,
     /// Middleware registrations.
-    pub middleware: Vec<(ComponentRef, Arc<dyn Middleware>)>,
+    pub middleware: Vec<Arc<dyn Middleware>>,
     /// Observer registrations.
-    pub observers: Vec<(ComponentRef, Arc<dyn Observer>)>,
+    pub observers: Vec<Arc<dyn Observer>>,
     /// Store for toolsets that stage bytes instead of inlining them. Without
     /// it, generated audio and images travel as base64 the model cannot use.
     pub artifact_store: Option<Arc<dyn ArtifactStore>>,
@@ -96,6 +129,9 @@ pub struct LinkedAgent {
 /// Host-agnostic fields shared by every linked-provider constructor.
 #[derive(Default)]
 pub struct LinkedCommon {
+    /// Explicit versioned journal registration. Defaults to a bounded memory store
+    /// in provider factories; overrides the builder store in `build_linked`.
+    pub journal_store: Option<(ComponentRef, Arc<dyn JournalStore>)>,
     /// Optional system instruction.
     pub instruction: Option<String>,
     /// Declarative catalog entries.
@@ -108,62 +144,6 @@ pub struct LinkedCommon {
     pub child_runs: ChildRunPolicy,
     /// Paid-tool approval grant mode. Bindings default this to `PerCall`.
     pub approval_grant: ApprovalGrantMode,
-    /// Optional `OpenRouter` media-toolset registration.
-    ///
-    /// Independent of which provider serves the model, so it lives here
-    /// rather than on four of the six provider specs.
-    pub openrouter_media: Option<OpenRouterMediaToolsSpec>,
-    /// Optional local ffmpeg composition-toolset registration.
-    pub video_compose: Option<VideoComposeSpec>,
-    /// Optional `MoviePlan` pipeline-toolset registration. Requires both
-    /// [`LinkedCommon::openrouter_media`] and [`LinkedCommon::video_compose`].
-    pub media_pipeline: Option<MediaPipelineSpec>,
-}
-
-/// `OpenRouter` media-toolset registration for any linked constructor.
-///
-/// The toolset always authenticates against `OpenRouter`, so it carries its
-/// own API key even when the chat model is served by another provider.
-pub struct OpenRouterMediaToolsSpec {
-    /// Explicit `OpenRouter` API key for the media endpoints.
-    pub api_key: String,
-    /// Optional non-secret `HTTP-Referer` attribution header.
-    pub referer: Option<String>,
-    /// Optional non-secret `X-Title` attribution header.
-    pub title: Option<String>,
-}
-
-/// Local ffmpeg composition-toolset registration for any linked constructor.
-///
-/// Every path is host-chosen and explicit: the SDK never searches `PATH` or
-/// invents a scratch location.
-pub struct VideoComposeSpec {
-    /// Absolute path to the `ffmpeg` binary.
-    pub ffmpeg_path: PathBuf,
-    /// Absolute path to the `ffprobe` binary.
-    pub ffprobe_path: PathBuf,
-    /// Directory for per-render scratch files. Created when missing.
-    pub scratch_dir: PathBuf,
-    /// Wall-clock ceiling for one render, in seconds. Must be greater than
-    /// zero and at most one hour.
-    pub render_timeout_s: u64,
-}
-
-/// `MoviePlan` pipeline-toolset registration for any linked constructor.
-///
-/// The driver is composed over the registered `OpenRouter` media toolset,
-/// the registered composition toolset, and the host's artifact store, so all
-/// three must be present on the same [`LinkedCommon`].
-pub struct MediaPipelineSpec {
-    /// Maximum number of scenes in one plan.
-    pub max_scenes: usize,
-    /// Maximum total video duration, in seconds, across all scenes.
-    pub max_total_video_s: u64,
-    /// Maximum number of concurrent render jobs.
-    pub max_concurrent_jobs: usize,
-    /// Optional sqlite file for durable render state. `None` keeps
-    /// process-local state that a restart cannot resume.
-    pub sqlite_state_path: Option<PathBuf>,
 }
 
 /// Provider selection for [`Agent::linked`], the single linked-provider
@@ -171,7 +151,7 @@ pub struct MediaPipelineSpec {
 ///
 /// Each variant carries the full typed spec for one wire protocol. All
 /// variants funnel into the same composition pipeline
-/// ([`NativeAgentBuilder::build_linked`]), so provider choice never changes
+/// ([`super::NativeAgentBuilder::build_linked`]), so provider choice never changes
 /// registration, policy, or output-schema semantics.
 pub enum LinkedProviderSpec {
     /// Official `OpenAI` Responses agent (always `https://api.openai.com`).
@@ -199,8 +179,6 @@ pub struct OpenAiAgentSpec {
     pub reasoning_effort: Option<String>,
     /// Optional Responses reasoning summary.
     pub reasoning_summary: Option<String>,
-    /// Register the native `OpenAI` media toolset alongside the model.
-    pub media_tools: bool,
     /// Shared instruction, ports, and child-run policy.
     pub common: LinkedCommon,
 }
@@ -220,8 +198,6 @@ pub struct OpenRouterAgentSpec {
     pub reasoning_effort: Option<String>,
     /// Optional Responses reasoning summary.
     pub reasoning_summary: Option<String>,
-    /// Register the `OpenRouter` media-generation toolset alongside the model.
-    pub media_tools: bool,
     /// Shared instruction, ports, and child-run policy.
     pub common: LinkedCommon,
 }
@@ -285,121 +261,6 @@ pub struct GatewayAgentSpec {
     pub common: LinkedCommon,
 }
 
-impl NativeAgentBuilder {
-    /// Apply binding-resolved ports and finish as a [`LinkedAgent`].
-    ///
-    /// This is the single finish path for linked-provider constructors and
-    /// host-handle factories. It does not read environment variables.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`crate::AGENT_RUN_INVALID_CONFIGURATION`] when composition,
-    /// lock, or output-schema compilation fails.
-    pub async fn build_linked(
-        mut self,
-        #[cfg_attr(
-            not(any(feature = "tool-openrouter-media", feature = "tool-video-compose")),
-            allow(unused_mut)
-        )]
-        mut common: LinkedCommon,
-        model_name: ModelName,
-        settings: ModelSettings,
-        default_timeout: Duration,
-    ) -> Result<LinkedAgent, AgentRunError> {
-        // Only the media-pipeline registration reads these handles back,
-        // and it is a narrower feature than either toolset it composes.
-        #[cfg(feature = "tool-openrouter-media")]
-        #[cfg_attr(not(feature = "workflow-media-pipeline"), allow(unused_variables))]
-        let media_toolset = match common.openrouter_media.take() {
-            Some(media) => Some(register_openrouter_media(&mut common.ports, media)?),
-            None => None,
-        };
-        #[cfg(not(feature = "tool-openrouter-media"))]
-        if common.openrouter_media.is_some() {
-            return Err(AgentRunError::configuration(
-                crate::AGENT_RUN_UNSUPPORTED_PLAN,
-                "openrouter_media requires the tool-openrouter-media feature",
-            ));
-        }
-        #[cfg(feature = "tool-video-compose")]
-        #[cfg_attr(not(feature = "workflow-media-pipeline"), allow(unused_variables))]
-        let compose_toolset = match common.video_compose.take() {
-            Some(compose) => Some(register_video_compose(&mut common.ports, &compose)?),
-            None => None,
-        };
-        #[cfg(not(feature = "tool-video-compose"))]
-        if common.video_compose.is_some() {
-            return Err(AgentRunError::configuration(
-                crate::AGENT_RUN_UNSUPPORTED_PLAN,
-                "video_compose requires the tool-video-compose feature",
-            ));
-        }
-        #[cfg(feature = "workflow-media-pipeline")]
-        if let Some(pipeline) = common.media_pipeline.take() {
-            register_media_pipeline(&mut common.ports, pipeline, media_toolset, compose_toolset)?;
-        }
-        #[cfg(not(feature = "workflow-media-pipeline"))]
-        if common.media_pipeline.is_some() {
-            return Err(AgentRunError::configuration(
-                crate::AGENT_RUN_UNSUPPORTED_PLAN,
-                "media_pipeline requires the workflow-media-pipeline feature",
-            ));
-        }
-        let LinkedCommon {
-            instruction,
-            capabilities,
-            active_capabilities,
-            ports,
-            child_runs,
-            approval_grant,
-            openrouter_media: _,
-            video_compose: _,
-            media_pipeline: _,
-        } = common;
-        for (component, toolset) in ports.toolsets {
-            self = self.toolset(component, toolset);
-        }
-        for (component, provider) in ports.context_providers {
-            self = self.context_provider(component, provider);
-        }
-        for (component, middleware) in ports.middleware {
-            self = self.middleware(component, middleware);
-        }
-        for (component, observer) in ports.observers {
-            self = self.observer(component, observer);
-        }
-        if let Some(store) = ports.artifact_store.clone() {
-            self = self.artifact_store(store);
-        }
-        if let Some(instruction) = instruction {
-            self = self.try_instruction(instruction)?;
-        }
-        for capability in capabilities {
-            self = self.capability(capability);
-        }
-        for capability in active_capabilities {
-            self = self.activate_application(capability);
-        }
-        self = self.policy(RunPolicy {
-            child_runs,
-            approval_grant,
-            ..RunPolicy::default()
-        });
-        let agent = self.build().await?;
-        let agent = if let Some(schema) = ports.output_schema {
-            agent.try_with_output_schema(&schema)?
-        } else {
-            agent
-        };
-        Ok(LinkedAgent {
-            agent,
-            model: model_name,
-            settings,
-            default_timeout,
-        })
-    }
-}
-
 impl Agent {
     /// Construct a linked-provider agent. This is the single Rust-owned
     /// construction path for every wire protocol; language bindings only map
@@ -414,8 +275,7 @@ impl Agent {
     ///   `https://openrouter.ai/api/v1/responses`. It does not attach a
     ///   [`finstack_ai_runtime::ports::model::MediaResolver`]: vision, file,
     ///   and audio input require a host-built provider with
-    ///   `with_media_resolver`; `media_tools` registers outbound
-    ///   media-generation tools only.
+    ///   `with_media_resolver`. Outbound media toolsets are composed separately.
     /// - [`LinkedProviderSpec::Anthropic`] and [`LinkedProviderSpec::Gemini`]
     ///   require HTTPS when `api_key` is set; a loopback endpoint may run
     ///   without one.
@@ -428,7 +288,7 @@ impl Agent {
     /// # Errors
     ///
     /// Returns [`crate::AGENT_RUN_UNSUPPORTED_PLAN`] on `wasm-host` or when
-    /// the `linked-providers` feature is disabled. Returns
+    /// the selected `provider-*` feature is disabled. Returns
     /// [`crate::AGENT_RUN_INVALID_CONFIGURATION`] when the endpoint, model,
     /// credential pairing, attribution, reasoning, or gateway route is
     /// invalid.
@@ -444,7 +304,7 @@ impl Agent {
     }
 }
 
-#[cfg(feature = "linked-providers")]
+#[cfg(feature = "provider-openai")]
 async fn openai_inner(spec: OpenAiAgentSpec) -> Result<LinkedAgent, AgentRunError> {
     use finstack_ai_provider_openai::{
         Authentication, OpenAiConfig, OpenAiModelConfig, OpenAiProvider, SecretString,
@@ -454,7 +314,6 @@ async fn openai_inner(spec: OpenAiAgentSpec) -> Result<LinkedAgent, AgentRunErro
         spec.reasoning_effort.as_deref(),
         spec.reasoning_summary.as_deref(),
     )?;
-    let api_key_for_tools = spec.media_tools.then(|| spec.api_key.clone());
     let config = OpenAiConfig::try_new("https://api.openai.com")
         .map_err(|error| model_configuration_error(&error))?
         .with_authentication(Authentication::Bearer(
@@ -473,19 +332,7 @@ async fn openai_inner(spec: OpenAiAgentSpec) -> Result<LinkedAgent, AgentRunErro
     model_config = model_config.with_reasoning(true);
     let model_name = model_config.name.clone();
     let provider = arc_model(OpenAiProvider::try_new, config, model_config)?;
-    #[cfg_attr(not(feature = "tool-openai-media"), allow(unused_mut))]
-    let mut common = spec.common;
-    #[cfg(feature = "tool-openai-media")]
-    if let Some(api_key_for_tools) = api_key_for_tools {
-        register_openai_media(&mut common.ports, api_key_for_tools)?;
-    }
-    #[cfg(not(feature = "tool-openai-media"))]
-    if api_key_for_tools.is_some() {
-        return Err(AgentRunError::configuration(
-            crate::AGENT_RUN_UNSUPPORTED_PLAN,
-            "media_tools requires the tool-openai-media feature",
-        ));
-    }
+    let common = spec.common;
     build_linked_provider(
         (
             "python.agent.openai",
@@ -501,7 +348,7 @@ async fn openai_inner(spec: OpenAiAgentSpec) -> Result<LinkedAgent, AgentRunErro
     .await
 }
 
-#[cfg(feature = "linked-providers")]
+#[cfg(feature = "provider-openrouter")]
 async fn openrouter_inner(spec: OpenRouterAgentSpec) -> Result<LinkedAgent, AgentRunError> {
     use finstack_ai_provider_openrouter::{
         Authentication, OpenRouterConfig, OpenRouterModelConfig, OpenRouterProvider, SecretString,
@@ -511,7 +358,6 @@ async fn openrouter_inner(spec: OpenRouterAgentSpec) -> Result<LinkedAgent, Agen
         spec.reasoning_effort.as_deref(),
         spec.reasoning_summary.as_deref(),
     )?;
-    let api_key_for_tools = spec.media_tools.then(|| spec.api_key.clone());
     let config = OpenRouterConfig::try_new("https://openrouter.ai")
         .map_err(|error| model_configuration_error(&error))?
         .with_authentication(Authentication::Bearer(
@@ -532,20 +378,7 @@ async fn openrouter_inner(spec: OpenRouterAgentSpec) -> Result<LinkedAgent, Agen
     .with_reasoning(true);
     let model_name = model_config.name().clone();
     let provider = arc_model(OpenRouterProvider::try_new, config, model_config)?;
-    let mut common = spec.common;
-    if let Some(api_key_for_tools) = api_key_for_tools {
-        if common.openrouter_media.is_some() {
-            return Err(AgentRunError::configuration(
-                AGENT_RUN_INVALID_CONFIGURATION,
-                "openrouter media_tools and openrouter_media cannot both be set",
-            ));
-        }
-        common.openrouter_media = Some(OpenRouterMediaToolsSpec {
-            api_key: api_key_for_tools,
-            referer: spec.referer.clone(),
-            title: spec.title.clone(),
-        });
-    }
+    let common = spec.common;
     build_linked_provider(
         (
             "python.agent.openrouter",
@@ -561,7 +394,7 @@ async fn openrouter_inner(spec: OpenRouterAgentSpec) -> Result<LinkedAgent, Agen
     .await
 }
 
-#[cfg(feature = "linked-providers")]
+#[cfg(feature = "provider-anthropic")]
 async fn anthropic_inner(spec: AnthropicAgentSpec) -> Result<LinkedAgent, AgentRunError> {
     use finstack_ai_provider_anthropic::{
         AnthropicConfig, AnthropicModelConfig, AnthropicProvider, Authentication, SecretString,
@@ -603,7 +436,7 @@ async fn anthropic_inner(spec: AnthropicAgentSpec) -> Result<LinkedAgent, AgentR
     .await
 }
 
-#[cfg(feature = "linked-providers")]
+#[cfg(feature = "provider-gemini")]
 async fn gemini_inner(spec: GeminiAgentSpec) -> Result<LinkedAgent, AgentRunError> {
     use finstack_ai_provider_gemini::{
         Authentication, GeminiConfig, GeminiModelConfig, GeminiProvider, SecretString,
@@ -644,7 +477,7 @@ async fn gemini_inner(spec: GeminiAgentSpec) -> Result<LinkedAgent, AgentRunErro
     .await
 }
 
-#[cfg(feature = "linked-providers")]
+#[cfg(feature = "provider-ollama")]
 async fn ollama_inner(spec: OllamaAgentSpec) -> Result<LinkedAgent, AgentRunError> {
     use finstack_ai_provider_ollama::{OllamaConfig, OllamaModelConfig, OllamaProvider};
 
@@ -677,7 +510,13 @@ async fn ollama_inner(spec: OllamaAgentSpec) -> Result<LinkedAgent, AgentRunErro
     .await
 }
 
-#[cfg(feature = "linked-providers")]
+#[cfg(any(
+    feature = "provider-openai",
+    feature = "provider-openrouter",
+    feature = "provider-anthropic",
+    feature = "provider-gemini",
+    feature = "provider-ollama"
+))]
 async fn gateway_inner(spec: GatewayAgentSpec) -> Result<LinkedAgent, AgentRunError> {
     use finstack_ai_runtime::ports::model::{Authentication, CredentialReference, CredentialStore};
 
@@ -753,7 +592,19 @@ async fn gateway_inner(spec: GatewayAgentSpec) -> Result<LinkedAgent, AgentRunEr
     .await
 }
 
-#[cfg(feature = "linked-providers")]
+#[cfg(any(
+    feature = "provider-openai",
+    feature = "provider-openrouter",
+    feature = "provider-anthropic",
+    feature = "provider-gemini",
+    feature = "provider-ollama"
+))]
+#[allow(
+    unused_variables,
+    unreachable_patterns,
+    clippy::needless_pass_by_value,
+    reason = "gateway routes are selected by individual provider features"
+)]
 fn gateway_provider(
     wire_protocol: &str,
     endpoint: &str,
@@ -763,6 +614,7 @@ fn gateway_provider(
     reference: finstack_ai_runtime::ports::model::CredentialReference,
 ) -> Result<(Arc<dyn Model>, ModelName), AgentRunError> {
     match wire_protocol {
+        #[cfg(feature = "provider-openai")]
         "openai_responses" => {
             use finstack_ai_provider_openai::{OpenAiConfig, OpenAiModelConfig, OpenAiProvider};
             let config = OpenAiConfig::try_new(endpoint)
@@ -783,6 +635,7 @@ fn gateway_provider(
                 model_name,
             ))
         }
+        #[cfg(feature = "provider-anthropic")]
         "anthropic_messages" => {
             use finstack_ai_provider_anthropic::{
                 AnthropicConfig, AnthropicModelConfig, AnthropicProvider,
@@ -805,6 +658,7 @@ fn gateway_provider(
                 model_name,
             ))
         }
+        #[cfg(feature = "provider-ollama")]
         "ollama_chat" => {
             use finstack_ai_provider_ollama::{OllamaConfig, OllamaModelConfig, OllamaProvider};
             let config = OllamaConfig::try_new(endpoint)
@@ -825,8 +679,15 @@ fn gateway_provider(
                 model_name,
             ))
         }
+        #[cfg(feature = "provider-gemini")]
         "gemini_generate_content" => {
             gateway_gemini_provider(endpoint, model, hard_input_bytes, store, reference)
+        }
+        "openai_responses" | "anthropic_messages" | "ollama_chat" | "gemini_generate_content" => {
+            Err(AgentRunError::configuration(
+                AGENT_RUN_UNSUPPORTED_PLAN,
+                "gateway route requires its individual provider feature",
+            ))
         }
         _ => Err(AgentRunError::configuration(
             AGENT_RUN_INVALID_CONFIGURATION,
@@ -835,7 +696,7 @@ fn gateway_provider(
     }
 }
 
-#[cfg(feature = "linked-providers")]
+#[cfg(feature = "provider-gemini")]
 fn gateway_gemini_provider(
     endpoint: &str,
     model: &str,
@@ -862,37 +723,49 @@ fn gateway_gemini_provider(
     ))
 }
 
-#[cfg(not(feature = "linked-providers"))]
+#[cfg(not(feature = "provider-openai"))]
 async fn openai_inner(spec: OpenAiAgentSpec) -> Result<LinkedAgent, AgentRunError> {
     unsupported_provider(spec, "openai").await
 }
 
-#[cfg(not(feature = "linked-providers"))]
+#[cfg(not(feature = "provider-openrouter"))]
 async fn openrouter_inner(spec: OpenRouterAgentSpec) -> Result<LinkedAgent, AgentRunError> {
     unsupported_provider(spec, "openrouter").await
 }
 
-#[cfg(not(feature = "linked-providers"))]
+#[cfg(not(feature = "provider-anthropic"))]
 async fn anthropic_inner(spec: AnthropicAgentSpec) -> Result<LinkedAgent, AgentRunError> {
     unsupported_provider(spec, "anthropic").await
 }
 
-#[cfg(not(feature = "linked-providers"))]
+#[cfg(not(feature = "provider-gemini"))]
 async fn gemini_inner(spec: GeminiAgentSpec) -> Result<LinkedAgent, AgentRunError> {
     unsupported_provider(spec, "gemini").await
 }
 
-#[cfg(not(feature = "linked-providers"))]
+#[cfg(not(feature = "provider-ollama"))]
 async fn ollama_inner(spec: OllamaAgentSpec) -> Result<LinkedAgent, AgentRunError> {
     unsupported_provider(spec, "ollama").await
 }
 
-#[cfg(not(feature = "linked-providers"))]
+#[cfg(not(any(
+    feature = "provider-openai",
+    feature = "provider-openrouter",
+    feature = "provider-anthropic",
+    feature = "provider-gemini",
+    feature = "provider-ollama"
+)))]
 async fn gateway_inner(spec: GatewayAgentSpec) -> Result<LinkedAgent, AgentRunError> {
     unsupported_provider(spec, "gateway").await
 }
 
-#[cfg(not(feature = "linked-providers"))]
+#[cfg(not(all(
+    feature = "provider-openai",
+    feature = "provider-openrouter",
+    feature = "provider-anthropic",
+    feature = "provider-gemini",
+    feature = "provider-ollama"
+)))]
 #[expect(
     clippy::unused_async,
     reason = "unsupported linked features keep the same async signature"
@@ -901,59 +774,25 @@ async fn unsupported_provider<T>(
     _spec: T,
     name: &'static str,
 ) -> Result<LinkedAgent, AgentRunError> {
+    let requirement = if name == "gateway" {
+        "a gateway route's provider-* feature".to_owned()
+    } else {
+        format!("the provider-{name} feature")
+    };
     Err(AgentRunError::configuration(
         AGENT_RUN_UNSUPPORTED_PLAN,
-        format!("Agent::{name} requires the linked-providers feature"),
+        format!("Agent::linked({name}) requires {requirement}"),
     ))
 }
 
-#[cfg(feature = "linked-providers")]
-async fn build_linked_provider(
-    (agent_id, bundle_id, model_id): (&str, &str, &str),
-    provider: Arc<dyn Model>,
-    model_name: ModelName,
-    common: LinkedCommon,
-    settings: ModelSettings,
-    default_timeout: Duration,
-) -> Result<LinkedAgent, AgentRunError> {
-    Agent::builder(
-        AgentId::parse(agent_id).map_err(|error| {
-            AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
-        })?,
-        BundleId::parse(bundle_id).map_err(|error| {
-            AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
-        })?,
-        (component(model_id)?, provider),
-        memory_store()?,
-    )
-    .build_linked(common, model_name, settings, default_timeout)
-    .await
-}
-
-#[cfg(feature = "linked-providers")]
-fn memory_store() -> Result<(ComponentRef, Arc<dyn JournalStore>), AgentRunError> {
-    use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
-
-    let store = Arc::new(
-        MemoryJournalStore::try_new(MemoryStoreLimits {
-            sessions: 64,
-            batches_per_session: 256,
-            records_per_session: 4_096,
-            snapshot_bytes: 64 * 1_024,
-        })
-        .map_err(|error| {
-            AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
-        })?,
-    );
-    Ok((component("python.store.memory")?, store))
-}
-
 #[cfg(any(
-    feature = "linked-providers",
-    feature = "tool-openrouter-media",
-    feature = "tool-video-compose"
+    feature = "provider-openai",
+    feature = "provider-openrouter",
+    feature = "provider-anthropic",
+    feature = "provider-gemini",
+    feature = "provider-ollama"
 ))]
-fn component(id: &str) -> Result<ComponentRef, AgentRunError> {
+pub(super) fn component(id: &str) -> Result<ComponentRef, AgentRunError> {
     Ok(ComponentRef::new(
         ComponentId::parse(id).map_err(|error| {
             AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
@@ -962,166 +801,17 @@ fn component(id: &str) -> Result<ComponentRef, AgentRunError> {
     ))
 }
 
-/// Register the `OpenAI` media toolset, attaching the host artifact store
-/// when the linked ports already have one.
-#[cfg(all(feature = "linked-providers", feature = "tool-openai-media"))]
-fn register_openai_media(
-    ports: &mut LinkedAgentPorts,
-    api_key: String,
-) -> Result<(), AgentRunError> {
-    use finstack_ai_tools_openai_media::{OpenAiMediaConfig, OpenAiMediaToolset};
-
-    let toolset = OpenAiMediaToolset::try_new(OpenAiMediaConfig {
-        api_key,
-        endpoint: String::new(),
-        max_result_bytes: LINKED_MEDIA_MAX_RESULT_BYTES,
-    })
-    .map_err(|error| {
-        AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
-    })?;
-    let toolset = match ports.artifact_store.clone() {
-        Some(store) => toolset.with_artifact_store(store),
-        None => toolset,
-    };
-    ports
-        .toolsets
-        .push((component("python.toolset.openai_media")?, Arc::new(toolset)));
-    Ok(())
-}
-
-/// Register the `OpenRouter` media toolset on any linked constructor.
-#[cfg(feature = "tool-openrouter-media")]
-fn register_openrouter_media(
-    ports: &mut LinkedAgentPorts,
-    spec: OpenRouterMediaToolsSpec,
-) -> Result<Arc<dyn Toolset>, AgentRunError> {
-    use finstack_ai_tools_openrouter_media::{OpenRouterMediaConfig, OpenRouterMediaToolset};
-
-    let toolset = OpenRouterMediaToolset::try_new(OpenRouterMediaConfig {
-        api_key: spec.api_key,
-        endpoint: String::new(),
-        referer: spec.referer,
-        title: spec.title,
-        max_result_bytes: LINKED_MEDIA_MAX_RESULT_BYTES,
-    })
-    .map_err(|error| {
-        AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
-    })?;
-    let toolset = match ports.artifact_store.clone() {
-        Some(store) => toolset.with_artifact_store(store),
-        None => toolset,
-    };
-    let toolset: Arc<dyn Toolset> = Arc::new(toolset);
-    ports.toolsets.push((
-        component("python.toolset.openrouter_media")?,
-        Arc::clone(&toolset),
-    ));
-    Ok(toolset)
-}
-
-/// Register the local ffmpeg composition toolset.
-///
-/// The toolset stages every render through the host artifact store, so a
-/// linked composition without one is a configuration error rather than a
-/// silently degraded toolset.
-#[cfg(feature = "tool-video-compose")]
-fn register_video_compose(
-    ports: &mut LinkedAgentPorts,
-    spec: &VideoComposeSpec,
-) -> Result<Arc<dyn Toolset>, AgentRunError> {
-    use finstack_ai_tools_video_compose::{VideoComposeConfig, VideoComposeToolset};
-
-    let artifact_store = ports.artifact_store.clone().ok_or_else(|| {
-        AgentRunError::configuration(
-            AGENT_RUN_INVALID_CONFIGURATION,
-            "video_compose requires an artifact store",
-        )
-    })?;
-    let toolset = VideoComposeToolset::try_new(VideoComposeConfig {
-        ffmpeg_path: spec.ffmpeg_path.clone(),
-        ffprobe_path: spec.ffprobe_path.clone(),
-        artifact_store,
-        scratch_dir: spec.scratch_dir.clone(),
-        render_timeout: Duration::from_secs(spec.render_timeout_s),
-    })
-    .map_err(|error| {
-        AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
-    })?;
-    let toolset: Arc<dyn Toolset> = Arc::new(toolset);
-    ports.toolsets.push((
-        component("python.toolset.video_compose")?,
-        Arc::clone(&toolset),
-    ));
-    Ok(toolset)
-}
-
-/// Register the `MoviePlan` pipeline over the already-registered media and
-/// composition toolsets.
-#[cfg(feature = "workflow-media-pipeline")]
-fn register_media_pipeline(
-    ports: &mut LinkedAgentPorts,
-    spec: MediaPipelineSpec,
-    media_tools: Option<Arc<dyn Toolset>>,
-    compose_tools: Option<Arc<dyn Toolset>>,
-) -> Result<(), AgentRunError> {
-    use finstack_ai_workflow_media_pipeline::{
-        MediaPipelineConfig, MediaPipelineDriver, MediaPipelineToolset, MemoryRenderStateStore,
-        PlanLimits, RenderStateStore, SqliteRenderStateStore,
-    };
-
-    let media_tools = media_tools.ok_or_else(|| {
-        AgentRunError::configuration(
-            AGENT_RUN_INVALID_CONFIGURATION,
-            "media_pipeline requires openrouter_media",
-        )
-    })?;
-    let compose_tools = compose_tools.ok_or_else(|| {
-        AgentRunError::configuration(
-            AGENT_RUN_INVALID_CONFIGURATION,
-            "media_pipeline requires video_compose (ffmpeg_path, ffprobe_path, scratch_dir)",
-        )
-    })?;
-    let artifact_store = ports.artifact_store.clone().ok_or_else(|| {
-        AgentRunError::configuration(
-            AGENT_RUN_INVALID_CONFIGURATION,
-            "media_pipeline requires an artifact store",
-        )
-    })?;
-    let state: Arc<dyn RenderStateStore> = match spec.sqlite_state_path {
-        Some(path) => Arc::new(SqliteRenderStateStore::open(path).map_err(|error| {
-            AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
-        })?),
-        None => Arc::new(MemoryRenderStateStore::new()),
-    };
-    let driver = MediaPipelineDriver::try_new(MediaPipelineConfig {
-        media_tools,
-        compose_tools,
-        state,
-        artifact_store: Some(artifact_store),
-        limits: PlanLimits {
-            max_scenes: spec.max_scenes,
-            max_total_video_s: spec.max_total_video_s,
-            max_concurrent_jobs: spec.max_concurrent_jobs,
-        },
-    })
-    .map_err(|error| {
-        AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
-    })?;
-    let toolset = MediaPipelineToolset::try_new(Arc::new(driver)).map_err(|error| {
-        AgentRunError::configuration(AGENT_RUN_INVALID_CONFIGURATION, error.to_string())
-    })?;
-    ports.toolsets.push((
-        component("python.toolset.media_pipeline")?,
-        Arc::new(toolset),
-    ));
-    Ok(())
-}
-
 /// Construct one provider and erase it to `Arc<dyn Model>`.
 ///
 /// Single finish path for every linked and gateway provider so the
 /// construct-wrap-map sequence cannot drift between providers.
-#[cfg(feature = "linked-providers")]
+#[cfg(any(
+    feature = "provider-openai",
+    feature = "provider-openrouter",
+    feature = "provider-anthropic",
+    feature = "provider-gemini",
+    feature = "provider-ollama"
+))]
 fn arc_model<C, M, P>(
     ctor: fn(C, Vec<M>) -> Result<P, finstack_ai_runtime::ports::model::ModelError>,
     config: C,
@@ -1136,7 +826,7 @@ where
 }
 
 /// Parse a provider model name into the shared error shape.
-#[cfg(feature = "linked-providers")]
+#[cfg(feature = "provider-gemini")]
 fn parse_model_name(model: &str) -> Result<ModelName, AgentRunError> {
     ModelName::try_new(model).map_err(|error| {
         AgentRunError::configuration(
@@ -1146,7 +836,13 @@ fn parse_model_name(model: &str) -> Result<ModelName, AgentRunError> {
     })
 }
 
-#[cfg(feature = "linked-providers")]
+#[cfg(any(
+    feature = "provider-openai",
+    feature = "provider-openrouter",
+    feature = "provider-anthropic",
+    feature = "provider-gemini",
+    feature = "provider-ollama"
+))]
 fn model_configuration_error(
     error: &finstack_ai_runtime::ports::model::ModelError,
 ) -> AgentRunError {
@@ -1156,7 +852,13 @@ fn model_configuration_error(
     )
 }
 
-#[cfg(feature = "linked-providers")]
+#[cfg(any(
+    feature = "provider-openai",
+    feature = "provider-openrouter",
+    feature = "provider-anthropic",
+    feature = "provider-gemini",
+    feature = "provider-ollama"
+))]
 fn secret_configuration_error() -> AgentRunError {
     AgentRunError::configuration(
         AGENT_RUN_INVALID_CONFIGURATION,
@@ -1164,7 +866,13 @@ fn secret_configuration_error() -> AgentRunError {
     )
 }
 
-#[cfg(feature = "linked-providers")]
+#[cfg(any(
+    feature = "provider-openai",
+    feature = "provider-openrouter",
+    feature = "provider-anthropic",
+    feature = "provider-gemini",
+    feature = "provider-ollama"
+))]
 fn gateway_authentication(
     kind: Option<&str>,
     api_key: Option<String>,
@@ -1194,7 +902,13 @@ fn gateway_authentication(
     }
 }
 
-#[cfg(feature = "linked-providers")]
+#[cfg(any(
+    feature = "provider-openai",
+    feature = "provider-openrouter",
+    feature = "provider-anthropic",
+    feature = "provider-gemini",
+    feature = "provider-ollama"
+))]
 fn require_https_or_loopback(endpoint: &str) -> Result<(), AgentRunError> {
     let parsed = url::Url::parse(endpoint).map_err(|_| {
         AgentRunError::configuration(
@@ -1226,7 +940,13 @@ fn require_https_or_loopback(endpoint: &str) -> Result<(), AgentRunError> {
     ))
 }
 
-#[cfg(feature = "linked-providers")]
+#[cfg(any(
+    feature = "provider-openai",
+    feature = "provider-openrouter",
+    feature = "provider-anthropic",
+    feature = "provider-gemini",
+    feature = "provider-ollama"
+))]
 fn require_https_for_credentials(endpoint: &str, has_secret: bool) -> Result<(), AgentRunError> {
     if !has_secret {
         return Ok(());
@@ -1243,7 +963,13 @@ fn require_https_for_credentials(endpoint: &str, has_secret: bool) -> Result<(),
     Ok(())
 }
 
-#[cfg(feature = "linked-providers")]
+#[cfg(any(
+    feature = "provider-openai",
+    feature = "provider-openrouter",
+    feature = "provider-anthropic",
+    feature = "provider-gemini",
+    feature = "provider-ollama"
+))]
 fn empty_model_settings() -> Result<ModelSettings, AgentRunError> {
     Ok(ModelSettings {
         values: RawJson::parse(b"{}").map_err(|error| {
@@ -1252,7 +978,7 @@ fn empty_model_settings() -> Result<ModelSettings, AgentRunError> {
     })
 }
 
-#[cfg(feature = "linked-providers")]
+#[cfg(any(feature = "provider-openai", feature = "provider-openrouter"))]
 fn reasoning_settings(
     effort: Option<&str>,
     summary: Option<&str>,
@@ -1295,14 +1021,6 @@ mod tests {
         LinkedCommon::default()
     }
 
-    pub(super) fn openrouter_media() -> OpenRouterMediaToolsSpec {
-        OpenRouterMediaToolsSpec {
-            api_key: "sk-or-media-canary".into(),
-            referer: None,
-            title: None,
-        }
-    }
-
     #[tokio::test]
     async fn openai_constructs_without_a_network_request() {
         let built = Agent::linked(LinkedProviderSpec::OpenAi(OpenAiAgentSpec {
@@ -1310,9 +1028,8 @@ mod tests {
             api_key: "sk-openai-secret-canary-056".into(),
             reasoning_effort: None,
             reasoning_summary: None,
-            media_tools: false,
+
             common: LinkedCommon {
-                openrouter_media: None,
                 instruction: Some("Answer concisely.".into()),
                 ..common()
             },
@@ -1332,11 +1049,8 @@ mod tests {
             api_key: "sk-openai-secret-canary-056".into(),
             reasoning_effort: Some("turbo".into()),
             reasoning_summary: None,
-            media_tools: false,
-            common: LinkedCommon {
-                openrouter_media: None,
-                ..common()
-            },
+
+            common: LinkedCommon { ..common() },
         }))
         .await
         .err()
@@ -1353,11 +1067,8 @@ mod tests {
             api_key: canary.into(),
             reasoning_effort: None,
             reasoning_summary: None,
-            media_tools: false,
-            common: LinkedCommon {
-                openrouter_media: None,
-                ..common()
-            },
+
+            common: LinkedCommon { ..common() },
         }))
         .await
         .err()
@@ -1375,7 +1086,7 @@ mod tests {
             title: Some("Example App".into()),
             reasoning_effort: None,
             reasoning_summary: None,
-            media_tools: false,
+
             common: LinkedCommon {
                 instruction: Some("Answer concisely.".into()),
                 ..common()
@@ -1388,28 +1099,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn openrouter_rejects_media_tools_and_common_openrouter_media() {
-        let error = Agent::linked(LinkedProviderSpec::OpenRouter(OpenRouterAgentSpec {
-            model: "openai/gpt-5".into(),
-            api_key: "sk-or-secret-canary-101".into(),
-            referer: None,
-            title: None,
-            reasoning_effort: None,
-            reasoning_summary: None,
-            media_tools: true,
-            common: LinkedCommon {
-                openrouter_media: Some(openrouter_media()),
-                ..common()
-            },
-        }))
-        .await
-        .err()
-        .expect("both media sources");
-        assert_eq!(error.code(), AGENT_RUN_INVALID_CONFIGURATION);
-        assert!(error.to_string().contains("cannot both be set"));
-    }
-
-    #[tokio::test]
     async fn openrouter_invalid_attribution_does_not_leak_the_api_key() {
         let canary = "sk-or-secret-canary-101";
         let error = Agent::linked(LinkedProviderSpec::OpenRouter(OpenRouterAgentSpec {
@@ -1419,7 +1108,7 @@ mod tests {
             title: None,
             reasoning_effort: None,
             reasoning_summary: None,
-            media_tools: false,
+
             common: common(),
         }))
         .await
@@ -1438,7 +1127,7 @@ mod tests {
             title: None,
             reasoning_effort: Some("turbo".into()),
             reasoning_summary: None,
-            media_tools: false,
+
             common: common(),
         }))
         .await
@@ -1455,10 +1144,7 @@ mod tests {
             base_url: "http://127.0.0.1:9".into(),
             model: "fixture-model".into(),
             api_key: Some(canary.into()),
-            common: LinkedCommon {
-                openrouter_media: None,
-                ..common()
-            },
+            common: LinkedCommon { ..common() },
         }))
         .await
         .err()
@@ -1474,7 +1160,6 @@ mod tests {
             model: "fixture-model".into(),
             api_key: None,
             common: LinkedCommon {
-                openrouter_media: None,
                 instruction: Some("Answer concisely.".into()),
                 ..common()
             },
@@ -1501,10 +1186,7 @@ mod tests {
             endpoint: "http://127.0.0.1:9".into(),
             model: "fixture-model".into(),
             api_key: Some(canary.into()),
-            common: LinkedCommon {
-                openrouter_media: None,
-                ..common()
-            },
+            common: LinkedCommon { ..common() },
         }))
         .await
         .err()
@@ -1518,10 +1200,7 @@ mod tests {
         let built = Agent::linked(LinkedProviderSpec::Ollama(OllamaAgentSpec {
             base_url: "http://127.0.0.1:11434".into(),
             model: "fixture-model".into(),
-            common: LinkedCommon {
-                openrouter_media: None,
-                ..common()
-            },
+            common: LinkedCommon { ..common() },
         }))
         .await
         .expect("ollama construct");
@@ -1649,239 +1328,5 @@ mod tests {
             .expect("openai_chat");
         assert_eq!(error.code(), AGENT_RUN_INVALID_CONFIGURATION);
         assert!(error.to_string().contains("openai_chat"));
-    }
-}
-
-#[cfg(all(test, feature = "linked-providers", feature = "linked-tools"))]
-mod media_tests {
-    use super::tests::{common, gateway_spec, openrouter_media};
-    use super::*;
-
-    fn toolset_ids(agent: &Agent) -> Vec<String> {
-        agent
-            .resolved()
-            .run_plan()
-            .toolsets()
-            .iter()
-            .map(|toolset| toolset.descriptor().component.id().to_string())
-            .collect()
-    }
-
-    #[tokio::test]
-    async fn openai_media_tools_register_the_toolset() {
-        let built = Agent::linked(LinkedProviderSpec::OpenAi(OpenAiAgentSpec {
-            model: "fixture-model".into(),
-            api_key: "sk-openai-secret-canary-056".into(),
-            reasoning_effort: None,
-            reasoning_summary: None,
-            media_tools: true,
-            common: LinkedCommon {
-                openrouter_media: Some(OpenRouterMediaToolsSpec {
-                    api_key: "sk-or-media-canary".into(),
-                    referer: None,
-                    title: None,
-                }),
-                ..common()
-            },
-        }))
-        .await
-        .expect("openai + media construct");
-        let ids = toolset_ids(&built.agent);
-        assert!(ids.contains(&"python.toolset.openai_media".into()));
-        assert!(ids.contains(&"python.toolset.openrouter_media".into()));
-    }
-
-    #[tokio::test]
-    async fn openai_agent_registers_the_openrouter_media_toolset() {
-        let built = Agent::linked(LinkedProviderSpec::OpenAi(OpenAiAgentSpec {
-            model: "fixture-model".into(),
-            api_key: "sk-openai-secret-canary-056".into(),
-            reasoning_effort: None,
-            reasoning_summary: None,
-            media_tools: false,
-            common: LinkedCommon {
-                openrouter_media: Some(openrouter_media()),
-                ..common()
-            },
-        }))
-        .await
-        .expect("openai + openrouter media construct");
-        assert!(toolset_ids(&built.agent).contains(&"python.toolset.openrouter_media".into()));
-    }
-
-    #[tokio::test]
-    async fn openai_agent_rejects_an_empty_media_api_key() {
-        let error = Agent::linked(LinkedProviderSpec::OpenAi(OpenAiAgentSpec {
-            model: "fixture-model".into(),
-            api_key: "sk-openai-secret-canary-056".into(),
-            reasoning_effort: None,
-            reasoning_summary: None,
-            media_tools: false,
-            common: LinkedCommon {
-                openrouter_media: Some(OpenRouterMediaToolsSpec {
-                    api_key: String::new(),
-                    referer: None,
-                    title: None,
-                }),
-                ..common()
-            },
-        }))
-        .await
-        .err()
-        .expect("empty media api key");
-        assert_eq!(error.code(), AGENT_RUN_INVALID_CONFIGURATION);
-    }
-
-    #[tokio::test]
-    async fn openrouter_media_tools_register_the_toolset() {
-        let built = Agent::linked(LinkedProviderSpec::OpenRouter(OpenRouterAgentSpec {
-            model: "openai/gpt-5".into(),
-            api_key: "sk-or-secret-canary-101".into(),
-            referer: None,
-            title: None,
-            reasoning_effort: None,
-            reasoning_summary: None,
-            media_tools: true,
-            common: common(),
-        }))
-        .await
-        .expect("openrouter + media construct");
-        assert!(toolset_ids(&built.agent).contains(&"python.toolset.openrouter_media".into()));
-    }
-
-    #[tokio::test]
-    async fn openrouter_registers_common_openrouter_media() {
-        let built = Agent::linked(LinkedProviderSpec::OpenRouter(OpenRouterAgentSpec {
-            model: "openai/gpt-5".into(),
-            api_key: "sk-or-secret-canary-101".into(),
-            referer: None,
-            title: None,
-            reasoning_effort: None,
-            reasoning_summary: None,
-            media_tools: false,
-            common: LinkedCommon {
-                openrouter_media: Some(openrouter_media()),
-                ..common()
-            },
-        }))
-        .await
-        .expect("openrouter + common media construct");
-        assert!(toolset_ids(&built.agent).contains(&"python.toolset.openrouter_media".into()));
-    }
-
-    #[tokio::test]
-    async fn gateway_registers_common_openrouter_media() {
-        let mut spec = gateway_spec();
-        spec.common.openrouter_media = Some(openrouter_media());
-        let built = Agent::linked(LinkedProviderSpec::Gateway(spec))
-            .await
-            .expect("gateway + openrouter media construct");
-        assert!(toolset_ids(&built.agent).contains(&"python.toolset.openrouter_media".into()));
-    }
-
-    #[cfg(feature = "tool-video-compose")]
-    fn video_compose(scratch_dir: std::path::PathBuf) -> VideoComposeSpec {
-        VideoComposeSpec {
-            ffmpeg_path: "/usr/bin/ffmpeg".into(),
-            ffprobe_path: "/usr/bin/ffprobe".into(),
-            scratch_dir,
-            render_timeout_s: 300,
-        }
-    }
-
-    #[cfg(feature = "workflow-media-pipeline")]
-    fn media_pipeline() -> MediaPipelineSpec {
-        MediaPipelineSpec {
-            max_scenes: 4,
-            max_total_video_s: 120,
-            max_concurrent_jobs: 2,
-            sqlite_state_path: None,
-        }
-    }
-
-    #[cfg(feature = "tool-video-compose")]
-    fn ports_with_artifact_store() -> LinkedAgentPorts {
-        LinkedAgentPorts {
-            artifact_store: Some(Arc::new(
-                finstack_ai_runtime::artifact::InProcessArtifactStore::default(),
-            )),
-            ..LinkedAgentPorts::default()
-        }
-    }
-
-    #[cfg(feature = "tool-video-compose")]
-    #[tokio::test]
-    async fn video_compose_registers_over_the_host_artifact_store() {
-        let scratch = tempfile::tempdir().expect("scratch dir");
-        let mut spec = gateway_spec();
-        spec.common.ports = ports_with_artifact_store();
-        spec.common.video_compose = Some(video_compose(scratch.path().to_path_buf()));
-        let built = Agent::linked(LinkedProviderSpec::Gateway(spec))
-            .await
-            .expect("gateway + video compose construct");
-        assert!(toolset_ids(&built.agent).contains(&"python.toolset.video_compose".into()));
-    }
-
-    #[cfg(feature = "tool-video-compose")]
-    #[tokio::test]
-    async fn video_compose_without_an_artifact_store_is_a_configuration_error() {
-        let scratch = tempfile::tempdir().expect("scratch dir");
-        let mut spec = gateway_spec();
-        spec.common.video_compose = Some(video_compose(scratch.path().to_path_buf()));
-        let error = Agent::linked(LinkedProviderSpec::Gateway(spec))
-            .await
-            .err()
-            .expect("missing artifact store");
-        assert_eq!(error.code(), AGENT_RUN_INVALID_CONFIGURATION);
-        assert!(error.to_string().contains("artifact store"));
-    }
-
-    #[cfg(feature = "workflow-media-pipeline")]
-    #[tokio::test]
-    async fn media_pipeline_registers_over_media_and_compose_toolsets() {
-        let scratch = tempfile::tempdir().expect("scratch dir");
-        let mut spec = gateway_spec();
-        spec.common.ports = ports_with_artifact_store();
-        spec.common.openrouter_media = Some(openrouter_media());
-        spec.common.video_compose = Some(video_compose(scratch.path().to_path_buf()));
-        spec.common.media_pipeline = Some(media_pipeline());
-        let built = Agent::linked(LinkedProviderSpec::Gateway(spec))
-            .await
-            .expect("gateway + media pipeline construct");
-        let ids = toolset_ids(&built.agent);
-        assert!(ids.contains(&"python.toolset.media_pipeline".into()));
-        assert!(ids.contains(&"python.toolset.video_compose".into()));
-        assert!(ids.contains(&"python.toolset.openrouter_media".into()));
-    }
-
-    #[cfg(feature = "workflow-media-pipeline")]
-    #[tokio::test]
-    async fn media_pipeline_without_video_compose_is_a_configuration_error() {
-        let mut spec = gateway_spec();
-        spec.common.ports = ports_with_artifact_store();
-        spec.common.openrouter_media = Some(openrouter_media());
-        spec.common.media_pipeline = Some(media_pipeline());
-        let error = Agent::linked(LinkedProviderSpec::Gateway(spec))
-            .await
-            .err()
-            .expect("missing video compose");
-        assert_eq!(error.code(), AGENT_RUN_INVALID_CONFIGURATION);
-        assert!(error.to_string().contains("video_compose"));
-    }
-
-    #[cfg(feature = "workflow-media-pipeline")]
-    #[tokio::test]
-    async fn media_pipeline_without_openrouter_media_is_a_configuration_error() {
-        let scratch = tempfile::tempdir().expect("scratch dir");
-        let mut spec = gateway_spec();
-        spec.common.ports = ports_with_artifact_store();
-        spec.common.video_compose = Some(video_compose(scratch.path().to_path_buf()));
-        spec.common.media_pipeline = Some(media_pipeline());
-        let error = Agent::linked(LinkedProviderSpec::Gateway(spec))
-            .await
-            .err()
-            .expect("missing openrouter media");
-        assert_eq!(error.code(), AGENT_RUN_INVALID_CONFIGURATION);
-        assert!(error.to_string().contains("openrouter_media"));
     }
 }

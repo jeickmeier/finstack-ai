@@ -92,8 +92,8 @@ JS_DECL_RE = re.compile(
 )
 
 
-def python_items() -> list[str]:
-    tree = ast.parse(PYTHON_INIT.read_text(encoding="utf-8"), filename=str(PYTHON_INIT))
+def python_exports_at(path: Path) -> list[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     for node in tree.body:
         if not isinstance(node, ast.Assign):
             continue
@@ -109,6 +109,20 @@ def python_items() -> list[str]:
             raise ValueError("Python __all__ must be a literal list of strings")
         return sorted(value)
     raise ValueError("Python package does not define __all__")
+
+
+# Native subpackages are published entrypoints with their own typed exports.
+PYTHON_SUBPACKAGES = ("eval", "search")
+
+
+def python_items() -> list[str]:
+    names = python_exports_at(PYTHON_INIT)
+    for module in PYTHON_SUBPACKAGES:
+        names.extend(
+            f"{module}.{name}"
+            for name in python_exports_at(PYTHON_INIT.parent / module / "__init__.py")
+        )
+    return sorted(names)
 
 
 def js_declared_items(path: Path) -> set[str]:
@@ -161,6 +175,10 @@ def python_stub_members() -> dict[str, set[str]]:
                 for item in node.body
                 if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
             }
+    for module in PYTHON_SUBPACKAGES:
+        members[module] = set(
+            python_exports_at(PYTHON_INIT.parent / module / "__init__.py")
+        )
     return members
 
 

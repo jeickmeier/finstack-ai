@@ -1,0 +1,44 @@
+{
+  "schema_version": "finstack.eval.v1",
+  "name": "parity",
+  "tasks": [
+    {
+      "task_id": "one",
+      "input": "one",
+      "target": "answer",
+      "metadata": null,
+      "attachments": []
+    },
+    {
+      "task_id": "two",
+      "input": "two",
+      "target": "answer",
+      "metadata": null,
+      "attachments": []
+    }
+  ],
+  "subjects": [
+    {
+      "subject_id": "baseline",
+      "lock_digest": null
+    },
+    {
+      "subject_id": "candidate",
+      "lock_digest": null
+    }
+  ],
+  "repetitions": 2,
+  "scorers": [
+    "exact_match"
+  ],
+  "reducer": {
+    "kind": "mean"
+  },
+  "limits": {
+    "attempt_timeout_ms": 1000,
+    "max_replacement_attempts": 0,
+    "max_concurrency": 1,
+    "budget_micros": null,
+    "budget_unit": null
+  }
+}

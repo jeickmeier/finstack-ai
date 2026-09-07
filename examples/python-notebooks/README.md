@@ -1,6 +1,6 @@
 # Python learning notebooks
 
-Eleven notebooks that teach `finstack_ai.Agent` as the composition root,
+Twelve notebooks that teach `finstack_ai.Agent` as the composition root,
 plus the five-notebook **k-track** product narrative (see below).
 There is no Python `Harness` type. A harness is the recipe: pick a
 provider factory, attach trusted Python ports, run, and inspect events.
@@ -58,6 +58,7 @@ uv run jupyter notebook examples/python-notebooks
 | [09_openrouter.ipynb](09_openrouter.ipynb) | T1 provider + T2 ports | Construct-only unless a key is set in the notebook or `OPENROUTER_API_KEY`. Set `OPENROUTER_MODEL`, `OPENROUTER_REFERER`, `OPENROUTER_TITLE`, `OPENROUTER_REASONING_EFFORT`, and `OPENROUTER_REASONING_SUMMARY` in the first code cell |
 | [10_elicitation.ipynb](10_elicitation.ipynb) | T2 callback | None |
 | [11_memory.ipynb](11_memory.ipynb) | T2 callback + native memory extension | None |
+| [12_evaluation.ipynb](12_evaluation.ipynb) | T2 callbacks + Rust evaluation and SQLite stores | None |
 
 T1 native providers and T2 Python callbacks run in-process. They are not
 isolated. See trust levels.
@@ -78,10 +79,13 @@ only by capability-safe roots and deny-by-default allowlists.
 Five narrative notebooks that tell the knowledge-agent story on this
 binding — the analyst path of the three-surface product defined in
 [`apps/finstack-knowledge/README.md`](../../apps/finstack-knowledge/README.md)
-(which also carries the cross-surface parity matrix). All five run
+with platform support in the [capability matrix](../../docs/capabilities.md). All five run
 offline and deterministically (scripted models); the shared composition
-lives in [`_knowledge.py`](_knowledge.py), which now composes the
-identical native components the Rust CLI does (divergences: none).
+lives in [`_knowledge.py`](_knowledge.py). It returns a `KnowledgeAgent`: retain
+its `.agent` for execution and `.maintain()` for bounded native index maintenance.
+The CLI and helper use the same native source implementations; browser search
+remains a host-adapter subset. Ingestion notebooks execute the real index effect
+and verify its receipt.
 
 | Notebook | Story beat |
 | --- | --- |
@@ -97,7 +101,7 @@ fixture `apps/finstack-knowledge/fixtures/golden.json` against this
 composition:
 
 ```bash
-uv run pytest examples/python-notebooks/test_knowledge_golden.py -q
+mise run test-search-python
 ```
 
 ## Live cells
@@ -121,3 +125,13 @@ Paste a key in the first code cell, or keep using the environment:
 OPENAI_API_KEY=... \
   uv run jupyter notebook examples/python-notebooks/06_openai.ipynb
 ```
+
+
+## Offline evaluation
+
+[12_evaluation.ipynb](12_evaluation.ipynb) compares two agent configurations on
+one frozen dataset using real Rust execution and SQLite journals. It reads paired
+quality, usage, cost coverage and failure counts, exports body-free JSONL, and
+rescores without subject calls. It requires no credentials. After rebuilding the
+extension, run `mise run test-eval-python` to validate Python parity, restart,
+cancellation and the full notebook. This notebook also runs in Python CI.

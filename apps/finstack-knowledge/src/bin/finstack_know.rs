@@ -158,6 +158,16 @@ fn print_markup(markup: &str) {
 }
 
 fn report_session(outcome: &ask::AskOutcome) {
+    for report in &outcome.maintenance {
+        if !report.failures.is_empty() || report.more {
+            eprintln!(
+                "search maintenance: more={}, failures={}",
+                report.more,
+                report.failures.join(",")
+            );
+        }
+    }
+
     if outcome.created {
         eprintln!("session: {}", outcome.session_id);
     }
@@ -213,7 +223,52 @@ fn config_from(cli: &Cli) -> Result<KnowledgeConfig, KnowledgeError> {
             })?,
         },
     };
-    Ok(KnowledgeConfig::new(data_dir, provider))
+    let mut config = KnowledgeConfig::new(data_dir, provider);
+    if let (Some(model), Some(dimensions)) = (&cli.embedding_model, cli.embedding_dimensions) {
+        config = config.with_embedder(finstack_ai_knowledge::EmbedderChoice::Ollama {
+            base_url: cli
+                .embedding_url
+                .clone()
+                .unwrap_or_else(|| DEFAULT_OLLAMA_URL.into()),
+            model: model.clone(),
+            dimensions,
+        });
+    }
+    if let Some(path) = &cli.graph_vocabulary {
+        use std::io::Read as _;
+        let file = std::fs::File::open(path).map_err(|_| KnowledgeError::Config {
+            reason: "graph_vocabulary_unreadable",
+        })?;
+        let mut bytes = Vec::new();
+        file.take(65_537)
+            .read_to_end(&mut bytes)
+            .map_err(|_| KnowledgeError::Config {
+                reason: "graph_vocabulary_unreadable",
+            })?;
+        if bytes.len() > 65_536 {
+            return Err(KnowledgeError::Config {
+                reason: "graph_vocabulary_too_large",
+            });
+        }
+        let vocabulary: finstack_ai_index_graph::GraphVocabulary =
+            serde_json::from_slice(&bytes).map_err(|_| KnowledgeError::Config {
+                reason: "graph_vocabulary_invalid",
+            })?;
+        vocabulary.validate().map_err(|_| KnowledgeError::Config {
+            reason: "graph_vocabulary_invalid",
+        })?;
+        config = config.with_graph(vocabulary);
+    }
+    config.search_sessions = cli
+        .search_session
+        .iter()
+        .map(|id| {
+            finstack_ai_kernel::SessionId::parse(id).map_err(|_| KnowledgeError::Config {
+                reason: "search_session_invalid",
+            })
+        })
+        .collect::<Result<_, _>>()?;
+    Ok(config)
 }
 
 fn runtime() -> Result<tokio::runtime::Runtime, KnowledgeError> {

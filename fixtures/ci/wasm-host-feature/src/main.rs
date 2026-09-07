@@ -42,7 +42,6 @@ fn main() -> Result<(), String> {
             api_key: "sk-unused".into(),
             reasoning_effort: None,
             reasoning_summary: None,
-            media_tools: false,
             common: LinkedCommon::default(),
         })),
     )?;
@@ -55,7 +54,6 @@ fn main() -> Result<(), String> {
             title: None,
             reasoning_effort: None,
             reasoning_summary: None,
-            media_tools: false,
             common: LinkedCommon::default(),
         })),
     )?;

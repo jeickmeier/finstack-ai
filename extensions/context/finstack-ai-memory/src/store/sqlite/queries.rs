@@ -84,7 +84,7 @@ pub(super) fn sqlite_search(
         MemoryQuery::Embedding {
             embedder_id,
             vector,
-        } => search_embedding(connection, scope, embedder_id, vector, now)?,
+        } => search_embedding(connection, scope, embedder_id, vector, now, limit)?,
     };
     hits.sort_by(|left, right| {
         right
@@ -299,7 +299,7 @@ fn sanitize_fts_query(text: &str) -> String {
 }
 
 /// One `memory_records` row, decoded back into a [`MemoryRecord`].
-fn record_from_row(row: &Row<'_>) -> rusqlite::Result<MemoryRecord> {
+pub(super) fn record_from_row(row: &Row<'_>) -> rusqlite::Result<MemoryRecord> {
     record_from_row_inner(row, true)
 }
 
@@ -1002,6 +1002,26 @@ pub(super) fn store_embedding(
     if embedding_source_digest(&embedding_source_text(&record))? != write.source_digest {
         return transaction.commit().map_err(|_| sqlite_unavailable());
     }
+    let retained: u64 = transaction
+        .query_row(
+            "SELECT COALESCE(SUM(length(vector)), 0) FROM memory_embeddings
+         WHERE NOT (scope_digest = ?1 AND id = ?2 AND embedder_id = ?3)",
+            params![
+                scope_key(&write.scope)?,
+                write.id.as_str(),
+                write.embedder_id.as_ref()
+            ],
+            |row| row.get(0),
+        )
+        .map_err(|_| sqlite_unavailable())?;
+    if retained.saturating_add((write.vector.dimensions() as u64).saturating_mul(4))
+        > limits.max_embedding_bytes
+    {
+        return Err(MemoryStoreError::CapacityExceeded {
+            resource: "embedding_bytes",
+            limit: limits.max_embedding_bytes,
+        });
+    }
     let unit_vector = write.vector.unit_normalized();
     transaction
         .execute(
@@ -1311,13 +1331,14 @@ fn search_full_text(
 /// scope's live rows in the space — the dot product of unit-normalized
 /// vectors mapped through the shared [`similarity_score`], so the ranking is
 /// byte-identical with [`super::super::InProcessMemoryStore`]'s. Ordering
-/// and the caller's limit are applied by [`sqlite_search`]'s shared sort.
+/// uses a bounded top-k heap; only the caller's limit is retained.
 fn search_embedding(
     connection: &Connection,
     scope: &MemoryScope,
     embedder_id: &str,
     vector: &EmbeddingVector,
     now: Timestamp,
+    limit: usize,
 ) -> Result<Vec<MemoryHit>, MemoryStoreError> {
     let Some(dimensions) = space_dimensions(connection, embedder_id)? else {
         // A space no embedder ever populated holds nothing.
@@ -1350,7 +1371,7 @@ fn search_embedding(
             },
         )
         .map_err(|_| sqlite_unavailable())?;
-    let mut hits = Vec::new();
+    let mut hits = super::super::ranking::TopHits::new(limit);
     for row in rows {
         let (record, blob) = row.map_err(|_| sqlite_unavailable())?;
         // Skip an undecodable embedding BLOB so one bad row does not fail search.
@@ -1366,7 +1387,7 @@ fn search_embedding(
             matched: MatchEvidence::Semantic,
         });
     }
-    Ok(hits)
+    Ok(hits.finish())
 }
 
 /// Decode a stored little-endian f32 BLOB back into a vector; `None` when

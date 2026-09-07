@@ -197,8 +197,8 @@ pub mod artifact {
         ArtifactError, ArtifactGcReport, ArtifactMetadata, ArtifactOwnerId, ArtifactPersistence,
         ArtifactRead, ArtifactScope, ArtifactStore, ArtifactStoreDescriptor, ArtifactStoreLimits,
         DEFAULT_ARTIFACT_ORPHAN_GRACE_MS, MAX_ARTIFACT_BYTES, MAX_ARTIFACT_GC_BATCH,
-        MAX_ARTIFACT_OWNERS, MAX_ARTIFACTS, MAX_TOTAL_ARTIFACT_BYTES, artifact_storage_key,
-        build_artifact_ref, get_required_artifact, stage_required_artifact,
+        MAX_ARTIFACT_OWNERS, MAX_ARTIFACTS, MAX_TOTAL_ARTIFACT_BYTES, artifact_scope_for_locator,
+        artifact_storage_key, build_artifact_ref, get_required_artifact, stage_required_artifact,
         validate_artifact_scope, validate_retrieved_artifact, validate_staged_artifact,
     };
     pub use crate::services::artifact::{

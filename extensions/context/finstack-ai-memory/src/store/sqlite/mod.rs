@@ -10,6 +10,7 @@
 //! Schema, worker, and query code live in sibling modules. Add behavior
 //! there rather than growing this facade.
 
+mod coverage;
 mod queries;
 mod schema;
 mod worker;

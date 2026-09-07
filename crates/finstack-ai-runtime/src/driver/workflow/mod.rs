@@ -18,6 +18,7 @@ use finstack_ai_kernel::{
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::artifact::ArtifactStore;
 #[cfg(feature = "native-tokio")]
 use crate::audit::SecurityAuditGate;
 use crate::commit::CommitCoordinator;
@@ -27,7 +28,7 @@ use crate::driver::host_driver as workflow_driver;
 use crate::driver::host_driver::InstalledRandom as WorkflowHostRandom;
 #[cfg(feature = "native-tokio")]
 use crate::driver::sdk as workflow_driver;
-use crate::events::EventHubConfig;
+use crate::events::{EventHubConfig, EventSubscriptionConfig};
 #[cfg(feature = "native-tokio")]
 use crate::ids::OsRandomSource as WorkflowHostRandom;
 use crate::ids::{ExternalClock, IdGenerationError, RandomSource};
@@ -41,9 +42,11 @@ use crate::ports::model::{
     ApprovalGrantMode, LockedModelContextProfile, Model, ModelCapabilities, ModelWarmupContext,
     ReadyModel, ToolSpec, model_retry_allowed,
 };
+use crate::ports::observer::Observer;
 use crate::ports::tool::{ResolvedToolCatalog, ToolStreamLimits, tool_retry_allowed};
 use crate::run::{
-    ModelTaskConfig, RunTaskConfig, RunTaskOwner, SameIdentityRetryPolicy, ToolTaskConfig,
+    ModelTaskConfig, RunHandle, RunTaskConfig, RunTaskOwner, SameIdentityRetryPolicy,
+    ShutdownReport, ToolTaskConfig,
 };
 
 /// Stable deny codes for [`retry_decision`].
@@ -414,6 +417,8 @@ pub struct WorkflowSession {
     audit: WorkflowAudit,
     model: Option<WorkflowModel>,
     catalog: Option<Arc<ResolvedToolCatalog>>,
+    artifact_store: Option<Arc<dyn ArtifactStore>>,
+    observers: Vec<(Arc<dyn Observer>, EventSubscriptionConfig)>,
     capability_owners: Option<Arc<BTreeMap<ComponentId, Arc<[CapabilityId]>>>>,
     middleware_chain: Option<Arc<ResolvedMiddlewareChain>>,
     context_providers: Option<Arc<[Arc<dyn ContextProvider>]>>,
@@ -514,6 +519,8 @@ impl WorkflowSession {
             audit,
             model: None,
             catalog: None,
+            artifact_store: None,
+            observers: Vec::new(),
             capability_owners: None,
             middleware_chain: None,
             context_providers: None,
@@ -807,6 +814,46 @@ impl WorkflowSession {
         })
     }
 
+    /// Rebind durable artifacts used by model and tool effects.
+    #[must_use]
+    pub fn with_artifact_store(mut self, store: Arc<dyn ArtifactStore>) -> Self {
+        self.artifact_store = Some(store);
+        self
+    }
+
+    /// Rebind read-only observers and their bounded delivery configuration.
+    #[must_use]
+    pub fn with_observers(
+        mut self,
+        observers: Vec<(Arc<dyn Observer>, EventSubscriptionConfig)>,
+    ) -> Self {
+        self.observers = observers;
+        self
+    }
+
+    /// Borrow a clone of the current owner's command handle, if spawned.
+    #[must_use]
+    pub fn run_handle(&self) -> Option<RunHandle> {
+        self.owner.as_ref().map(RunTaskOwner::handle)
+    }
+
+    /// Stop and join all local driving tasks, then refresh committed state.
+    ///
+    /// This does not cancel the durable run or reverse an external operation.
+    /// Pending effects retain their journal-authoritative recovery disposition.
+    ///
+    /// # Errors
+    /// Returns a recovery error if the post-shutdown journal cannot be loaded.
+    pub async fn shutdown_owner(&mut self) -> Result<Option<ShutdownReport>, WorkflowDriverError> {
+        let report = if let Some(mut owner) = self.owner.take() {
+            Some(owner.shutdown().await)
+        } else {
+            None
+        };
+        self.refresh_state().await?;
+        Ok(report)
+    }
+
     /// Drop the driving owner without touching the journal.
     pub fn abort_owner(&mut self) {
         self.owner = None;
@@ -921,7 +968,7 @@ impl WorkflowSession {
             command_capacity: 8,
             event_hub: EventHubConfig {
                 source_capacity: 16,
-                max_subscribers: 8,
+                max_subscribers: self.observers.len().checked_add(2).unwrap_or(0),
             },
             shutdown_deadline: Duration::from_millis(500),
             approval_grant: self.approval_grant,
@@ -932,8 +979,8 @@ impl WorkflowSession {
             stream_limits: crate::ports::model::ModelStreamLimits::default(),
             same_identity_retry: SameIdentityRetryPolicy::default(),
         };
-        let owner = if let Some(catalog) = self.catalog.clone() {
-            Box::pin(RunTaskOwner::spawn_with_model_and_tools(
+        let mut owner = if let Some(catalog) = self.catalog.clone() {
+            Box::pin(RunTaskOwner::spawn_with_model_tools_and_artifacts(
                 coordinator,
                 run_config,
                 model_config,
@@ -946,17 +993,23 @@ impl WorkflowSession {
                 model,
                 profile,
                 catalog,
+                self.artifact_store
+                    .clone()
+                    .map(|store| (store, self.locator.clone())),
                 self.clock.clone(),
                 self.random.clone(),
             ))
             .await
         } else {
-            Box::pin(RunTaskOwner::spawn_with_model(
+            Box::pin(RunTaskOwner::spawn_with_model_and_artifacts(
                 coordinator,
                 run_config,
                 model_config,
                 model,
                 profile,
+                self.artifact_store
+                    .clone()
+                    .map(|store| (store, self.locator.clone())),
                 self.clock.clone(),
                 self.random.clone(),
             ))
@@ -965,6 +1018,11 @@ impl WorkflowSession {
         .map_err(|error| WorkflowDriverError::Spawn {
             code: spawn_code(&error),
         })?;
+        for (observer, config) in &self.observers {
+            let _attached = owner
+                .attach_observer(Arc::clone(observer), config.clone())
+                .await;
+        }
         self.owner = Some(owner);
         Ok(())
     }

@@ -1,0 +1,71 @@
+pub mod finstack_ai_index_journal
+pub struct finstack_ai_index_journal::JournalIndexConfig
+pub finstack_ai_index_journal::JournalIndexConfig::io_timeout_ms: u64
+pub finstack_ai_index_journal::JournalIndexConfig::limits: finstack_ai_search_core::query::SearchLimits
+pub finstack_ai_index_journal::JournalIndexConfig::max_entries: usize
+pub finstack_ai_index_journal::JournalIndexConfig::max_entry_bytes: usize
+pub finstack_ai_index_journal::JournalIndexConfig::scope: finstack_ai_search_core::scope::SearchScope
+pub finstack_ai_index_journal::JournalIndexConfig::scope_mapping: finstack_ai_search_core::scope::ScopeMapping
+pub finstack_ai_index_journal::JournalIndexConfig::sensitivity: finstack_ai_kernel::primitives::diagnostic::Sensitivity
+pub finstack_ai_index_journal::JournalIndexConfig::sessions: alloc::vec::Vec<finstack_ai_kernel::primitives::ids::SessionId>
+pub finstack_ai_index_journal::JournalIndexConfig::source_id: alloc::sync::Arc<str>
+impl finstack_ai_index_journal::JournalIndexConfig
+pub fn finstack_ai_index_journal::JournalIndexConfig::new(impl core::convert::Into<alloc::sync::Arc<str>>, finstack_ai_search_core::scope::SearchScope, alloc::vec::Vec<finstack_ai_kernel::primitives::ids::SessionId>) -> Self
+pub fn finstack_ai_index_journal::JournalIndexConfig::validate(&self) -> core::result::Result<(), finstack_ai_search_core::SearchError>
+impl core::clone::Clone for finstack_ai_index_journal::JournalIndexConfig
+pub fn finstack_ai_index_journal::JournalIndexConfig::clone(&self) -> finstack_ai_index_journal::JournalIndexConfig
+impl core::cmp::Eq for finstack_ai_index_journal::JournalIndexConfig
+impl core::cmp::PartialEq for finstack_ai_index_journal::JournalIndexConfig
+pub fn finstack_ai_index_journal::JournalIndexConfig::eq(&self, &finstack_ai_index_journal::JournalIndexConfig) -> bool
+impl core::fmt::Debug for finstack_ai_index_journal::JournalIndexConfig
+pub fn finstack_ai_index_journal::JournalIndexConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_index_journal::JournalIndexConfig
+impl serde_core::ser::Serialize for finstack_ai_index_journal::JournalIndexConfig
+pub fn finstack_ai_index_journal::JournalIndexConfig::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_index_journal::JournalIndexConfig
+pub fn finstack_ai_index_journal::JournalIndexConfig::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_index_journal::JournalIndexObserver
+impl finstack_ai_index_journal::JournalIndexObserver
+pub async fn finstack_ai_index_journal::JournalIndexObserver::drain(&self, usize, usize) -> core::result::Result<alloc::vec::Vec<finstack_ai_index_journal::JournalIndexReport>, finstack_ai_search_core::SearchError>
+pub fn finstack_ai_index_journal::JournalIndexObserver::dropped_hints(&self) -> u64
+pub fn finstack_ai_index_journal::JournalIndexObserver::try_new(alloc::sync::Arc<finstack_ai_index_journal::JournalSearchSource>) -> core::result::Result<Self, finstack_ai_search_core::SearchError>
+impl core::clone::Clone for finstack_ai_index_journal::JournalIndexObserver
+pub fn finstack_ai_index_journal::JournalIndexObserver::clone(&self) -> finstack_ai_index_journal::JournalIndexObserver
+impl finstack_ai_runtime::ports::observer::Observer for finstack_ai_index_journal::JournalIndexObserver
+pub fn finstack_ai_index_journal::JournalIndexObserver::descriptor(&self) -> finstack_ai_runtime::ports::observer::ObserverDescriptor
+pub fn finstack_ai_index_journal::JournalIndexObserver::observe(&self, alloc::sync::Arc<[finstack_ai_kernel::events::envelope::RunEvent]>) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<(), finstack_ai_runtime::ports::observer::ObserverError>>
+pub struct finstack_ai_index_journal::JournalIndexReport
+pub finstack_ai_index_journal::JournalIndexReport::complete: bool
+pub finstack_ai_index_journal::JournalIndexReport::examined: usize
+pub finstack_ai_index_journal::JournalIndexReport::historical_complete: bool
+pub finstack_ai_index_journal::JournalIndexReport::indexed: usize
+pub finstack_ai_index_journal::JournalIndexReport::next_sequence: u64
+pub finstack_ai_index_journal::JournalIndexReport::session: finstack_ai_kernel::primitives::ids::SessionId
+pub finstack_ai_index_journal::JournalIndexReport::used_load: bool
+impl core::clone::Clone for finstack_ai_index_journal::JournalIndexReport
+pub fn finstack_ai_index_journal::JournalIndexReport::clone(&self) -> finstack_ai_index_journal::JournalIndexReport
+impl core::cmp::Eq for finstack_ai_index_journal::JournalIndexReport
+impl core::cmp::PartialEq for finstack_ai_index_journal::JournalIndexReport
+pub fn finstack_ai_index_journal::JournalIndexReport::eq(&self, &finstack_ai_index_journal::JournalIndexReport) -> bool
+impl core::fmt::Debug for finstack_ai_index_journal::JournalIndexReport
+pub fn finstack_ai_index_journal::JournalIndexReport::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_index_journal::JournalIndexReport
+impl serde_core::ser::Serialize for finstack_ai_index_journal::JournalIndexReport
+pub fn finstack_ai_index_journal::JournalIndexReport::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_index_journal::JournalIndexReport
+pub fn finstack_ai_index_journal::JournalIndexReport::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_index_journal::JournalSearchSource
+impl finstack_ai_index_journal::JournalSearchSource
+pub const fn finstack_ai_index_journal::JournalSearchSource::config(&self) -> &finstack_ai_index_journal::JournalIndexConfig
+pub const fn finstack_ai_index_journal::JournalSearchSource::configuration_digest(&self) -> finstack_ai_kernel::primitives::digest::Digest
+pub fn finstack_ai_index_journal::JournalSearchSource::try_open(&std::path::Path, alloc::sync::Arc<dyn finstack_ai_runtime::ports::journal::JournalStore>, finstack_ai_index_journal::JournalIndexConfig) -> core::result::Result<Self, finstack_ai_search_core::SearchError>
+impl finstack_ai_index_journal::JournalSearchSource
+pub async fn finstack_ai_index_journal::JournalSearchSource::sync_session(&self, finstack_ai_kernel::primitives::ids::SessionId, usize) -> core::result::Result<finstack_ai_index_journal::JournalIndexReport, finstack_ai_search_core::SearchError>
+impl core::clone::Clone for finstack_ai_index_journal::JournalSearchSource
+pub fn finstack_ai_index_journal::JournalSearchSource::clone(&self) -> finstack_ai_index_journal::JournalSearchSource
+impl finstack_ai_search_core::SearchSource for finstack_ai_index_journal::JournalSearchSource
+pub fn finstack_ai_index_journal::JournalSearchSource::authorize(&self, &finstack_ai_search_core::scope::SearchScope, &finstack_ai_search_core::query::SearchQuery) -> core::result::Result<(), finstack_ai_search_core::SearchError>
+pub fn finstack_ai_index_journal::JournalSearchSource::descriptor(&self) -> finstack_ai_search_core::SearchSourceDescriptor
+pub fn finstack_ai_index_journal::JournalSearchSource::read_evidence(&self, finstack_ai_search_core::scope::SearchScope, finstack_ai_search_core::hit::SourceRef) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<core::option::Option<finstack_ai_search_core::evidence::SearchEvidence>, finstack_ai_search_core::SearchError>>
+pub fn finstack_ai_index_journal::JournalSearchSource::references(&self, finstack_ai_search_core::scope::SearchScope, core::option::Option<alloc::string::String>, usize) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_search_core::catalog::SourceReferencePage, finstack_ai_search_core::SearchError>>
+pub fn finstack_ai_index_journal::JournalSearchSource::search(&self, finstack_ai_search_core::scope::SearchScope, finstack_ai_search_core::query::SearchQuery, usize) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_search_core::hit::SourceResult, finstack_ai_search_core::SearchError>>

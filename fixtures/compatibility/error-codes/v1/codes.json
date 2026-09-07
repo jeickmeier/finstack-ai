@@ -167,6 +167,101 @@
       "value": "repository_unsupported"
     },
     {
+      "crate": "finstack-ai-eval",
+      "name": "EVAL_ARITHMETIC_OVERFLOW",
+      "value": "eval_arithmetic_overflow"
+    },
+    {
+      "crate": "finstack-ai-eval",
+      "name": "EVAL_ATTEMPT_SEQUENCE_CONFLICT",
+      "value": "eval_attempt_sequence_conflict"
+    },
+    {
+      "crate": "finstack-ai-eval",
+      "name": "EVAL_ATTEMPT_UNRESOLVED",
+      "value": "eval_attempt_unresolved"
+    },
+    {
+      "crate": "finstack-ai-eval",
+      "name": "EVAL_BUDGET_EXHAUSTED",
+      "value": "eval_budget_exhausted"
+    },
+    {
+      "crate": "finstack-ai-eval",
+      "name": "EVAL_CELL_FINALIZED",
+      "value": "eval_cell_finalized"
+    },
+    {
+      "crate": "finstack-ai-eval",
+      "name": "EVAL_COST_UNKNOWN",
+      "value": "eval_cost_unknown"
+    },
+    {
+      "crate": "finstack-ai-eval",
+      "name": "EVAL_HISTORY_INCOMPLETE",
+      "value": "eval_history_incomplete"
+    },
+    {
+      "crate": "finstack-ai-eval",
+      "name": "EVAL_JUDGE_OUTPUT_INVALID",
+      "value": "eval_judge_output_invalid"
+    },
+    {
+      "crate": "finstack-ai-eval",
+      "name": "EVAL_RESCORE_SESSION_MISSING",
+      "value": "eval_rescore_session_missing"
+    },
+    {
+      "crate": "finstack-ai-eval",
+      "name": "EVAL_RUNNER_BUSY",
+      "value": "eval_runner_busy"
+    },
+    {
+      "crate": "finstack-ai-eval",
+      "name": "EVAL_SCORER_FAILED",
+      "value": "eval_scorer_failed"
+    },
+    {
+      "crate": "finstack-ai-eval",
+      "name": "EVAL_SCORE_OUT_OF_RANGE",
+      "value": "eval_score_out_of_range"
+    },
+    {
+      "crate": "finstack-ai-eval",
+      "name": "EVAL_SPEC_DIVERGED",
+      "value": "eval_spec_diverged"
+    },
+    {
+      "crate": "finstack-ai-eval",
+      "name": "EVAL_SPEC_INVALID",
+      "value": "eval_spec_invalid"
+    },
+    {
+      "crate": "finstack-ai-eval",
+      "name": "EVAL_STORE_UNAVAILABLE",
+      "value": "eval_store_unavailable"
+    },
+    {
+      "crate": "finstack-ai-eval",
+      "name": "EVAL_STORE_VERSION",
+      "value": "eval_store_version"
+    },
+    {
+      "crate": "finstack-ai-eval",
+      "name": "EVAL_SUBJECT_LOCK_MISMATCH",
+      "value": "eval_subject_lock_mismatch"
+    },
+    {
+      "crate": "finstack-ai-eval",
+      "name": "EVAL_SUBJECT_UNBOUND",
+      "value": "eval_subject_unbound"
+    },
+    {
+      "crate": "finstack-ai-eval",
+      "name": "EVAL_TARGET_INVALID",
+      "value": "eval_target_invalid"
+    },
+    {
       "crate": "finstack-ai-memory",
       "name": "MEMORY_TOOL_ID_CONFLICT",
       "value": "memory_id_conflict"
@@ -735,6 +830,36 @@
       "crate": "finstack-ai-sandbox-e2b",
       "name": "E2B_TRANSPORT_FAILED",
       "value": "e2b_transport_failed"
+    },
+    {
+      "crate": "finstack-ai-search-core",
+      "name": "SEARCH_CAPACITY_EXCEEDED",
+      "value": "search_capacity_exceeded"
+    },
+    {
+      "crate": "finstack-ai-search-core",
+      "name": "SEARCH_INVALID",
+      "value": "search_invalid"
+    },
+    {
+      "crate": "finstack-ai-search-core",
+      "name": "SEARCH_NO_SUCCESSFUL_SOURCES",
+      "value": "search_no_successful_sources"
+    },
+    {
+      "crate": "finstack-ai-search-core",
+      "name": "SEARCH_SCOPE_DENIED",
+      "value": "search_scope_denied"
+    },
+    {
+      "crate": "finstack-ai-search-core",
+      "name": "SEARCH_UNAVAILABLE",
+      "value": "search_unavailable"
+    },
+    {
+      "crate": "finstack-ai-search-core",
+      "name": "SEARCH_UNSUPPORTED",
+      "value": "search_unsupported"
     },
     {
       "crate": "finstack-ai-store-postgres",

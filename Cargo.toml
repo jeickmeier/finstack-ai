@@ -7,6 +7,7 @@ members = [
     "crates/finstack-ai-protocol",
     "crates/finstack-ai-server",
     "crates/finstack-ai-test",
+    "crates/finstack-ai-eval",
     "bindings/finstack-ai-python",
     "bindings/finstack-ai-wasm",
     "extensions/stores/finstack-ai-store-common",
@@ -36,6 +37,11 @@ members = [
     "extensions/toolsets/finstack-ai-tools-video-compose",
     "extensions/context/finstack-ai-context-repository",
     "extensions/context/finstack-ai-memory",
+    "extensions/search/finstack-ai-search-core",
+    "extensions/search/finstack-ai-search",
+    "extensions/search/finstack-ai-index-documents",
+    "extensions/search/finstack-ai-index-journal",
+    "extensions/search/finstack-ai-index-graph",
     "extensions/embeddings/finstack-ai-embeddings",
     "extensions/embeddings/finstack-ai-embedder-ollama",
     "extensions/middleware/finstack-ai-middleware-compaction",
@@ -127,6 +133,7 @@ license-files = ["licenses/LICENSE-MIT", "licenses/LICENSE-APACHE"]
 finstack-ai-kernel = { path = "crates/finstack-ai-kernel", version = "2.0.0" }
 finstack-ai-runtime = { path = "crates/finstack-ai-runtime", version = "2.0.0", default-features = false }
 finstack-ai = { path = "crates/finstack-ai", version = "2.0.0", default-features = false }
+finstack-ai-eval = { path = "crates/finstack-ai-eval", version = "2.0.0", default-features = false }
 finstack-ai-protocol = { path = "crates/finstack-ai-protocol", version = "2.0.0" }
 finstack-ai-server = { path = "crates/finstack-ai-server", version = "2.0.0" }
 rustls = { version = "0.23.31", default-features = false, features = ["std", "ring"] }
@@ -164,6 +171,11 @@ finstack-ai-tools-skills = { path = "extensions/toolsets/finstack-ai-tools-skill
 finstack-ai-tools-skill-import = { path = "extensions/toolsets/finstack-ai-tools-skill-import", version = "2.0.0" }
 finstack-ai-tools-video-compose = { path = "extensions/toolsets/finstack-ai-tools-video-compose", version = "2.0.0" }
 finstack-ai-memory = { path = "extensions/context/finstack-ai-memory", version = "2.0.0" }
+finstack-ai-search-core = { path = "extensions/search/finstack-ai-search-core", version = "2.0.0" }
+finstack-ai-search = { path = "extensions/search/finstack-ai-search", version = "2.0.0" }
+finstack-ai-index-graph = { path = "extensions/search/finstack-ai-index-graph", version = "2.0.0" }
+finstack-ai-index-journal = { path = "extensions/search/finstack-ai-index-journal", version = "2.0.0" }
+finstack-ai-index-documents = { path = "extensions/search/finstack-ai-index-documents", version = "2.0.0" }
 finstack-ai-embeddings = { path = "extensions/embeddings/finstack-ai-embeddings", version = "2.0.0" }
 finstack-ai-embedder-ollama = { path = "extensions/embeddings/finstack-ai-embedder-ollama", version = "2.0.0" }
 # Non-ASCII MCP `Mcp-Name` header sentinel encoding (`=?base64?…?=`).

@@ -21,6 +21,7 @@ use crate::record::{
 };
 
 mod in_process;
+mod ranking;
 #[cfg(all(feature = "sqlite", not(target_arch = "wasm32")))]
 mod sqlite;
 
@@ -30,7 +31,7 @@ pub use in_process::InProcessMemoryStore;
 pub use sqlite::SqliteMemoryStore;
 
 /// Default maximum records retained by a bounded memory store.
-pub const MAX_MEMORY_RECORDS: usize = 4_096;
+pub const MAX_MEMORY_RECORDS: usize = 10_000;
 /// Default maximum durable idempotency receipts.
 pub const MAX_MEMORY_IDEMPOTENCY_KEYS: usize = 16_384;
 /// Default aggregate inline-text byte ceiling.
@@ -50,6 +51,8 @@ pub const MAX_MEMORY_EMBEDDING_DIMENSIONS: usize = 4096;
 /// Default maximum distinct embedding spaces (embedder identities) retained
 /// by a store.
 pub const MAX_MEMORY_EMBEDDING_SPACES: usize = 4;
+/// Default aggregate retained embedding-vector bytes across all scopes/spaces.
+pub const MAX_MEMORY_EMBEDDING_BYTES: u64 = 256 * 1024 * 1024;
 /// Maximum byte length of an embedder identity.
 const MEMORY_EMBEDDER_ID_MAX_BYTES: usize = 256;
 
@@ -79,6 +82,10 @@ pub struct MemoryStoreLimits {
     /// Maximum distinct embedding spaces (embedder identities) retained by
     /// the store's index.
     pub max_embedding_spaces: usize,
+    /// Maximum aggregate retained f32 vector bytes, including stale rows until
+    /// mutation sweeps or explicit space deletion remove them. Replacing a row
+    /// credits its existing bytes atomically.
+    pub max_embedding_bytes: u64,
 }
 
 impl Default for MemoryStoreLimits {
@@ -93,6 +100,7 @@ impl Default for MemoryStoreLimits {
             max_receipt_age_ms: MAX_MEMORY_RECEIPT_AGE_MS,
             max_embedding_dimensions: MAX_MEMORY_EMBEDDING_DIMENSIONS,
             max_embedding_spaces: MAX_MEMORY_EMBEDDING_SPACES,
+            max_embedding_bytes: MAX_MEMORY_EMBEDDING_BYTES,
         }
     }
 }
@@ -224,6 +232,16 @@ pub struct EmbeddingSource {
     /// Digest of `text`, passed back to [`MemoryStore::store_embedding`] as
     /// the staleness guard.
     pub source_digest: Digest,
+}
+
+/// Read-only embedding coverage at one store snapshot, scoped to one exact
+/// complete memory scope and one embedding space.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EmbeddingCoverage {
+    /// Live, non-expired records in the exact scope.
+    pub live_records: usize,
+    /// Live records with a current content-digest-matching vector in this space.
+    pub indexed_records: usize,
 }
 
 /// Outcome of a [`MemoryStore::put`] call.
@@ -438,6 +456,17 @@ pub trait MemoryStore: PortObject {
         Box::pin(async { Ok(()) })
     }
 
+    /// Read current embedding coverage without sending any source text to an
+    /// embedder. `None` means this adapter cannot report coverage; callers must
+    /// preserve that uncertainty rather than claim a complete empty search.
+    fn embedding_coverage(
+        &self,
+        _scope: MemoryScope,
+        _embedder_id: Arc<str>,
+    ) -> PortFuture<Result<Option<EmbeddingCoverage>, MemoryStoreError>> {
+        Box::pin(async { Ok(None) })
+    }
+
     /// Return at most `limit` live records that have no embedding row for
     /// the space `embedder_id`, in stable order.
     ///
@@ -474,7 +503,9 @@ pub trait MemoryStore: PortObject {
     /// when a new space would exceed
     /// [`MemoryStoreLimits::max_embedding_spaces`]; and, for stores without
     /// an embedding index, [`MemoryStoreError::InvalidRequest`] with reason
-    /// `memory_embeddings_unsupported`.
+    /// `memory_embeddings_unsupported`. Aggregate vector bytes exceeding
+    /// [`MemoryStoreLimits::max_embedding_bytes`] return
+    /// [`MemoryStoreError::CapacityExceeded`] (resource `embedding_bytes`).
     fn store_embedding(
         &self,
         _embedder_id: Arc<str>,
@@ -571,6 +602,15 @@ pub async fn reconcile_memory_embeddings(
     let pending = store
         .pending_embedding_sources(Arc::clone(&descriptor.embedder_id), limit)
         .await?;
+    apply_embedding_sources(store, embedder, pending).await
+}
+
+pub(crate) async fn apply_embedding_sources(
+    store: &dyn MemoryStore,
+    embedder: &dyn TextEmbedder,
+    pending: Vec<EmbeddingSource>,
+) -> Result<usize, MemoryStoreError> {
+    let descriptor = embedder.descriptor();
     if pending.is_empty() {
         return Ok(0);
     }
@@ -693,25 +733,7 @@ pub fn embedding_source_digest(text: &str) -> Result<Digest, MemoryStoreError> {
     })
 }
 
-/// Map a dot product over unit-normalized vectors to a search score.
-///
-/// Clamps `dot` to `[-1, 1]`, then maps it linearly onto `0..=1_000_000`
-/// (`-1 → 0`, `0 → 500_000`, `1 → 1_000_000`). The map is monotonic, and a
-/// degenerate NaN input scores `0` so it ranks last deterministically. Both
-/// store implementations score through this one function, keeping their
-/// semantic rankings identical.
-#[must_use]
-pub fn similarity_score(dot: f32) -> u32 {
-    if dot.is_nan() {
-        return 0;
-    }
-    let clamped = f64::from(dot).clamp(-1.0, 1.0);
-    // The clamped value lands in 0.0..=1_000_000.0 after scaling, so the
-    // narrowing conversion cannot truncate or lose sign.
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    let score = ((clamped + 1.0) * 500_000.0).round() as u32;
-    score
-}
+pub use finstack_ai_embeddings::vector::similarity_score;
 
 pub(crate) fn validate_embedder_id(embedder_id: &str) -> Result<(), MemoryStoreError> {
     if embedder_id.is_empty()

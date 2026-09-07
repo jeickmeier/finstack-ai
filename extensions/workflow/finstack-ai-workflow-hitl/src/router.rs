@@ -19,7 +19,8 @@ use crate::store::{HitlInboxStore, InteractionTransition};
 /// Grouping these ends the run of same-typed positional parameters a caller
 /// could silently transpose; the fields travel unchanged from `resolve`
 /// through delivery into the kernel's `InteractionResolution`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ResolutionInput {
     /// Idempotent resolution identity.
     pub resolution_id: Arc<str>,

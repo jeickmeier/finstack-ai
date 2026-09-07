@@ -1,6 +1,7 @@
 mod observer;
 mod provider;
 mod record;
+mod scale;
 #[cfg(all(feature = "sqlite", not(target_arch = "wasm32")))]
 mod sqlite;
 mod store;

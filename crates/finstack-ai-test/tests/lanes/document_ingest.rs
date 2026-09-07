@@ -97,12 +97,7 @@ async fn document_ingest_agent_with_store(
         ),
         toolset,
     )
-    .middleware(
-        ComponentRef::new(
-            ComponentId::parse("finstack.middleware.document-ingest").expect("middleware id"),
-            Some(COMPONENT_VERSION),
-        ),
-        middleware,
+    .middleware(middleware,
     )
     .policy(RunPolicy::default())
     .build()

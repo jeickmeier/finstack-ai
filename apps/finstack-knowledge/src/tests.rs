@@ -85,7 +85,7 @@ async fn agent_builds_and_answers_offline() {
             .await
             .expect("loopback");
     let config = loopback_config(dir.path(), base_url);
-    let agent = build_agent(&config).await.expect("agent builds");
+    let agent = build_agent(&config).await.expect("agent builds").agent;
     let request = finstack_ai::AgentRunRequest::try_new(
         model_name(&config).expect("model name"),
         "Say hello.",
@@ -108,7 +108,7 @@ async fn self_docs_reach_the_model_request() {
         .await
         .expect("loopback");
     let config = loopback_config(dir.path(), base_url);
-    let agent = build_agent(&config).await.expect("agent builds");
+    let agent = build_agent(&config).await.expect("agent builds").agent;
     let request = finstack_ai::AgentRunRequest::try_new(
         model_name(&config).expect("model name"),
         "What is the architecture?",
@@ -132,7 +132,7 @@ async fn capability_catalog_lists_citation_skill() {
     let dir = tempfile::tempdir().expect("tempdir");
     let (base_url, server) = loopback::serve_ndjson(Vec::new()).await.expect("loopback");
     let config = loopback_config(dir.path(), base_url);
-    let agent = build_agent(&config).await.expect("agent builds");
+    let agent = build_agent(&config).await.expect("agent builds").agent;
     drop(server);
     let catalog = agent.compact_capability_catalog();
     assert!(
@@ -173,8 +173,8 @@ fn ollama_embedder(base_url: String) -> EmbedderChoice {
     }
 }
 
-/// Does any registered toolset advertise `mode` on `search_memory`?
-fn search_memory_advertises_mode(agent: &finstack_ai::Agent) -> bool {
+/// Does the global search tool advertise a semantic strategy?
+fn search_advertises_semantic(agent: &finstack_ai::Agent) -> bool {
     agent
         .resolved()
         .run_plan()
@@ -182,34 +182,40 @@ fn search_memory_advertises_mode(agent: &finstack_ai::Agent) -> bool {
         .iter()
         .any(|toolset| {
             toolset.handle().tools().iter().any(|spec| {
-                spec.model_name.as_ref() == "search_memory"
-                    && spec.input_schema.as_str().contains("\"mode\"")
+                spec.model_name.as_ref() == "search"
+                    && spec.input_schema.as_str().contains("\"semantic\"")
             })
         })
 }
 
 #[test]
-fn default_config_has_no_memory_embedder() {
+fn default_config_has_no_embedder() {
     let config = KnowledgeConfig::new(PathBuf::from("/tmp/data"), ollama());
-    assert!(config.memory_embedder.is_none());
+    assert!(config.embedder.is_none());
 }
 
 #[tokio::test]
-async fn memory_embedder_advertises_search_mode() {
+async fn embedder_advertises_semantic_search() {
     let dir = tempfile::tempdir().expect("tempdir");
     let (base_url, server) = loopback::serve_ndjson(Vec::new()).await.expect("loopback");
 
-    // Lexical-only composition: `mode` stays out of the model contract.
+    // Lexical-only composition omits semantic strategies.
     let lexical = loopback_config(dir.path(), base_url.clone());
-    let agent = build_agent(&lexical).await.expect("lexical agent builds");
-    assert!(!search_memory_advertises_mode(&agent));
+    let agent = build_agent(&lexical)
+        .await
+        .expect("lexical agent builds")
+        .agent;
+    assert!(!search_advertises_semantic(&agent));
     drop(agent);
 
-    // Embedder-configured composition advertises `mode` on `search_memory`.
-    let semantic = loopback_config(dir.path(), base_url.clone())
-        .with_memory_embedder(ollama_embedder(base_url));
-    let agent = build_agent(&semantic).await.expect("semantic agent builds");
-    assert!(search_memory_advertises_mode(&agent));
+    // The explicit embedder enables semantic search in the global tool.
+    let semantic =
+        loopback_config(dir.path(), base_url.clone()).with_embedder(ollama_embedder(base_url));
+    let agent = build_agent(&semantic)
+        .await
+        .expect("semantic agent builds")
+        .agent;
+    assert!(search_advertises_semantic(&agent));
     drop(server);
 }
 
@@ -263,8 +269,7 @@ async fn down_embedder_never_blocks_startup() {
     drop(listener);
 
     let (base_url, server) = loopback::serve_ndjson(Vec::new()).await.expect("loopback");
-    let config =
-        loopback_config(dir.path(), base_url).with_memory_embedder(ollama_embedder(dead_url));
+    let config = loopback_config(dir.path(), base_url).with_embedder(ollama_embedder(dead_url));
     build_agent(&config)
         .await
         .expect("a down embedder never blocks startup");
@@ -305,7 +310,7 @@ async fn golden_entries_hold_offline() {
                 .await
                 .expect("loopback");
         let config = loopback_config(dir.path(), base_url);
-        let agent = build_agent(&config).await.expect("agent builds");
+        let agent = build_agent(&config).await.expect("agent builds").agent;
         let request = finstack_ai::AgentRunRequest::try_new(
             model_name(&config).expect("model name"),
             entry.question.as_str(),
@@ -397,9 +402,9 @@ async fn run_semantic_entry(
     .expect("loopback");
     let mut config = loopback_config(dir.path(), base_url.clone());
     if with_embedder {
-        config = config.with_memory_embedder(ollama_embedder(base_url));
+        config = config.with_embedder(ollama_embedder(base_url));
     }
-    let agent = build_agent(&config).await.expect("agent builds");
+    let agent = build_agent(&config).await.expect("agent builds").agent;
 
     // Seeding run: the scripted `remember` call stores the record.
     let request = finstack_ai::AgentRunRequest::try_new(

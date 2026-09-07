@@ -13,7 +13,6 @@ import tempfile
 from pathlib import Path
 
 import pytest
-
 from _knowledge import build_knowledge_agent, golden_entries, scripted_model
 
 
@@ -21,13 +20,15 @@ from _knowledge import build_knowledge_agent, golden_entries, scripted_model
 def test_golden_entry_holds_offline(entry: dict[str, object]) -> None:
     async def exercise() -> tuple[str, list[str]]:
         with tempfile.TemporaryDirectory(prefix="finstack-know-golden-") as tmp:
-            agent = await build_knowledge_agent(
-                Path(tmp),
-                scripted_model(
-                    [str(entry["scripted_response"])],
-                    component=f"knowledge.model.golden-{entry['id']}",
-                ),
-            )
+            agent = (
+                await build_knowledge_agent(
+                    Path(tmp),
+                    scripted_model(
+                        [str(entry["scripted_response"])],
+                        component=f"knowledge.model.golden-{entry['id']}",
+                    ),
+                )
+            ).agent
             run = agent.start(str(entry["question"]))
             kinds: list[str] = []
 

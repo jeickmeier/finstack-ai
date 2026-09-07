@@ -990,7 +990,6 @@ fn observer_descriptor(id: &str) -> ObserverDescriptor {
 }
 
 async fn run_with_observer(
-    observer_id: &str,
     observer: Arc<dyn Observer>,
 ) -> (
     AgentRunOutput,
@@ -1027,13 +1026,7 @@ async fn run_with_observer(
             store,
         ),
     )
-    .observer(
-        ComponentRef::new(
-            ComponentId::parse(observer_id).expect("observer component"),
-            Some(VERSION),
-        ),
-        observer,
-    )
+    .observer(observer)
     .build()
     .await
     .expect("build");
@@ -1069,9 +1062,9 @@ async fn failing_or_stalled_observer_does_not_change_journal_prefix() {
         )
         .expect("stalled"),
     );
-    let (noop_out, noop_diagnostics) = run_with_observer("test.observer.noop", noop).await;
-    let (fail_out, fail_diagnostics) = run_with_observer("test.observer.fail", failing).await;
-    let (stall_out, stall_diagnostics) = run_with_observer("test.observer.stall", stalled).await;
+    let (noop_out, noop_diagnostics) = run_with_observer(noop).await;
+    let (fail_out, fail_diagnostics) = run_with_observer(failing).await;
+    let (stall_out, stall_diagnostics) = run_with_observer(stalled).await;
     assert_eq!(noop_out.text(), "observer-ok");
     assert_eq!(fail_out.text(), noop_out.text());
     assert_eq!(stall_out.text(), noop_out.text());
@@ -2247,13 +2240,7 @@ async fn drive_loop_continues_past_a_superseded_finalize() {
             Arc::clone(&store) as Arc<dyn JournalStore>,
         ),
     )
-    .middleware(
-        ComponentRef::new(
-            ComponentId::parse("test.middleware.finalize-verification-retry").expect("component"),
-            Some(VERSION),
-        ),
-        middleware,
-    )
+    .middleware(middleware)
     .build()
     .await
     .expect("agent");
@@ -2316,13 +2303,7 @@ async fn multi_cycle_run_loads_once_and_reuses_the_handed_off_session_head() {
             Arc::clone(&store) as Arc<dyn JournalStore>,
         ),
     )
-    .middleware(
-        ComponentRef::new(
-            ComponentId::parse("test.middleware.finalize-verification-retry").expect("component"),
-            Some(VERSION),
-        ),
-        middleware,
-    )
+    .middleware(middleware)
     .build()
     .await
     .expect("agent");
@@ -2540,13 +2521,7 @@ async fn second_lane_turn_reuses_a_validated_compaction_checkpoint() {
             Arc::clone(&store) as Arc<dyn JournalStore>,
         ),
     )
-    .middleware(
-        ComponentRef::new(
-            ComponentId::parse("test.middleware.checkpoint-compactor").expect("middleware"),
-            Some(VERSION),
-        ),
-        middleware,
-    )
+    .middleware(middleware)
     .build()
     .await
     .expect("agent");
@@ -2574,3 +2549,8 @@ async fn second_lane_turn_reuses_a_validated_compaction_checkpoint() {
 }
 
 mod regressions;
+
+mod composition;
+
+#[cfg(feature = "durable-host")]
+mod durable;

@@ -54,6 +54,12 @@ mise run check-rust
 mise run check-docs
 mise run check-public-api
 mise run test-rust
+mise run test-examples
+mise run test-linked-features
+mise run test-durable-host
+mise run test-recipes-rust
+mise run test-eval
+mise run test-search
 "$(mise where github:EmbarkStudios/cargo-deny)/cargo-deny" check
 "$(mise where github:EmbarkStudios/cargo-deny)/cargo-deny" --manifest-path fuzz/Cargo.toml check
 """
@@ -160,6 +166,7 @@ set -euo pipefail
 # mise appends `mise run ... -- <args>` to this script text, not $1.
 build_rust() {
   export PYO3_PYTHON="${PYO3_PYTHON:-$(uv python find 3.14)}"
+cargo test -p finstack-ai-python --lib --locked
   case "${1:-dev}" in
     release|--release) profile=release ;;
     dev|--dev) profile=dev ;;
@@ -335,17 +342,36 @@ test_rust() {
 test_rust
 """
 
+[tasks.test-examples]
+description = "Build and execute every offline Rust starter with bounded smoke assertions"
+run = "python scripts/ci/test_examples.py"
+
+[tasks.test-recipes-rust]
+description = "Execute persistent, approval and supervisor Rust recipes offline"
+run = "python scripts/ci/test_recipes.py rust"
+
+[tasks.test-recipes-python]
+description = "Execute Python lifecycle recipes against the installed native binding"
+run = "uv run python scripts/ci/test_recipes.py python"
+
 [tasks.test-python]
 description = "Run Python binding tests"
 run = """
 set -euo pipefail
-export PYO3_PYTHON="${PYO3_PYTHON:-$(uv python find 3.14)}"
+uv sync --locked --python 3.14 --no-install-package finstack-ai
+export VIRTUAL_ENV="$PWD/.venv"
+export PYO3_PYTHON="$VIRTUAL_ENV/bin/python"
 # `callback-fixture` registers `_callback_port_conformance`. Without it the
 # six-port callback conformance suite skips itself silently on every run.
 uv run --no-project --with maturin==1.14.1 \
-  maturin develop --locked --manifest-path bindings/finstack-ai-python/Cargo.toml \
+  env VIRTUAL_ENV="$VIRTUAL_ENV" PYO3_PYTHON="$PYO3_PYTHON" \
+  maturin develop --uv --locked --manifest-path bindings/finstack-ai-python/Cargo.toml \
   --features extension-module,callback-fixture
-uv run pytest -q
+cargo test -p finstack-ai-python --lib --locked
+uv run --no-sync pytest -q
+mise run test-search-python
+uv run --no-sync python scripts/ci/test_recipes.py python
+uv run --no-sync python scripts/ci/test_eval_notebook.py
 """
 
 [tasks.test-wasm]
@@ -526,4 +552,66 @@ run = """
 set -euo pipefail
 docker run --rm -d -p 5432:5432 -e POSTGRES_PASSWORD=postgres --name finstack-pg postgres:16
 echo "export FINSTACK_PG_TEST_URL=postgres://postgres:postgres@localhost:5432/postgres"
+"""
+
+[tasks.test-linked-features]
+description = "Verify each linked provider independently and the minimal facade"
+run = """
+set -euo pipefail
+cargo clippy -p finstack-ai --no-default-features --locked -- -D warnings
+for provider in openai openrouter anthropic gemini ollama; do
+  cargo clippy -p finstack-ai --no-default-features --features "provider-$provider" --all-targets --locked -- -D warnings
+  cargo test -p finstack-ai --no-default-features --features "provider-$provider" --lib agent::linked_feature_tests --locked
+done
+"""
+
+[tasks.test-durable-host]
+description = "Validate SDK/worker recovery and the independent-process durable example"
+run = """
+set -euo pipefail
+cargo test -p finstack-ai --no-default-features --features durable-host --lib agent::tests::durable --locked
+cargo test -p finstack-ai-workflow-worker -p finstack-ai-workflow-hitl --locked
+cargo run -p finstack-ai-example-durable-interaction --locked
+"""
+
+[tasks.test-eval]
+description = "Validate evaluation storage, execution, scorers, reports and crash recovery"
+run = """
+set -euo pipefail
+cargo test -p finstack-ai-eval --no-default-features --locked
+cargo test -p finstack-ai-eval --features native-tokio,sqlite --locked
+cargo clippy -p finstack-ai-eval --features native-tokio,sqlite --all-targets --locked -- -D warnings
+"""
+
+[tasks.test-eval-python]
+description = "Validate evaluation Python runtime parity and the offline notebook after building the extension"
+run = """
+set -euo pipefail
+uv run --no-sync pytest -q bindings/finstack-ai-python/tests/test_eval.py
+uv run --no-sync python scripts/ci/test_eval_notebook.py
+"""
+
+[tasks.test-search]
+description = "Validate scoped federation, source lifecycle, indexing effects and retrieval bounds"
+run = """
+set -euo pipefail
+cargo test -p finstack-ai-search-core --no-default-features --locked
+cargo test -p finstack-ai-knowledge -p finstack-ai-middleware-document-ingest -p finstack-ai-search -p finstack-ai-index-documents -p finstack-ai-index-journal -p finstack-ai-index-graph -p finstack-ai-memory --features finstack-ai-memory/search,finstack-ai-memory/sqlite --locked
+cargo clippy -p finstack-ai-search-core -p finstack-ai-search -p finstack-ai-index-documents -p finstack-ai-index-journal -p finstack-ai-index-graph -p finstack-ai-memory --features finstack-ai-memory/search,finstack-ai-memory/sqlite --all-targets --locked -- -D warnings
+"""
+
+[tasks.bench-search]
+description = "Measure deterministic SQLite lexical, exact-vector, hybrid, journal and graph search at 100k chunks / 10k memories"
+run = """
+set -euo pipefail
+cargo build -p finstack-ai-index-graph --example search_scale --profile release-fast --locked
+python scripts/benchmarks/search.py
+"""
+
+[tasks.test-search-python]
+description = "Validate native Python search, the knowledge composition and all five offline notebooks"
+run = """
+set -euo pipefail
+uv run --no-sync pytest -q bindings/finstack-ai-python/tests/test_search.py examples/python-notebooks/test_knowledge_golden.py examples/python-notebooks/test_knowledge_search.py
+uv run --no-sync python scripts/ci/test_knowledge_notebooks.py
 """

@@ -23,11 +23,12 @@ native-tokio = [
     "finstack-ai-runtime/native-tokio",
     "dep:finstack-ai-remote-child",
 ]
-provider-openai = ["native-tokio", "dep:finstack-ai-provider-openai"]
-provider-openrouter = ["native-tokio", "dep:finstack-ai-provider-openrouter"]
-provider-anthropic = ["native-tokio", "dep:finstack-ai-provider-anthropic"]
-provider-gemini = ["native-tokio", "dep:finstack-ai-provider-gemini"]
-provider-ollama = ["native-tokio", "dep:finstack-ai-provider-ollama"]
+durable-host = ["native-tokio", "dep:finstack-ai-store-sqlite", "dep:finstack-ai-workflow-worker", "dep:finstack-ai-workflow-hitl", "dep:finstack-ai-workflow-local", "dep:tokio"]
+provider-openai = ["native-tokio", "dep:finstack-ai-provider-openai", "dep:finstack-ai-store-memory"]
+provider-openrouter = ["native-tokio", "dep:finstack-ai-provider-openrouter", "dep:finstack-ai-store-memory"]
+provider-anthropic = ["native-tokio", "dep:finstack-ai-provider-anthropic", "dep:finstack-ai-store-memory"]
+provider-gemini = ["native-tokio", "dep:finstack-ai-provider-gemini", "dep:finstack-ai-store-memory"]
+provider-ollama = ["native-tokio", "dep:finstack-ai-provider-ollama", "dep:finstack-ai-store-memory"]
 tool-openrouter-media = ["native-tokio", "dep:finstack-ai-tools-openrouter-media"]
 tool-openai-media = ["native-tokio", "dep:finstack-ai-tools-openai-media"]
 tool-e2b = ["native-tokio", "dep:finstack-ai-sandbox-e2b"]
@@ -41,17 +42,13 @@ workflow-media-pipeline = [
     "tool-video-compose",
     "dep:finstack-ai-workflow-media-pipeline",
 ]
-# `linked-providers` is the only production path that constructs a journal
-# store on the caller's behalf (see `agent::linked::memory_store`), so the
-# concrete store dependency belongs here rather than on `native-tokio`. A
-# default consumer brings its own store and must not pay for this one.
+# Each individual provider includes the convenience factory memory fallback.
 linked-providers = [
     "provider-openai",
     "provider-openrouter",
     "provider-anthropic",
     "provider-gemini",
     "provider-ollama",
-    "dep:finstack-ai-store-memory",
 ]
 linked-tools = [
     "tool-openrouter-media",
@@ -90,6 +87,11 @@ finstack-ai-tools-openrouter-media = { workspace = true, optional = true }
 finstack-ai-tools-openai-media = { workspace = true, optional = true }
 finstack-ai-tools-video-compose = { workspace = true, optional = true }
 finstack-ai-workflow-media-pipeline = { workspace = true, optional = true }
+finstack-ai-store-sqlite = { workspace = true, optional = true }
+finstack-ai-workflow-worker = { workspace = true, optional = true }
+finstack-ai-workflow-hitl = { workspace = true, optional = true }
+finstack-ai-workflow-local = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_json_canonicalizer = { workspace = true }

@@ -16,11 +16,14 @@ mod child_route;
 #[cfg(feature = "native-tokio")]
 pub mod deferred;
 mod drive;
+#[cfg(feature = "durable-host")]
+pub mod durable;
 mod handle;
 mod history;
 mod lane;
 mod lifecycle;
 mod linked;
+mod linked_composition;
 mod mask;
 mod prepare;
 mod run;
@@ -47,8 +50,7 @@ pub use history::HistoryCachePolicy;
 pub(crate) use lane::{LaneLive, live_run};
 pub use linked::{
     AnthropicAgentSpec, GatewayAgentSpec, GeminiAgentSpec, LinkedAgent, LinkedAgentPorts,
-    LinkedCommon, LinkedProviderSpec, MediaPipelineSpec, OllamaAgentSpec, OpenAiAgentSpec,
-    OpenRouterAgentSpec, OpenRouterMediaToolsSpec, VideoComposeSpec,
+    LinkedCommon, LinkedProviderSpec, OllamaAgentSpec, OpenAiAgentSpec, OpenRouterAgentSpec,
 };
 pub use run::AgentRun;
 pub use types::{
@@ -57,3 +59,15 @@ pub use types::{
     AttachmentInput, CapabilityCatalogEntry, DEFAULT_MAX_CYCLES, DEFAULT_MAX_OUTPUT_RETRIES,
     DEFAULT_RUN_TIMEOUT, MAX_CONFIGURED_CYCLES, MAX_CONFIGURED_OUTPUT_RETRIES, MAX_RUN_ATTACHMENTS,
 };
+
+#[cfg(all(
+    test,
+    any(
+        feature = "provider-openai",
+        feature = "provider-openrouter",
+        feature = "provider-anthropic",
+        feature = "provider-gemini",
+        feature = "provider-ollama"
+    )
+))]
+mod linked_feature_tests;

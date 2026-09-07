@@ -4,6 +4,12 @@ Browser package for the Rust-owned `finstack-ai` engine. The published
 TypeScript surface is hand-authored; generated wasm-bindgen glue stays in
 `generated/` and is not a public API.
 
+See the [shared capability matrix](../../../docs/capabilities.md) and
+[migration guide](../../../docs/migration-2.0.md). Native SQLite durable hosting,
+unified search and evaluation execution are deferred in browsers. Applications
+can consume serialized search results and evaluation JSONL from a native host.
+Shared SDK changes remain gated by `mise run ci-wasm`.
+
 ## Quick start
 
 Staged, not published. Host adapters are trusted page code and are not isolated.

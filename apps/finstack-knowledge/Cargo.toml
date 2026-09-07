@@ -12,13 +12,17 @@ publish = false
 
 [dependencies]
 finstack-ai = { workspace = true, features = ["native-tokio"] }
+finstack-ai-search = { workspace = true }
+finstack-ai-index-documents = { workspace = true }
+finstack-ai-index-journal = { workspace = true }
+finstack-ai-index-graph = { workspace = true }
 finstack-ai-kernel = { workspace = true }
 finstack-ai-embeddings = { workspace = true }
 finstack-ai-embedder-ollama = { workspace = true }
 finstack-ai-store-sqlite = { workspace = true }
 finstack-ai-store-artifact = { workspace = true, features = ["local"] }
 finstack-ai-context-repository = { workspace = true }
-finstack-ai-memory = { workspace = true, features = ["sqlite"] }
+finstack-ai-memory = { workspace = true, features = ["sqlite", "search"] }
 finstack-ai-middleware-instructions = { workspace = true }
 finstack-ai-middleware-document-ingest = { workspace = true }
 finstack-ai-middleware-compaction = { workspace = true }
@@ -43,6 +47,7 @@ name = "finstack-know"
 path = "src/bin/finstack_know.rs"
 
 [dev-dependencies]
+finstack-ai-native-examples = { path = "../../examples/rust-minimal", version = "2.0.0" }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread", "signal"] }
 

@@ -10,6 +10,8 @@ use crate::error::WorkerError;
 /// Why a parked session is expected to wake.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WakeReason {
+    /// An accepted run awaiting application stage advancement.
+    Runnable,
     /// Woken by a scheduled timer (`wake_at`).
     Timer,
     /// Woken by an inbound interaction (message, tool result, etc.).
@@ -23,6 +25,7 @@ impl WakeReason {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
+            Self::Runnable => "runnable",
             Self::Timer => "timer",
             Self::Interaction => "interaction",
             Self::Deferred => "deferred",
@@ -36,6 +39,7 @@ impl WakeReason {
     /// Returns [`WorkerError::StoreIntegrity`] for any unknown value.
     pub fn parse(value: &str) -> Result<Self, WorkerError> {
         match value {
+            "runnable" => Ok(Self::Runnable),
             "timer" => Ok(Self::Timer),
             "interaction" => Ok(Self::Interaction),
             "deferred" => Ok(Self::Deferred),
@@ -223,7 +227,7 @@ pub fn lease_open(row: &WakeRow, now: Timestamp) -> bool {
 #[must_use]
 pub fn wake_due(row: &WakeRow, now: Timestamp) -> bool {
     match row.reason {
-        WakeReason::Timer => row.wake_at.is_some_and(|due| due <= now),
+        WakeReason::Runnable | WakeReason::Timer => row.wake_at.is_some_and(|due| due <= now),
         WakeReason::Interaction | WakeReason::Deferred => row.wake_at.is_none_or(|due| due <= now),
     }
 }

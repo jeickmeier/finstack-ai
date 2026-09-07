@@ -78,7 +78,7 @@ pub struct NativeAgentBuilder {
     agent_id: AgentId,
     bundle_id: BundleId,
     model: (ComponentRef, Arc<dyn Model>),
-    store: (
+    pub(super) store: (
         ComponentRef,
         Arc<dyn finstack_ai_runtime::ports::journal::JournalStore>,
     ),
@@ -216,14 +216,12 @@ impl NativeAgentBuilder {
     ///
     /// # Arguments
     ///
-    /// * `component` - Exact-version component identity for the lock.
     /// * `provider` - Ready in-process context provider.
+    ///   Its descriptor supplies the exact component identity and version.
     #[must_use]
-    pub fn context_provider(
-        mut self,
-        component: ComponentRef,
-        provider: Arc<dyn ContextProvider>,
-    ) -> Self {
+    pub fn context_provider(mut self, provider: Arc<dyn ContextProvider>) -> Self {
+        let invocation = provider.descriptor().invocation;
+        let component = ComponentRef::new(invocation.component, Some(invocation.version));
         self.context_providers
             .push(PortHandle::base(component, provider));
         self
@@ -246,11 +244,9 @@ impl NativeAgentBuilder {
 
     /// Register a context provider handle without adding it to the base spec.
     #[must_use]
-    pub fn capability_context_provider(
-        mut self,
-        component: ComponentRef,
-        provider: Arc<dyn ContextProvider>,
-    ) -> Self {
+    pub fn capability_context_provider(mut self, provider: Arc<dyn ContextProvider>) -> Self {
+        let invocation = provider.descriptor().invocation;
+        let component = ComponentRef::new(invocation.component, Some(invocation.version));
         self.context_providers
             .push(PortHandle::capability_only(component, provider));
         self
@@ -258,11 +254,9 @@ impl NativeAgentBuilder {
 
     /// Register a Middleware handle without adding it to the base spec.
     #[must_use]
-    pub fn capability_middleware(
-        mut self,
-        component: ComponentRef,
-        middleware: Arc<dyn Middleware>,
-    ) -> Self {
+    pub fn capability_middleware(mut self, middleware: Arc<dyn Middleware>) -> Self {
+        let invocation = middleware.descriptor().invocation;
+        let component = ComponentRef::new(invocation.component, Some(invocation.version));
         self.middleware
             .push(PortHandle::capability_only(component, middleware));
         self
@@ -282,10 +276,12 @@ impl NativeAgentBuilder {
     ///
     /// # Arguments
     ///
-    /// * `component` - Exact-version component identity for the lock.
     /// * `middleware` - Ready in-process middleware component.
+    ///   Its descriptor supplies the exact component identity and version.
     #[must_use]
-    pub fn middleware(mut self, component: ComponentRef, middleware: Arc<dyn Middleware>) -> Self {
+    pub fn middleware(mut self, middleware: Arc<dyn Middleware>) -> Self {
+        let invocation = middleware.descriptor().invocation;
+        let component = ComponentRef::new(invocation.component, Some(invocation.version));
         self.middleware
             .push(PortHandle::base(component, middleware));
         self
@@ -295,10 +291,11 @@ impl NativeAgentBuilder {
     ///
     /// # Arguments
     ///
-    /// * `component` - Exact-version component identity for the lock.
     /// * `observer` - Ready read-only observer. Failures are isolated from run semantics.
+    ///   Its descriptor supplies the exact component identity and version.
     #[must_use]
-    pub fn observer(mut self, component: ComponentRef, observer: Arc<dyn Observer>) -> Self {
+    pub fn observer(mut self, observer: Arc<dyn Observer>) -> Self {
+        let component = observer.descriptor().component;
         self.observers.push((component, observer));
         self
     }
@@ -536,19 +533,31 @@ fn validate_builder_components(builder: &NativeAgentBuilder) -> Result<(), Agent
             "child toolset policy drifted after binding",
         ));
     }
-    validate_exact_component(&builder.model.0)?;
-    validate_exact_component(&builder.store.0)?;
-    for port in &builder.toolsets {
-        validate_exact_component(&port.component)?;
-    }
-    for port in &builder.context_providers {
-        validate_exact_component(&port.component)?;
-    }
-    for port in &builder.middleware {
-        validate_exact_component(&port.component)?;
-    }
-    for (component, _) in &builder.observers {
-        validate_exact_component(component)?;
+    let components = [&builder.model.0, &builder.store.0]
+        .into_iter()
+        .chain(builder.toolsets.iter().map(|port| &port.component))
+        .chain(builder.context_providers.iter().map(|port| &port.component))
+        .chain(builder.middleware.iter().map(|port| &port.component))
+        .chain(builder.observers.iter().map(|(component, _)| component));
+    let mut seen = BTreeMap::new();
+    for component in components {
+        let version = validate_exact_component(component)?;
+        if let Some(existing) = seen.insert(component.id(), version) {
+            return Err(AgentRunError::configuration(
+                AGENT_RUN_INVALID_CONFIGURATION,
+                format!(
+                    "registration_duplicate: duplicate component {}@{}.{}.{} conflicts with {}@{}.{}.{}",
+                    component.id(),
+                    version.major,
+                    version.minor,
+                    version.patch,
+                    component.id(),
+                    existing.major,
+                    existing.minor,
+                    existing.patch
+                ),
+            ));
+        }
     }
     Ok(())
 }
@@ -681,12 +690,13 @@ fn registration_metadata(component: &ComponentRef) -> RegistrationMetadata {
     )
 }
 
-fn validate_exact_component(component: &ComponentRef) -> Result<(), AgentRunError> {
-    if component.version().is_none() {
-        return Err(AgentRunError::configuration(
+fn validate_exact_component(
+    component: &ComponentRef,
+) -> Result<finstack_ai_kernel::Version, AgentRunError> {
+    component.version().ok_or_else(|| {
+        AgentRunError::configuration(
             AGENT_RUN_INVALID_CONFIGURATION,
             format!("component {} requires an exact version", component.id()),
-        ));
-    }
-    Ok(())
+        )
+    })
 }

@@ -123,7 +123,7 @@ let middleware = Arc::new(ToolPolicyMiddleware::try_new(config).expect("leaf"));
 
 // Register via NativeAgentBuilder.
 let component = component_ref("finstack.middleware.tool-policy", (1, 0, 0));
-builder.middleware(component, middleware);
+builder.middleware(middleware);
 ```
 
 ## Stable error codes

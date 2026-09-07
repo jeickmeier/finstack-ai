@@ -1,0 +1,168 @@
+pub mod finstack_ai_index_documents
+pub enum finstack_ai_index_documents::DocumentStatus
+pub finstack_ai_index_documents::DocumentStatus::Indexed
+pub finstack_ai_index_documents::DocumentStatus::OcrRequired
+pub finstack_ai_index_documents::DocumentStatus::Truncated
+impl core::clone::Clone for finstack_ai_index_documents::DocumentStatus
+pub fn finstack_ai_index_documents::DocumentStatus::clone(&self) -> finstack_ai_index_documents::DocumentStatus
+impl core::cmp::Eq for finstack_ai_index_documents::DocumentStatus
+impl core::cmp::PartialEq for finstack_ai_index_documents::DocumentStatus
+pub fn finstack_ai_index_documents::DocumentStatus::eq(&self, &finstack_ai_index_documents::DocumentStatus) -> bool
+impl core::fmt::Debug for finstack_ai_index_documents::DocumentStatus
+pub fn finstack_ai_index_documents::DocumentStatus::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_index_documents::DocumentStatus
+impl core::marker::StructuralPartialEq for finstack_ai_index_documents::DocumentStatus
+impl serde_core::ser::Serialize for finstack_ai_index_documents::DocumentStatus
+pub fn finstack_ai_index_documents::DocumentStatus::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_index_documents::DocumentStatus
+pub fn finstack_ai_index_documents::DocumentStatus::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_index_documents::ChunkerConfig
+pub finstack_ai_index_documents::ChunkerConfig::overlap_chars: usize
+pub finstack_ai_index_documents::ChunkerConfig::target_chars: usize
+pub finstack_ai_index_documents::ChunkerConfig::version: u32
+impl finstack_ai_index_documents::ChunkerConfig
+pub fn finstack_ai_index_documents::ChunkerConfig::digest(&self) -> core::result::Result<finstack_ai_kernel::primitives::digest::Digest, finstack_ai_search_core::SearchError>
+pub fn finstack_ai_index_documents::ChunkerConfig::validate(&self) -> core::result::Result<(), finstack_ai_search_core::SearchError>
+impl core::clone::Clone for finstack_ai_index_documents::ChunkerConfig
+pub fn finstack_ai_index_documents::ChunkerConfig::clone(&self) -> finstack_ai_index_documents::ChunkerConfig
+impl core::cmp::Eq for finstack_ai_index_documents::ChunkerConfig
+impl core::cmp::PartialEq for finstack_ai_index_documents::ChunkerConfig
+pub fn finstack_ai_index_documents::ChunkerConfig::eq(&self, &finstack_ai_index_documents::ChunkerConfig) -> bool
+impl core::default::Default for finstack_ai_index_documents::ChunkerConfig
+pub fn finstack_ai_index_documents::ChunkerConfig::default() -> Self
+impl core::fmt::Debug for finstack_ai_index_documents::ChunkerConfig
+pub fn finstack_ai_index_documents::ChunkerConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_index_documents::ChunkerConfig
+impl core::marker::StructuralPartialEq for finstack_ai_index_documents::ChunkerConfig
+impl serde_core::ser::Serialize for finstack_ai_index_documents::ChunkerConfig
+pub fn finstack_ai_index_documents::ChunkerConfig::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_index_documents::ChunkerConfig
+pub fn finstack_ai_index_documents::ChunkerConfig::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_index_documents::DocumentChunk
+pub finstack_ai_index_documents::DocumentChunk::content_digest: finstack_ai_kernel::primitives::digest::Digest
+pub finstack_ai_index_documents::DocumentChunk::end_char: u32
+pub finstack_ai_index_documents::DocumentChunk::heading: core::option::Option<alloc::sync::Arc<str>>
+pub finstack_ai_index_documents::DocumentChunk::ordinal: u32
+pub finstack_ai_index_documents::DocumentChunk::start_char: u32
+pub finstack_ai_index_documents::DocumentChunk::text: alloc::sync::Arc<str>
+impl core::clone::Clone for finstack_ai_index_documents::DocumentChunk
+pub fn finstack_ai_index_documents::DocumentChunk::clone(&self) -> finstack_ai_index_documents::DocumentChunk
+impl core::cmp::Eq for finstack_ai_index_documents::DocumentChunk
+impl core::cmp::PartialEq for finstack_ai_index_documents::DocumentChunk
+pub fn finstack_ai_index_documents::DocumentChunk::eq(&self, &finstack_ai_index_documents::DocumentChunk) -> bool
+impl core::fmt::Debug for finstack_ai_index_documents::DocumentChunk
+pub fn finstack_ai_index_documents::DocumentChunk::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_index_documents::DocumentChunk
+impl serde_core::ser::Serialize for finstack_ai_index_documents::DocumentChunk
+pub fn finstack_ai_index_documents::DocumentChunk::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_index_documents::DocumentChunk
+pub fn finstack_ai_index_documents::DocumentChunk::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_index_documents::DocumentIndexConfig
+pub finstack_ai_index_documents::DocumentIndexConfig::chunker: finstack_ai_index_documents::ChunkerConfig
+pub finstack_ai_index_documents::DocumentIndexConfig::limits: finstack_ai_search_core::query::SearchLimits
+pub finstack_ai_index_documents::DocumentIndexConfig::max_chunks: usize
+pub finstack_ai_index_documents::DocumentIndexConfig::max_documents: usize
+pub finstack_ai_index_documents::DocumentIndexConfig::parse_limits: finstack_ai_tools_document::parser::DocumentLimits
+pub finstack_ai_index_documents::DocumentIndexConfig::scope: finstack_ai_search_core::scope::SearchScope
+pub finstack_ai_index_documents::DocumentIndexConfig::scope_mapping: finstack_ai_search_core::scope::ScopeMapping
+pub finstack_ai_index_documents::DocumentIndexConfig::source_id: alloc::sync::Arc<str>
+impl finstack_ai_index_documents::DocumentIndexConfig
+pub fn finstack_ai_index_documents::DocumentIndexConfig::new(impl core::convert::Into<alloc::sync::Arc<str>>, finstack_ai_search_core::scope::SearchScope) -> Self
+pub fn finstack_ai_index_documents::DocumentIndexConfig::processing_digest(&self) -> core::result::Result<finstack_ai_kernel::primitives::digest::Digest, finstack_ai_search_core::SearchError>
+pub fn finstack_ai_index_documents::DocumentIndexConfig::validate(&self) -> core::result::Result<(), finstack_ai_search_core::SearchError>
+impl core::clone::Clone for finstack_ai_index_documents::DocumentIndexConfig
+pub fn finstack_ai_index_documents::DocumentIndexConfig::clone(&self) -> finstack_ai_index_documents::DocumentIndexConfig
+impl core::cmp::Eq for finstack_ai_index_documents::DocumentIndexConfig
+impl core::cmp::PartialEq for finstack_ai_index_documents::DocumentIndexConfig
+pub fn finstack_ai_index_documents::DocumentIndexConfig::eq(&self, &finstack_ai_index_documents::DocumentIndexConfig) -> bool
+impl core::fmt::Debug for finstack_ai_index_documents::DocumentIndexConfig
+pub fn finstack_ai_index_documents::DocumentIndexConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_index_documents::DocumentIndexConfig
+impl serde_core::ser::Serialize for finstack_ai_index_documents::DocumentIndexConfig
+pub fn finstack_ai_index_documents::DocumentIndexConfig::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_index_documents::DocumentIndexConfig
+pub fn finstack_ai_index_documents::DocumentIndexConfig::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_index_documents::DocumentIndexReport
+pub finstack_ai_index_documents::DocumentIndexReport::artifact: finstack_ai_kernel::primitives::handles::ArtifactRef
+pub finstack_ai_index_documents::DocumentIndexReport::chunker_digest: finstack_ai_kernel::primitives::digest::Digest
+pub finstack_ai_index_documents::DocumentIndexReport::chunks: usize
+pub finstack_ai_index_documents::DocumentIndexReport::page_count: core::option::Option<u32>
+pub finstack_ai_index_documents::DocumentIndexReport::parsed_digest: finstack_ai_kernel::primitives::digest::Digest
+pub finstack_ai_index_documents::DocumentIndexReport::requires_ocr: bool
+pub finstack_ai_index_documents::DocumentIndexReport::status: finstack_ai_index_documents::DocumentStatus
+pub finstack_ai_index_documents::DocumentIndexReport::truncated: bool
+impl core::clone::Clone for finstack_ai_index_documents::DocumentIndexReport
+pub fn finstack_ai_index_documents::DocumentIndexReport::clone(&self) -> finstack_ai_index_documents::DocumentIndexReport
+impl core::cmp::Eq for finstack_ai_index_documents::DocumentIndexReport
+impl core::cmp::PartialEq for finstack_ai_index_documents::DocumentIndexReport
+pub fn finstack_ai_index_documents::DocumentIndexReport::eq(&self, &finstack_ai_index_documents::DocumentIndexReport) -> bool
+impl core::fmt::Debug for finstack_ai_index_documents::DocumentIndexReport
+pub fn finstack_ai_index_documents::DocumentIndexReport::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_index_documents::DocumentIndexReport
+impl serde_core::ser::Serialize for finstack_ai_index_documents::DocumentIndexReport
+pub fn finstack_ai_index_documents::DocumentIndexReport::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_index_documents::DocumentIndexReport
+pub fn finstack_ai_index_documents::DocumentIndexReport::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_index_documents::DocumentIndexToolset
+impl finstack_ai_index_documents::DocumentIndexToolset
+pub fn finstack_ai_index_documents::DocumentIndexToolset::try_new(alloc::sync::Arc<finstack_ai_index_documents::DocumentSearchSource>) -> core::result::Result<Self, finstack_ai_search_core::SearchError>
+impl core::clone::Clone for finstack_ai_index_documents::DocumentIndexToolset
+pub fn finstack_ai_index_documents::DocumentIndexToolset::clone(&self) -> finstack_ai_index_documents::DocumentIndexToolset
+impl finstack_ai_runtime::ports::tool::port::Toolset for finstack_ai_index_documents::DocumentIndexToolset
+pub fn finstack_ai_index_documents::DocumentIndexToolset::call(&self, finstack_ai_runtime::ports::tool::types::ToolCallContext, finstack_ai_kernel::records::tools::ValidatedToolCall) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::tool::types::ToolEventStream, finstack_ai_runtime::ports::tool::error::ToolError>>
+pub fn finstack_ai_index_documents::DocumentIndexToolset::descriptor(&self) -> finstack_ai_runtime::ports::tool::types::ToolsetDescriptor
+pub fn finstack_ai_index_documents::DocumentIndexToolset::reconcile(&self, finstack_ai_runtime::ports::model::context::ReconcileContext, finstack_ai_runtime::ports::tool::types::PendingToolEffect) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::tool::types::ToolReconcileResult, finstack_ai_runtime::ports::tool::error::ToolError>>
+pub fn finstack_ai_index_documents::DocumentIndexToolset::tools(&self) -> alloc::sync::Arc<[finstack_ai_runtime::ports::model::request::ToolSpec]>
+pub struct finstack_ai_index_documents::DocumentInput
+pub finstack_ai_index_documents::DocumentInput::artifact: finstack_ai_kernel::primitives::handles::ArtifactRef
+pub finstack_ai_index_documents::DocumentInput::artifact_scope: finstack_ai_runtime::services::artifact::ArtifactScope
+impl core::clone::Clone for finstack_ai_index_documents::DocumentInput
+pub fn finstack_ai_index_documents::DocumentInput::clone(&self) -> finstack_ai_index_documents::DocumentInput
+impl core::cmp::Eq for finstack_ai_index_documents::DocumentInput
+impl core::cmp::PartialEq for finstack_ai_index_documents::DocumentInput
+pub fn finstack_ai_index_documents::DocumentInput::eq(&self, &finstack_ai_index_documents::DocumentInput) -> bool
+impl core::fmt::Debug for finstack_ai_index_documents::DocumentInput
+pub fn finstack_ai_index_documents::DocumentInput::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_index_documents::DocumentInput
+impl serde_core::ser::Serialize for finstack_ai_index_documents::DocumentInput
+pub fn finstack_ai_index_documents::DocumentInput::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_index_documents::DocumentInput
+pub fn finstack_ai_index_documents::DocumentInput::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct finstack_ai_index_documents::DocumentSearchSource
+impl finstack_ai_index_documents::DocumentSearchSource
+pub const fn finstack_ai_index_documents::DocumentSearchSource::config(&self) -> &finstack_ai_index_documents::DocumentIndexConfig
+pub fn finstack_ai_index_documents::DocumentSearchSource::try_open(&std::path::Path, alloc::sync::Arc<dyn finstack_ai_runtime::services::artifact::ArtifactStore>, finstack_ai_index_documents::DocumentIndexConfig, core::option::Option<alloc::sync::Arc<dyn finstack_ai_embeddings::embedder::TextEmbedder>>) -> core::result::Result<Self, finstack_ai_search_core::SearchError>
+impl finstack_ai_index_documents::DocumentSearchSource
+pub async fn finstack_ai_index_documents::DocumentSearchSource::index_document(&self, finstack_ai_index_documents::DocumentInput) -> core::result::Result<finstack_ai_index_documents::DocumentIndexReport, finstack_ai_search_core::SearchError>
+pub async fn finstack_ai_index_documents::DocumentSearchSource::indexed_document(&self, finstack_ai_index_documents::DocumentInput) -> core::result::Result<core::option::Option<finstack_ai_index_documents::DocumentIndexReport>, finstack_ai_search_core::SearchError>
+pub async fn finstack_ai_index_documents::DocumentSearchSource::inputs(&self, core::option::Option<alloc::string::String>, usize) -> core::result::Result<alloc::vec::Vec<(alloc::string::String, finstack_ai_index_documents::DocumentInput)>, finstack_ai_search_core::SearchError>
+pub async fn finstack_ai_index_documents::DocumentSearchSource::reconcile_embeddings(&self, usize) -> core::result::Result<usize, finstack_ai_search_core::SearchError>
+pub async fn finstack_ai_index_documents::DocumentSearchSource::reconcile_sources(&self, core::option::Option<alloc::string::String>, usize) -> core::result::Result<finstack_ai_index_documents::ReconcileReport, finstack_ai_search_core::SearchError>
+impl core::clone::Clone for finstack_ai_index_documents::DocumentSearchSource
+pub fn finstack_ai_index_documents::DocumentSearchSource::clone(&self) -> finstack_ai_index_documents::DocumentSearchSource
+impl finstack_ai_search_core::SearchSource for finstack_ai_index_documents::DocumentSearchSource
+pub fn finstack_ai_index_documents::DocumentSearchSource::authorize(&self, &finstack_ai_search_core::scope::SearchScope, &finstack_ai_search_core::query::SearchQuery) -> core::result::Result<(), finstack_ai_search_core::SearchError>
+pub fn finstack_ai_index_documents::DocumentSearchSource::descriptor(&self) -> finstack_ai_search_core::SearchSourceDescriptor
+pub fn finstack_ai_index_documents::DocumentSearchSource::read_evidence(&self, finstack_ai_search_core::scope::SearchScope, finstack_ai_search_core::hit::SourceRef) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<core::option::Option<finstack_ai_search_core::evidence::SearchEvidence>, finstack_ai_search_core::SearchError>>
+pub fn finstack_ai_index_documents::DocumentSearchSource::references(&self, finstack_ai_search_core::scope::SearchScope, core::option::Option<alloc::string::String>, usize) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_search_core::catalog::SourceReferencePage, finstack_ai_search_core::SearchError>>
+pub fn finstack_ai_index_documents::DocumentSearchSource::search(&self, finstack_ai_search_core::scope::SearchScope, finstack_ai_search_core::query::SearchQuery, usize) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_search_core::hit::SourceResult, finstack_ai_search_core::SearchError>>
+pub struct finstack_ai_index_documents::ReconcileReport
+pub finstack_ai_index_documents::ReconcileReport::examined: usize
+pub finstack_ai_index_documents::ReconcileReport::next_after: core::option::Option<alloc::string::String>
+pub finstack_ai_index_documents::ReconcileReport::removed: usize
+pub finstack_ai_index_documents::ReconcileReport::truncated: bool
+pub finstack_ai_index_documents::ReconcileReport::unavailable: usize
+impl core::clone::Clone for finstack_ai_index_documents::ReconcileReport
+pub fn finstack_ai_index_documents::ReconcileReport::clone(&self) -> finstack_ai_index_documents::ReconcileReport
+impl core::cmp::Eq for finstack_ai_index_documents::ReconcileReport
+impl core::cmp::PartialEq for finstack_ai_index_documents::ReconcileReport
+pub fn finstack_ai_index_documents::ReconcileReport::eq(&self, &finstack_ai_index_documents::ReconcileReport) -> bool
+impl core::fmt::Debug for finstack_ai_index_documents::ReconcileReport
+pub fn finstack_ai_index_documents::ReconcileReport::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_index_documents::ReconcileReport
+impl serde_core::ser::Serialize for finstack_ai_index_documents::ReconcileReport
+pub fn finstack_ai_index_documents::ReconcileReport::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_index_documents::ReconcileReport
+pub fn finstack_ai_index_documents::ReconcileReport::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub const finstack_ai_index_documents::INDEX_DOCUMENT_TOOL_ID: &str
+pub fn finstack_ai_index_documents::chunk_document(&str, finstack_ai_index_documents::ChunkerConfig, usize) -> core::result::Result<alloc::vec::Vec<finstack_ai_index_documents::DocumentChunk>, finstack_ai_search_core::SearchError>

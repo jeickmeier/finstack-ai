@@ -1,0 +1,40 @@
+{
+  "schema_version": "finstack.eval.v1",
+  "name": "financial-comparison",
+  "tasks": [
+    {
+      "task_id": "retention",
+      "input": "What is the policy?",
+      "target": "seven years",
+      "metadata": null,
+      "attachments": []
+    }
+  ],
+  "subjects": [
+    {
+      "subject_id": "baseline",
+      "lock_digest": null
+    },
+    {
+      "subject_id": "candidate",
+      "lock_digest": null
+    }
+  ],
+  "repetitions": 3,
+  "scorers": [
+    "exact_match",
+    "numeric_tolerance"
+  ],
+  "reducer": {
+    "kind": "pass_at_k",
+    "k": 2,
+    "pass_threshold_micros": 1000000
+  },
+  "limits": {
+    "attempt_timeout_ms": 120000,
+    "max_replacement_attempts": 2,
+    "max_concurrency": 4,
+    "budget_micros": 1000000,
+    "budget_unit": "USD"
+  }
+}

@@ -435,6 +435,35 @@ pub fn validate_retrieved_artifact(
     Ok(())
 }
 
+/// Resolve an exact artifact scope within an already authorized run locator.
+/// The reference must match either that run or its owning session. This does
+/// not grant authority to another tenant or session.
+///
+/// Returns `None` when none of the locator's exact scopes match.
+#[must_use]
+pub fn artifact_scope_for_locator(
+    locator: &crate::OperationLocator,
+    artifact: &ArtifactRef,
+) -> Option<ArtifactScope> {
+    [
+        Sensitivity::Public,
+        Sensitivity::Internal,
+        Sensitivity::Confidential,
+        Sensitivity::Secret,
+        Sensitivity::Credential,
+    ]
+    .into_iter()
+    .flat_map(|sensitivity| {
+        [Some(locator.run_id), None].map(|run_id| ArtifactScope {
+            tenant_scope: Arc::clone(&locator.tenant_scope),
+            session_id: locator.session_id,
+            run_id,
+            sensitivity,
+        })
+    })
+    .find(|scope| scope.digest().ok() == Some(artifact.scope_digest()))
+}
+
 /// Load and independently verify a required artifact.
 ///
 /// # Errors

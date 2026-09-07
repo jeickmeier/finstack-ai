@@ -616,3 +616,32 @@ fn parse_cache_recovers_from_poison() {
     cache.insert(parse_key(1), "added".to_owned());
     assert_eq!(cache.lookup(&parse_key(1)).as_deref(), Some("added"));
 }
+
+#[test]
+fn cached_parse_keeps_each_exact_uploaded_blob_reference() {
+    let store = Arc::new(CaptureArtifactStore::default());
+    let first = stage(store.as_ref(), SAMPLE_CSV, "text/csv", "first.csv");
+    let second = stage(store.as_ref(), SAMPLE_CSV, "text/csv", "second.csv");
+    let middleware = DocumentIngestMiddleware::try_new(store).unwrap();
+    for artifact in [&first, &second, &first] {
+        let outcome = block_on(
+            middleware.invoke(middleware_context(), before_model_input_with_file(artifact)),
+        )
+        .unwrap();
+        let StageOutcome::Replace(json) = outcome else {
+            panic!("expected replacement");
+        };
+        let draft: ModelRequestDraft = serde_json::from_slice(json.as_bytes()).unwrap();
+        let text = all_text(&draft);
+        let line = text
+            .lines()
+            .find_map(|line| line.strip_prefix("Document source reference: "))
+            .unwrap();
+        let reference: serde_json::Value = serde_json::from_str(line).unwrap();
+        assert_eq!(
+            reference["attachment"],
+            serde_json::to_value(blob_of(artifact)).unwrap()
+        );
+        assert!(text.contains("Q1"));
+    }
+}

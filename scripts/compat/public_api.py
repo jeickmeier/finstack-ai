@@ -51,6 +51,7 @@ CORE_CRATES = (
     REPO_ROOT / "crates" / "finstack-ai-runtime",
     REPO_ROOT / "crates" / "finstack-ai",
     REPO_ROOT / "crates" / "finstack-ai-server",
+    REPO_ROOT / "crates" / "finstack-ai-eval",
 )
 
 
@@ -110,6 +111,9 @@ def cargo_public_api_bin() -> str:
 # never appear in the default dump.
 FEATURED_DUMPS: dict[str, tuple[str, ...]] = {
     "finstack-ai-runtime": ("native-tokio", "wasm-host"),
+    "finstack-ai": ("durable-host",),
+    "finstack-ai-eval": ("native-tokio,sqlite",),
+    "finstack-ai-memory": ("search,sqlite",),
     # Both drivers are off by default, so the default dump holds neither
     # artifact store.
     "finstack-ai-store-artifact": ("local", "s3"),

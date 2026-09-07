@@ -37,6 +37,8 @@ use tokio::net::TcpListener;
 /// Boxed error used by the small standalone binaries.
 pub type BoxError = Box<dyn Error + Send + Sync>;
 
+pub mod controlled;
+
 /// Exact developer-preview component version.
 pub const PREVIEW_VERSION: Version = Version {
     major: 0,
@@ -159,7 +161,9 @@ fn component(id: &str) -> Result<ComponentRef, BoxError> {
 pub fn text_response(text: &str, id: &str) -> String {
     let _ = id;
     format!(
-        "{{\"message\":{{\"role\":\"assistant\",\"content\":\"{text}\"}},\"done\":false}}\n{{\"message\":{{\"role\":\"assistant\",\"content\":\"\"}},\"done\":true,\"prompt_eval_count\":1,\"eval_count\":1}}\n"
+        "{}\n{}\n",
+        serde_json::json!({"message":{"role":"assistant", "content":text},"done":false}),
+        serde_json::json!({"message":{"role":"assistant", "content":""},"done":true,"prompt_eval_count":1,"eval_count":1}),
     )
 }
 
@@ -205,7 +209,7 @@ pub async fn serve_ndjson(
     Ok((format!("http://{address}"), task))
 }
 
-async fn read_request(socket: &mut tokio::net::TcpStream) -> Result<(), String> {
+pub(crate) async fn read_request(socket: &mut tokio::net::TcpStream) -> Result<String, String> {
     let mut request = Vec::new();
     let mut buffer = [0_u8; 4_096];
     let header_end = loop {
@@ -217,6 +221,9 @@ async fn read_request(socket: &mut tokio::net::TcpStream) -> Result<(), String> 
             return Err("request closed before headers".to_owned());
         }
         request.extend_from_slice(&buffer[..count]);
+        if request.len() > 2 * 1024 * 1024 {
+            return Err("request too large".to_owned());
+        }
         if let Some(index) = request.windows(4).position(|window| window == b"\r\n\r\n") {
             break index + 4;
         }
@@ -230,6 +237,9 @@ async fn read_request(socket: &mut tokio::net::TcpStream) -> Result<(), String> 
                 .and_then(|value| value.parse::<usize>().ok())
         })
         .ok_or_else(|| "request omitted content-length".to_owned())?;
+    if content_length > 2 * 1024 * 1024 {
+        return Err("request body too large".to_owned());
+    }
     while request.len() < header_end + content_length {
         let count = socket
             .read(&mut buffer)
@@ -240,5 +250,5 @@ async fn read_request(socket: &mut tokio::net::TcpStream) -> Result<(), String> 
         }
         request.extend_from_slice(&buffer[..count]);
     }
-    Ok(())
+    String::from_utf8(request[header_end..].to_vec()).map_err(|error| error.to_string())
 }

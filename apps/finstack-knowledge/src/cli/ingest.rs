@@ -23,7 +23,7 @@ use crate::{
 };
 
 /// Instruction sent with the attachment.
-const INGEST_INSTRUCTION: &str = "A document is attached. Summarize it in one paragraph, \
+const INGEST_INSTRUCTION: &str = "A document is attached. First call index_document with the attachment reference shown with the converted document, then report its extraction status. Summarize it in one paragraph, \
 then use the remember tool to store its key facts (names, figures, dates) with useful \
 keywords, citing the document name.";
 
@@ -62,7 +62,9 @@ async fn run_ingest_inner(
 
     let journal = open_journal(config)?;
     let artifact_store = open_artifact_store(config)?;
-    let agent = build_agent_with_stores(config, journal.clone(), artifact_store.clone()).await?;
+    let (session, lane, created) = super::session_lane(journal.clone(), session).await?;
+    let config = crate::local_search_config(config).await?;
+    let mut composition = build_agent_with_stores(&config, journal, artifact_store.clone()).await?;
 
     // Stage into the same tenant-bound pre-run scope the ingest middleware
     // resolves (pattern of the python binding's attachment staging).
@@ -74,7 +76,7 @@ async fn run_ingest_inner(
     };
     let artifact = stage_required_artifact(
         artifact_store.as_ref(),
-        scope,
+        scope.clone(),
         bytes.into(),
         ArtifactMetadata {
             kind: std::sync::Arc::from("attachment"),
@@ -86,17 +88,35 @@ async fn run_ingest_inner(
     .await
     .map_err(compose_error)?;
 
-    let (session, lane, created) = super::session_lane(journal, session).await?;
-
     let mut request =
-        AgentRunRequest::try_new(model_name(config)?, INGEST_INSTRUCTION, security(os_user)?)
+        AgentRunRequest::try_new(model_name(&config)?, INGEST_INSTRUCTION, security(os_user)?)
             .map_err(compose_error)?;
-    request.attachments = std::sync::Arc::from([AttachmentInput { artifact }]);
-    super::run_to_sink(&lane, &agent, request, sink).await?;
+    request.attachments = std::sync::Arc::from([AttachmentInput {
+        artifact: artifact.clone(),
+    }]);
+    let result = super::run_to_sink(&lane, &composition.agent, request, sink).await;
+    let maintenance = composition.search.maintain(256).await?;
+    result?;
+    if composition
+        .search
+        .documents
+        .indexed_document(finstack_ai_index_documents::DocumentInput {
+            artifact_scope: scope,
+            artifact,
+        })
+        .await
+        .map_err(compose_error)?
+        .is_none()
+    {
+        return Err(KnowledgeError::Run {
+            reason: "document_index_effect_not_completed".into(),
+        });
+    }
 
     Ok(AskOutcome {
         session_id: session.session_id().to_string(),
         created,
+        maintenance: vec![composition.initial_maintenance, maintenance],
     })
 }
 

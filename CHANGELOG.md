@@ -14,7 +14,43 @@ unpublished.
 
 ## [Unreleased]
 
+### Changed
+
+- Staged 2.0 direct context, middleware, and observer registration derives exact
+  identities from descriptors. Models, toolsets, and journals retain explicit
+  versioned identities. Linked constructors work with individual provider
+  features and accept explicit journals; Python provider factories expose the
+  same SQLite/Postgres and artifact options as callback construction.
+- Media toolsets are configured separately from model factories. Rust uses typed
+  toolset crates under `finstack_ai::media`; Python uses `OpenAiMediaToolset`,
+  `OpenRouterMediaToolset`, `VideoComposeToolset`, and `MediaPipelineToolset` in
+  `toolsets`. Removed the staged media factory keywords and `LinkedCommon`
+  media fields. Existing tool identities, approval rules, and schemas remain.
+
 ### Added
+
+- Rust-owned evaluation and typed `finstack_ai.eval`: frozen experiments,
+  durable reservations/reconciliation, built-in and custom scoring, separate
+  subject/scorer failures, lineage-aware usage, unit-aware cost, paired reports,
+  resume, rescoring and JSONL export. Browser execution is explicitly deferred.
+- Unified scoped search across memory, documents, committed journals and an
+  evidence-backed SQLite property graph; typed Python sources and knowledge-app
+  composition. Lexical retrieval is offline by default; embedders and graph
+  expansion require explicit configuration. Index maintenance reports pending
+  work, deleted sources and incomplete history.
+- Executed offline starter/recipe/notebook gates and a deterministic scale
+  benchmark for 100,000 document chunks and 10,000 memories. Exact vectors retain
+  bounded top-k; memory vector writes enforce an atomic aggregate byte ceiling.
+  Graph schema v2 adds ordered lookup indexes with a tested v1 migration.
+  See [capabilities](docs/capabilities.md), [migration](docs/migration-2.0.md),
+  and [measured scale](docs/search-scale.md).
+
+- Opt-in Rust `durable-host` and Python `DurableHost` integrate registered
+  application definitions with the worker through the shared SDK stage driver.
+  Immutable versioned recovery descriptors precede dispatch; fresh processes
+  preserve accepted identity, context, authority, deadlines and effect state.
+  Missing storage, definition drift and uncertainty fail explicitly. The durable
+  interaction starter now verifies recovery across actual process termination.
 
 - `finstack-ai-tools-video-compose`: new `extensions/toolsets` leaf. A T1
   declarative ffmpeg composition toolset (`compose_video`, `probe_media`).
@@ -35,13 +71,12 @@ unpublished.
   finished render into the artifact store.
 - `finstack-ai`: new optional features `tool-video-compose` and
   `workflow-media-pipeline` (both native-only, both in `linked-tools`), plus
-  `VideoComposeSpec` and `MediaPipelineSpec` on `LinkedCommon`. The pipeline
-  registration wires the driver over the constructed OpenRouter media and
-  compose toolsets and the host's artifact store, and fails with
-  `agent_run_invalid_configuration` when any of the three is missing.
+  typed media toolsets composed through `LinkedCommon::toolsets`. The pipeline
+  takes configured OpenRouter media and video-composition toolsets sharing the
+  host artifact store.
   `finstack-ai-store-artifact` remains host-injected, not an SDK default.
-- Python bindings: every linked agent factory gains `video_compose_*` and
-  `media_pipeline_*` keyword arguments mirroring the new specs.
+- Python bindings expose `VideoComposeToolset` and `MediaPipelineToolset`
+  independently of linked model factories.
 - Python binding composition parity: every composable extension a Rust host
   can register now has a native Python surface. New exports —
   `InstructionsMiddleware`, `CompactionMiddleware` (sliding window, large

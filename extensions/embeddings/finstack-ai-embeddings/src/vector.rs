@@ -182,3 +182,22 @@ pub fn truncate_to_bytes(text: &str, max_bytes: usize) -> &str {
     }
     &text[..end]
 }
+
+/// Map a dot product over unit-normalized vectors to a search score.
+///
+/// Clamps `dot` to `[-1, 1]`, then maps it linearly onto `0..=1_000_000`
+/// (`-1 → 0`, `0 → 500_000`, `1 → 1_000_000`). The map is monotonic, and a
+/// degenerate NaN input scores `0` so it ranks last deterministically. Memory and document sources use this shared mapping to preserve
+/// identical semantic score arithmetic.
+#[must_use]
+pub fn similarity_score(dot: f32) -> u32 {
+    if dot.is_nan() {
+        return 0;
+    }
+    let clamped = f64::from(dot).clamp(-1.0, 1.0);
+    // The clamped value lands in 0.0..=1_000_000.0 after scaling, so the
+    // narrowing conversion cannot truncate or lose sign.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let score = ((clamped + 1.0) * 500_000.0).round() as u32;
+    score
+}

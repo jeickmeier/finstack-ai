@@ -1240,13 +1240,17 @@ dependencies = [
  "finstack-ai-runtime",
  "finstack-ai-sandbox-e2b",
  "finstack-ai-store-memory",
+ "finstack-ai-store-sqlite",
  "finstack-ai-test",
  "finstack-ai-tools-calculator",
  "finstack-ai-tools-openai-media",
  "finstack-ai-tools-openrouter-media",
  "finstack-ai-tools-skills",
  "finstack-ai-tools-video-compose",
+ "finstack-ai-workflow-hitl",
+ "finstack-ai-workflow-local",
  "finstack-ai-workflow-media-pipeline",
+ "finstack-ai-workflow-worker",
  "serde",
  "serde_json",
  "serde_json_canonicalizer",
@@ -1325,9 +1329,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "finstack-ai-eval"
+version = "2.0.0"
+dependencies = [
+ "finstack-ai",
+ "finstack-ai-kernel",
+ "finstack-ai-store-memory",
+ "finstack-ai-store-sqlite",
+ "finstack-ai-test",
+ "regex",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "serde_json_canonicalizer",
+ "tempfile",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "finstack-ai-example-durable-interaction"
 version = "2.0.0"
 dependencies = [
+ "finstack-ai",
  "finstack-ai-kernel",
  "finstack-ai-runtime",
  "finstack-ai-store-sqlite",
@@ -1360,6 +1384,80 @@ dependencies = [
 ]
 
 [[package]]
+name = "finstack-ai-index-documents"
+version = "2.0.0"
+dependencies = [
+ "finstack-ai",
+ "finstack-ai-embeddings",
+ "finstack-ai-kernel",
+ "finstack-ai-memory",
+ "finstack-ai-runtime",
+ "finstack-ai-search",
+ "finstack-ai-search-core",
+ "finstack-ai-store-artifact",
+ "finstack-ai-store-memory",
+ "finstack-ai-test",
+ "finstack-ai-tools-document",
+ "futures-util",
+ "regex",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "finstack-ai-index-graph"
+version = "2.0.0"
+dependencies = [
+ "clap",
+ "finstack-ai",
+ "finstack-ai-embeddings",
+ "finstack-ai-index-documents",
+ "finstack-ai-index-journal",
+ "finstack-ai-kernel",
+ "finstack-ai-memory",
+ "finstack-ai-runtime",
+ "finstack-ai-search",
+ "finstack-ai-search-core",
+ "finstack-ai-store-artifact",
+ "finstack-ai-store-memory",
+ "finstack-ai-store-sqlite",
+ "finstack-ai-test",
+ "futures-util",
+ "regex",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "finstack-ai-index-journal"
+version = "2.0.0"
+dependencies = [
+ "finstack-ai",
+ "finstack-ai-embeddings",
+ "finstack-ai-kernel",
+ "finstack-ai-protocol",
+ "finstack-ai-runtime",
+ "finstack-ai-search",
+ "finstack-ai-search-core",
+ "finstack-ai-store-common",
+ "finstack-ai-store-memory",
+ "finstack-ai-store-sqlite",
+ "finstack-ai-test",
+ "futures-util",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "finstack-ai-kernel"
 version = "2.0.0"
 dependencies = [
@@ -1383,16 +1481,21 @@ dependencies = [
  "finstack-ai-context-repository",
  "finstack-ai-embedder-ollama",
  "finstack-ai-embeddings",
+ "finstack-ai-index-documents",
+ "finstack-ai-index-graph",
+ "finstack-ai-index-journal",
  "finstack-ai-kernel",
  "finstack-ai-memory",
  "finstack-ai-middleware-compaction",
  "finstack-ai-middleware-document-ingest",
  "finstack-ai-middleware-instructions",
+ "finstack-ai-native-examples",
  "finstack-ai-observer-log",
  "finstack-ai-provider-anthropic",
  "finstack-ai-provider-ollama",
  "finstack-ai-provider-openai",
  "finstack-ai-provider-openrouter",
+ "finstack-ai-search",
  "finstack-ai-store-artifact",
  "finstack-ai-store-sqlite",
  "finstack-ai-tools-document",
@@ -1414,6 +1517,7 @@ dependencies = [
  "finstack-ai-embeddings",
  "finstack-ai-kernel",
  "finstack-ai-runtime",
+ "finstack-ai-search-core",
  "futures-util",
  "rusqlite",
  "serde",
@@ -1530,6 +1634,7 @@ dependencies = [
  "finstack-ai-tools-calculator",
  "finstack-ai-tools-filesystem",
  "finstack-ai-tools-shell",
+ "serde_json",
  "tokio",
 ]
 
@@ -1748,6 +1853,12 @@ version = "2.0.0"
 dependencies = [
  "finstack-ai",
  "finstack-ai-context-repository",
+ "finstack-ai-embedder-ollama",
+ "finstack-ai-embeddings",
+ "finstack-ai-eval",
+ "finstack-ai-index-documents",
+ "finstack-ai-index-graph",
+ "finstack-ai-index-journal",
  "finstack-ai-kernel",
  "finstack-ai-memory",
  "finstack-ai-middleware-compaction",
@@ -1768,6 +1879,8 @@ dependencies = [
  "finstack-ai-provider-openai",
  "finstack-ai-provider-openrouter",
  "finstack-ai-sandbox-e2b",
+ "finstack-ai-search",
+ "finstack-ai-search-core",
  "finstack-ai-store-artifact",
  "finstack-ai-store-memory",
  "finstack-ai-store-postgres",
@@ -1788,6 +1901,7 @@ dependencies = [
  "pyo3-build-config",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -1832,6 +1946,37 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "finstack-ai-search"
+version = "2.0.0"
+dependencies = [
+ "finstack-ai-embeddings",
+ "finstack-ai-kernel",
+ "finstack-ai-memory",
+ "finstack-ai-runtime",
+ "finstack-ai-search-core",
+ "finstack-ai-test",
+ "futures-util",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "finstack-ai-search-core"
+version = "2.0.0"
+dependencies = [
+ "finstack-ai-kernel",
+ "finstack-ai-runtime",
+ "regex",
+ "serde",
+ "serde_json",
+ "serde_json_canonicalizer",
  "thiserror",
  "tokio",
 ]
@@ -2219,6 +2364,7 @@ dependencies = [
  "finstack-ai-workflow-local",
  "finstack-ai-workflow-worker",
  "rusqlite",
+ "serde",
  "serde_json",
  "tempfile",
  "thiserror",

@@ -11,6 +11,7 @@ description = "Durable interaction restart example using the local workflow driv
 publish = false
 
 [dependencies]
+finstack-ai = { workspace = true, features = ["durable-host"] }
 finstack-ai-kernel = { workspace = true }
 finstack-ai-runtime = { workspace = true, default-features = false, features = ["native-tokio"] }
 finstack-ai-store-sqlite = { workspace = true }

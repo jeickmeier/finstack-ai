@@ -31,9 +31,7 @@ use finstack_ai::runtime::ports::model::{Model, ModelName};
 use finstack_ai::runtime::ports::tool::Toolset;
 use finstack_ai::{Agent, AgentRunRequest};
 use finstack_ai_context_repository::RepositoryContextProvider;
-use finstack_ai_kernel::{
-    AgentId, BundleId, ComponentId, ComponentRef, Duration, RawJson, Version,
-};
+use finstack_ai_kernel::{AgentId, BundleId, ComponentId, ComponentRef, Duration, RawJson};
 use finstack_ai_memory::provider::{MemoryContextProvider, RecallConfig};
 use finstack_ai_memory::record::MemoryScope;
 use finstack_ai_memory::store::InProcessMemoryStore;
@@ -145,15 +143,12 @@ async fn main() -> Result<(), BoxError> {
     }
     if let Ok(repository) = repository {
         let provider: Arc<dyn ContextProvider> = Arc::new(repository);
-        builder = builder.context_provider(leaf("finstack.context.repository")?, provider);
+        builder = builder.context_provider(provider);
     }
     if let Ok(memory) = memory {
-        let provider: Arc<dyn ContextProvider> = Arc::new(memory);
-        builder = builder.context_provider(leaf("finstack.context.memory")?, provider);
+        builder = builder.context_provider(Arc::new(memory));
     }
-    builder = builder
-        .middleware(leaf("finstack.middleware.compaction")?, compaction)
-        .middleware(leaf("finstack.middleware.verify")?, verify);
+    builder = builder.middleware(compaction).middleware(verify);
 
     let agent = builder.build().await?;
     let output = agent
@@ -172,16 +167,5 @@ fn component(id: &str) -> Result<ComponentRef, BoxError> {
     Ok(ComponentRef::new(
         ComponentId::parse(id)?,
         Some(PREVIEW_VERSION),
-    ))
-}
-
-fn leaf(id: &str) -> Result<ComponentRef, BoxError> {
-    Ok(ComponentRef::new(
-        ComponentId::parse(id)?,
-        Some(Version {
-            major: 0,
-            minor: 0,
-            patch: 4,
-        }),
     ))
 }

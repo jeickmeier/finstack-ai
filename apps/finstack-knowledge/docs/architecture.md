@@ -25,6 +25,7 @@ finstack-ai is a deterministic agent microkernel with a layered workspace:
   components. This knowledge agent is one: it implements no ports and
   only composes existing extensions.
 
-Every run appends committed records to the journal; the event stream a
-surface renders is derived from those records, so replay and inspection
-are exact, not approximate.
+Every run appends authoritative committed records to the journal. Live event
+streams also contain transient progress, including token deltas, which is not
+replayed by `JournalStore::scan`. Journal search cites committed entry/record IDs
+and reports incomplete historical coverage when retained history is insufficient.

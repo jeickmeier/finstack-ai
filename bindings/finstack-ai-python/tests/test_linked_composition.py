@@ -7,9 +7,8 @@ import importlib.util
 from pathlib import Path
 from typing import Any
 
-import pytest
-
 import finstack_ai
+import pytest
 
 _HANDLES_SPEC = importlib.util.spec_from_file_location(
     "finstack_ai_test_handles",
@@ -146,36 +145,29 @@ def test_openrouter_constructs_with_openrouter_media() -> None:
         agent = await finstack_ai.Agent.openrouter(
             "fixture-model",
             api_key="sk-openrouter-secret-canary-056",
-            openrouter_media_api_key="sk-openrouter-media-canary-056",
+            toolsets=[
+                finstack_ai.OpenRouterMediaToolset("sk-openrouter-media-canary-056")
+            ],
         )
         assert agent.capability_catalog() == []
 
     asyncio.run(construct())
 
 
-def test_openrouter_rejects_media_tools_and_openrouter_media() -> None:
+def test_openrouter_rejects_duplicate_media_registrations() -> None:
     async def construct() -> None:
-        with pytest.raises(finstack_ai.ConfigurationError, match="cannot both be set"):
+        media = finstack_ai.OpenRouterMediaToolset("media-secret")
+        with pytest.raises(finstack_ai.ConfigurationError, match="duplicate component"):
             await finstack_ai.Agent.openrouter(
-                "fixture-model",
-                api_key="sk-openrouter-secret-canary-056",
-                media_tools=True,
-                openrouter_media_api_key="sk-openrouter-media-canary-056",
+                "fixture-model", api_key="model-secret", toolsets=[media, media]
             )
 
     asyncio.run(construct())
 
 
-def test_openrouter_media_referer_requires_api_key() -> None:
-    async def construct() -> None:
-        with pytest.raises(ValueError, match="openrouter_media_api_key"):
-            await finstack_ai.Agent.openrouter(
-                "fixture-model",
-                api_key="sk-openrouter-secret-canary-056",
-                openrouter_media_referer="https://example.test",
-            )
-
-    asyncio.run(construct())
+def test_openrouter_media_requires_explicit_api_key() -> None:
+    with pytest.raises(TypeError, match="api_key"):
+        finstack_ai.OpenRouterMediaToolset(referer="https://example.test")
 
 
 def test_gateway_constructs_without_a_request() -> None:
@@ -204,7 +196,9 @@ def test_gateway_constructs_with_openrouter_media() -> None:
             hard_input_bytes=1_000_000,
             auth="bearer",
             api_key="sk-gateway-secret-canary-045",
-            openrouter_media_api_key="sk-openrouter-media-canary-056",
+            toolsets=[
+                finstack_ai.OpenRouterMediaToolset("sk-openrouter-media-canary-056")
+            ],
         )
         assert agent.capability_catalog() == []
 
@@ -347,52 +341,105 @@ def test_ollama_observer_receives_loopback_events() -> None:
 
 def test_openrouter_constructs_with_the_media_pipeline(tmp_path: Path) -> None:
     async def construct() -> None:
-        agent = await finstack_ai.Agent.openrouter(
-            "fixture-model",
-            api_key="sk-openrouter-secret-canary-056",
-            openrouter_media_api_key="sk-openrouter-media-canary-056",
-            video_compose_ffmpeg_path="/usr/bin/ffmpeg",
-            video_compose_ffprobe_path="/usr/bin/ffprobe",
-            video_compose_scratch_dir=str(tmp_path / "scratch"),
-            video_compose_render_timeout_s=300,
-            media_pipeline_max_scenes=4,
-            media_pipeline_max_total_video_s=120,
-            media_pipeline_max_concurrent_jobs=2,
-            media_pipeline_sqlite_state_path=str(tmp_path / "render-state.sqlite3"),
-            artifact_path=str(tmp_path / "artifacts"),
+        media = finstack_ai.OpenRouterMediaToolset("media-secret")
+        compose = finstack_ai.VideoComposeToolset(
+            "/usr/bin/ffmpeg",
+            "/usr/bin/ffprobe",
+            str(tmp_path / "scratch"),
+            render_timeout_s=300,
         )
-        assert agent.capability_catalog() == []
+        pipeline = finstack_ai.MediaPipelineToolset(
+            media,
+            compose,
+            max_scenes=4,
+            max_total_video_s=120,
+            max_concurrent_jobs=2,
+            sqlite_state_path=str(tmp_path / "render-state.sqlite3"),
+        )
+        for factory, args, options in [
+            (
+                finstack_ai.Agent.openrouter,
+                ("fixture-model",),
+                {"api_key": "model-secret"},
+            ),
+            (finstack_ai.Agent.ollama, ("http://127.0.0.1:1", "fixture-model"), {}),
+        ]:
+            agent = await factory(
+                *args,
+                **options,
+                toolsets=[pipeline, media, compose],
+                artifact_path=str(tmp_path / "artifacts"),
+            )
+            assert agent.capability_catalog() == []
 
     asyncio.run(construct())
 
 
-def test_media_pipeline_without_ffmpeg_path_is_a_configuration_error(
-    tmp_path: Path,
+def test_media_pipeline_requires_typed_dependencies() -> None:
+    media = finstack_ai.OpenRouterMediaToolset("media-secret")
+    with pytest.raises(TypeError, match="compose"):
+        finstack_ai.MediaPipelineToolset(
+            media, max_scenes=4, max_total_video_s=120, max_concurrent_jobs=2
+        )
+
+
+def test_partial_video_compose_configuration_is_rejected(tmp_path: Path) -> None:
+    with pytest.raises(TypeError, match="ffmpeg_path"):
+        finstack_ai.VideoComposeToolset(
+            ffprobe_path="/usr/bin/ffprobe",
+            scratch_dir=str(tmp_path),
+            render_timeout_s=300,
+        )
+
+
+@pytest.mark.parametrize(
+    "tools",
+    [finstack_ai.OpenAiMediaToolset(""), finstack_ai.OpenRouterMediaToolset("")],
+)
+def test_empty_media_credentials_fail_without_leaking_model_credentials(
+    tools: Any,
 ) -> None:
     async def construct() -> None:
-        with pytest.raises(finstack_ai.ConfigurationError, match="video_compose"):
-            await finstack_ai.Agent.openrouter(
-                "fixture-model",
-                api_key="sk-openrouter-secret-canary-056",
-                openrouter_media_api_key="sk-openrouter-media-canary-056",
-                media_pipeline_max_scenes=4,
-                media_pipeline_max_total_video_s=120,
-                media_pipeline_max_concurrent_jobs=2,
-                artifact_path=str(tmp_path / "artifacts"),
+        with pytest.raises(finstack_ai.ConfigurationError) as caught:
+            await finstack_ai.Agent.openai(
+                "fixture", api_key="model-secret-canary", toolsets=[tools]
+            )
+        assert "model-secret-canary" not in str(caught.value)
+
+    asyncio.run(construct())
+
+
+@pytest.mark.parametrize("max_result_bytes", [0, 8 * 1024 * 1024 + 1])
+@pytest.mark.parametrize(
+    "toolset_type", [finstack_ai.OpenAiMediaToolset, finstack_ai.OpenRouterMediaToolset]
+)
+def test_media_result_bounds_still_fail_closed(
+    toolset_type: Any, max_result_bytes: int
+) -> None:
+    async def construct() -> None:
+        tools = toolset_type("media-secret", max_result_bytes=max_result_bytes)
+        with pytest.raises(finstack_ai.ConfigurationError):
+            await finstack_ai.Agent.ollama(
+                "http://127.0.0.1:1", "fixture", toolsets=[tools]
             )
 
     asyncio.run(construct())
 
 
-def test_partial_video_compose_kwargs_are_rejected(tmp_path: Path) -> None:
+@pytest.mark.parametrize("render_timeout_s", [0, 3601])
+def test_video_timeout_bounds_still_fail_closed(
+    tmp_path: Path, render_timeout_s: int
+) -> None:
     async def construct() -> None:
-        with pytest.raises(ValueError, match="video_compose_ffmpeg_path"):
-            await finstack_ai.Agent.openrouter(
-                "fixture-model",
-                api_key="sk-openrouter-secret-canary-056",
-                video_compose_ffprobe_path="/usr/bin/ffprobe",
-                video_compose_scratch_dir=str(tmp_path / "scratch"),
-                artifact_path=str(tmp_path / "artifacts"),
+        tools = finstack_ai.VideoComposeToolset(
+            "/usr/bin/ffmpeg",
+            "/usr/bin/ffprobe",
+            str(tmp_path),
+            render_timeout_s=render_timeout_s,
+        )
+        with pytest.raises(finstack_ai.ConfigurationError):
+            await finstack_ai.Agent.ollama(
+                "http://127.0.0.1:1", "fixture", toolsets=[tools]
             )
 
     asyncio.run(construct())

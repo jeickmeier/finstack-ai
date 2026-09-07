@@ -7,6 +7,9 @@ execution.
 Workspace version is **2.0.0**. The package is not on PyPI. Consume a
 staged wheel or an editable checkout.
 
+See the [capability matrix](../../docs/capabilities.md) and
+[staged 2.0 migration guide](../../docs/migration-2.0.md).
+
 ## Quick start
 
 ```bash
@@ -17,9 +20,9 @@ uv run --isolated --no-project --with-editable bindings/finstack-ai-python \
 Callbacks are trusted in-process code and are not isolated.
 
 The curated wheel links the Rust-backed OpenAI Responses, Anthropic Messages,
-OpenRouter Responses, and native Ollama paths into the same extension module.
-`linked_providers()` reports `("openai", "anthropic", "ollama", "openrouter")`.
-`Agent.openai()`, `Agent.anthropic()`, `Agent.ollama()`, and
+Gemini, OpenRouter Responses, and native Ollama paths into the same extension module.
+`linked_providers()` reports `("openai", "anthropic", "gemini", "ollama", "openrouter")`.
+`Agent.openai()`, `Agent.anthropic()`, `Agent.gemini()`, `Agent.ollama()`, and
 `Agent.openrouter()` construct those T1 clients explicitly and accept the
 same keyword-only T2 ports as `Agent.from_python` (`toolsets`,
 `context_providers`, `middleware`, `observers`, `output_type`). `openai` and
@@ -84,7 +87,8 @@ not route those commands. `Agent.inspect_session(session_id)` returns the same
 Rust-owned provisional replay projection exposed by the browser binding.
 `Agent.open_session` inspects a journal and does not respawn parked runs;
 `Lane.resume(agent)` respawns the parked owner.
-`Agent.from_python(..., sqlite_path=..., sqlite_durability=...)` opens
+`Agent.from_python` and the provider factories with
+`sqlite_path=..., sqlite_durability=...` open
 `finstack-ai-store-sqlite`. Interaction resolution and live
 external-completion routing stay Rust-owned. IndexedDB remains experimental
 and non-durable.
@@ -150,3 +154,165 @@ annotations have intentionally changed.
 
 [MIT](../../licenses/LICENSE-MIT) OR [Apache-2.0](../../licenses/LICENSE-APACHE).
 [DCO](../../CONTRIBUTING.md). [Maintainers](../../GOVERNANCE.md).
+
+### Persistent stores in provider factories
+
+Every provider factory (`openai`, `openrouter`, `anthropic`, `gemini`, `ollama`,
+and `gateway`) accepts the same store keywords as `from_python`:
+`sqlite_path`, `sqlite_durability`, `postgres_dsn`, `artifact_path`, and
+`artifact_store`. SQLite and Postgres journal options are mutually exclusive.
+For example, `await Agent.ollama("http://127.0.0.1:11434", "model",
+sqlite_path="assistant.sqlite", artifact_path="./artifacts")` keeps the journal
+and attachments available across restarts. Journals default to bounded memory;
+SQLite defaults to durable mode. Reopening a journal alone does not provide
+background execution or reconstruct process-local artifact bytes.
+
+### Embedded durable hosting
+
+`DurableHost` owns the SQLite journal, worker and interaction stores; supplied
+agents provide the application definition, callbacks, credentials and artifact
+store. Starting admits work without dispatch. Explicit ticks perform execution:
+
+```python
+host = await finstack_ai.DurableHost.open("host.sqlite", {"assistant": agent})
+locator = await host.start("assistant", "Review the requested action")
+report = await host.tick()
+for interaction in host.pending():
+    # Obtain an authenticated application decision before calling resolve.
+    host.resolve(interaction["interaction_id"], authorized_resolution)
+await host.tick()
+inspection = await host.inspect(locator)
+await host.shutdown()
+```
+
+A fresh process opens the same path and registers the same definitions, then
+resolves/ticks the existing locator without supplying the original input. Keep
+artifacts on durable storage and use a unique worker ID per concurrent host.
+Shutdown joins local execution; it cannot undo external work already dispatched.
+Check tick failures and inspect the run before deciding how to reconcile it.
+Missing descriptors, definition drift, lost artifacts, unavailable context prefixes
+and unresolved effects are explicit errors. Rust owns recovery and authorization.
+`finstack_ai.durable` provides typed inspection, interaction and report shapes.
+
+### Media toolsets independent of provider factories
+
+Replace `media_tools` and the `openrouter_media_*`, `video_compose_*`, and
+`media_pipeline_*` factory keywords with typed objects in `toolsets`:
+
+```python
+media = finstack_ai.OpenRouterMediaToolset(media_api_key)
+compose = finstack_ai.VideoComposeToolset(
+    "/usr/local/bin/ffmpeg",
+    "/usr/local/bin/ffprobe",
+    "./scratch",
+    render_timeout_s=300,
+)
+pipeline = finstack_ai.MediaPipelineToolset(
+    media,
+    compose,
+    max_scenes=4,
+    max_total_video_s=120,
+    max_concurrent_jobs=2,
+    sqlite_state_path="render-state.sqlite",
+)
+agent = await finstack_ai.Agent.ollama(
+    "http://127.0.0.1:11434",
+    "model",
+    toolsets=[media, compose, pipeline],
+    artifact_path="./artifacts",
+)
+```
+
+Use `OpenAiMediaToolset(media_api_key)` for OpenAI media generation. Media
+credentials are explicit and separate from model-provider credentials. Each
+agent construction materializes a supplied object once; pipeline dependencies
+and individually exposed tools share the same handles and artifact store.
+Objects can be reused when switching model providers. All prior tool identities,
+approval requirements, result schemas, and native bounds remain in effect.
+The pipeline's SQLite render state and the agent's journal are separate stores.
+Browser composition continues to use supported host adapters.
+
+## Evaluation
+
+`finstack_ai.eval` exposes typed `EvalSpec`, `TaskSample`, `SubjectDecl`,
+`EvalLimits`, `SubjectBinding`, built-in scorers, and `EvalRunner`. Scheduling,
+journal measurement, cancellation, classification, scoring arithmetic and
+memory/SQLite persistence are owned by Rust. See
+[the offline comparison notebook](../../examples/python-notebooks/12_evaluation.ipynb)
+and [the Rust evaluation contract](../../crates/finstack-ai-eval/README.md).
+
+```python
+from finstack_ai import eval as ev
+
+spec = ev.EvalSpec(
+    "retention",
+    [ev.TaskSample("policy", "What is retention?", "seven years")],
+    [ev.SubjectDecl("baseline")],
+    ["exact_match"],
+    repetitions=2,
+)
+runner = ev.EvalRunner(
+    spec,
+    ev.SqliteEvalStore("experiment.sqlite"),
+    [ev.SubjectBinding("baseline", agent)],
+    [ev.ExactMatchScorer()],
+)
+result = await runner.run()
+result.export_jsonl("attempts.jsonl")
+result.write_summary("summary.json")
+rescored = await runner.rescore()  # no subject preparation or model execution
+```
+
+The experiment store uses a dedicated database file, separate from the agent's
+journal. Call `runner.cancel()` and await the active operation to observe
+settlement. Cancelling a Python await alone detaches from its native owner.
+Reopening reconciles admitted work; it never silently repeats unresolved effects.
+Judge rescoring may execute new graders and incur separately recorded spend.
+
+Every provider factory and `Agent.from_python` accepts `document_tools=False`
+to omit the automatically supplied document toolset. Construct grader agents with
+that option and no explicit toolsets or capabilities; `JudgeScorer` rejects tools
+by default. Attachment ingestion and artifact ownership remain configured on the
+agent. The default `document_tools=True` preserves ordinary document workflows.
+
+Use `await agent.with_limits(RunLimits(...))` to obtain a new resolved composition
+with accepted token/tool/cost limits, retaining the same native components,
+journal, artifact store and output schema. Existing runs keep their original
+limits. Finite evaluation budgets require an accepted compatible `CostLimit`;
+limits are admission thresholds and concurrent work can overspend them. Trusted
+`PythonModel` callbacks may return `ModelOutput.usage` using the canonical `Usage`
+and `CostAmount` shapes. Omitted measurements remain unknown.
+
+Custom preparation callbacks receive `PreparationContext` and return bounded
+`PreparedRequest` changes. They cannot replace execution authority, the agent,
+journal or attachments and must not dispatch work. `PythonScorer` callbacks
+receive optional failed-subject output and return integer `Score` values with
+the bound identity/version. Async callbacks are cancelled on timeout/drop;
+synchronous callbacks run in the blocking pool and their late results are
+ignored, since Python threads cannot be forcibly stopped. Exceptions are
+classified with stable codes and their private text is not persisted.
+
+Reports return decimal-string statistics and exact cost totals, with scorer
+versions, unknown units and missing coverage kept separate. JSONL excludes
+input/target bodies, transcripts, arbitrary score metadata and explanations.
+TypeScript execution remains deferred; exported JSONL/summary files are the
+available integration. Python's `Agent.with_limits` and `document_tools` factory
+control are documented native conveniences; the browser keeps its existing
+host-configured composition surface (bindings owner; browser convenience parity
+is deferred beyond this program).
+
+## Unified search and evaluation
+
+`finstack_ai.search` provides typed native memory, document, journal and graph
+sources, query strategies, source outcomes and evidence. Lexical search is the
+default; provide an embedder for semantic retrieval and a vocabulary for graphs.
+Use the [knowledge composition](../../apps/finstack-knowledge/README.md) for the
+complete application, retaining its `.agent` and explicit `.maintain()` lifecycle.
+The standalone [search guide](../../extensions/search/README.md) describes source
+binding, indexing effects, authorized journal backfill and bounded reconstruction.
+
+`finstack_ai.eval` exposes Rust-owned experiments, subjects, scorers, persistence,
+reports and async run/resume/rescore. Start with the tested
+[comparison notebook](../../examples/python-notebooks/12_evaluation.ipynb) and
+[evaluation contract guide](../../crates/finstack-ai-eval/README.md). Native search
+and evaluation are not browser implementations; TypeScript can consume exports.

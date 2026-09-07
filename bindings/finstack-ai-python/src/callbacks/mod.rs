@@ -12,6 +12,7 @@ mod toolset;
 
 pub(crate) use context::PyCallbackContext;
 pub(crate) use context_provider::PyPythonContextProvider;
+pub(crate) use engine::PythonCallback;
 pub(crate) use middleware::PyPythonMiddleware;
 pub(crate) use model::PyPythonModel;
 pub(crate) use observer::{PyPythonObserver, parse_payload_mode};

@@ -119,7 +119,7 @@ impl fmt::Debug for ProviderChoice {
     }
 }
 
-/// Which text embedder powers semantic memory recall.
+/// Which text embedder powers semantic memory/document retrieval.
 ///
 /// Configuring an embedder is the app's explicit egress decision (spec §8):
 /// with `None` no memory content ever leaves local storage, and the only
@@ -154,9 +154,14 @@ pub struct KnowledgeConfig {
     /// entirely. Patterns are validated against the fetch toolset's
     /// grammar when the agent is built.
     pub fetch_allowlist: Vec<String>,
-    /// Optional embedder behind semantic memory recall; `None` (the
+    /// Optional embedder behind semantic memory/document retrieval; `None` (the
     /// default) keeps recall lexical and fully local.
-    pub memory_embedder: Option<EmbedderChoice>,
+    pub embedder: Option<EmbedderChoice>,
+    /// Explicit sessions for callers supplying a `JournalStore`; local builders
+    /// enumerate their application-owned database when this list is empty.
+    pub search_sessions: Vec<finstack_ai_kernel::SessionId>,
+    /// Deterministic graph vocabulary; None keeps graph extraction/expansion off.
+    pub graph_vocabulary: Option<finstack_ai_index_graph::GraphVocabulary>,
 }
 
 impl KnowledgeConfig {
@@ -169,7 +174,9 @@ impl KnowledgeConfig {
             provider,
             project_root: None,
             fetch_allowlist: Vec::new(),
-            memory_embedder: None,
+            embedder: None,
+            search_sessions: Vec::new(),
+            graph_vocabulary: None,
         }
     }
 
@@ -187,10 +194,24 @@ impl KnowledgeConfig {
         self
     }
 
-    /// Enable semantic memory recall through `embedder`.
+    /// Bind an explicit authorized journal session set (at most 256).
     #[must_use]
-    pub fn with_memory_embedder(mut self, embedder: EmbedderChoice) -> Self {
-        self.memory_embedder = Some(embedder);
+    pub fn with_search_sessions(mut self, sessions: Vec<finstack_ai_kernel::SessionId>) -> Self {
+        self.search_sessions = sessions;
+        self
+    }
+
+    /// Opt in to configured graph extraction and two-hop query expansion.
+    #[must_use]
+    pub fn with_graph(mut self, vocabulary: finstack_ai_index_graph::GraphVocabulary) -> Self {
+        self.graph_vocabulary = Some(vocabulary);
+        self
+    }
+
+    /// Enable semantic memory/document retrieval through `embedder`.
+    #[must_use]
+    pub fn with_embedder(mut self, embedder: EmbedderChoice) -> Self {
+        self.embedder = Some(embedder);
         self
     }
 }
