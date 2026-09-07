@@ -36,7 +36,7 @@ use finstack_ai_kernel::{
     ErrorCategory, ErrorDescriptor, ProviderIds, RawJson, RecordBody, RetrySafety, SessionTag,
 };
 use finstack_ai_runtime::ports::journal::{JournalStore, LoadRequest, PruneRequest, StoreLimits};
-use finstack_ai_store_postgres::{PostgresJournalStore, PostgresStoreConfig};
+use finstack_ai_store_postgres::{PostgresJournalStore, PostgresStoreConfig, PostgresTlsMode};
 use finstack_ai_test::store_fixtures::{draft, request};
 use finstack_ai_test::{
     JournalStoreConformanceCase, LegalRestore, all_activated_record_bodies,
@@ -88,6 +88,9 @@ fn wide_limits() -> StoreLimits {
 async fn open_store(url: &str, schema: &str) -> PostgresJournalStore {
     let mut config = PostgresStoreConfig::new(url, wide_limits());
     config.schema = Arc::from(schema);
+    // `FINSTACK_PG_TEST_URL` is the hosted CI service / local `pg-test-db`
+    // plaintext listener. Production defaults require TLS.
+    config.tls_mode = PostgresTlsMode::Disable;
     PostgresJournalStore::try_open(config)
         .await
         .expect("open postgres journal store")
