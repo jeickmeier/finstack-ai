@@ -60,6 +60,25 @@ test("map-backed host journal can append, load, and inspect", async ({ page }) =
   expect(result.headSequence).toBeGreaterThan(0);
 });
 
+test("browser minimal page runs and inspects the same session after reload", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.goto("/examples/browser-minimal/");
+  await page.getByRole("button", { name: "Run scripted session" }).click();
+  await expect(page.locator("#result")).toHaveText("hello from browser-minimal");
+  await expect(page.locator("#events")).toContainText("run_completed");
+  await page.getByRole("button", { name: "Inspect last session" }).click();
+  await expect(page.locator("#inspect-panel")).toContainText('"phase": "completed"');
+  const inspected: unknown = JSON.parse(await page.locator("#inspect-panel").innerText());
+  expect(inspected).toMatchObject({ resultText: "hello from browser-minimal", phase: "completed" });
+
+  await page.reload();
+  await page.getByRole("button", { name: "Inspect last session" }).click();
+  await expect(page.locator("#inspect-panel")).toContainText('"phase": "completed"');
+  expect(JSON.parse(await page.locator("#inspect-panel").innerText())).toEqual(inspected);
+  expect(errors).toEqual([]);
+});
+
 test("completed worker session survives reload as inspect", async ({ page }) => {
   await page.goto("/");
   await page.waitForFunction(() => window.finstackReady instanceof Promise);

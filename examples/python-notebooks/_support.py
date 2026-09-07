@@ -3,6 +3,7 @@
 The binding does not read environment variables. Notebooks resolve
 ``api_key=`` from a top-of-notebook assignment via ``live_value()``,
 then the environment. This module does not load ``.env`` files.
+Set ``FINSTACK_NOTEBOOK_OFFLINE=1`` to disable live gates and Ollama probes.
 """
 
 from __future__ import annotations
@@ -27,10 +28,11 @@ def live(*env_names: str) -> bool:
 
     Returns:
         ``True`` when every named variable is set and non-empty.
-        ``False`` when ``env_names`` is empty or any name is missing.
+        ``False`` in offline mode, when ``env_names`` is empty, or any
+        name is missing.
     """
 
-    if not env_names:
+    if os.environ.get("FINSTACK_NOTEBOOK_OFFLINE") == "1" or not env_names:
         return False
     return all(bool(os.environ.get(name)) for name in env_names)
 
@@ -44,11 +46,13 @@ def live_value(explicit: str, *env_names: str) -> str | None:
         *env_names: Environment variable names to try in order.
 
     Returns:
-        The first non-empty value, or ``None`` when ``explicit`` and
-        every named variable are empty or unset. The value is never
-        printed.
+        The first non-empty value, or ``None`` in offline mode or when
+        ``explicit`` and every named variable are empty or unset. The
+        value is never printed.
     """
 
+    if os.environ.get("FINSTACK_NOTEBOOK_OFFLINE") == "1":
+        return None
     if explicit:
         return explicit
     for name in env_names:
@@ -79,10 +83,13 @@ def ollama_installed(base_url: str = "http://127.0.0.1:11434") -> list[str] | No
         base_url: Ollama base URL.
 
     Returns:
-        Installed names, possibly empty, or ``None`` when the server is
-        unreachable or the response is not a tags listing.
+        Installed names, possibly empty, or ``None`` when offline mode
+        disables the probe, the server is unreachable, or the response
+        is not a tags listing.
     """
 
+    if os.environ.get("FINSTACK_NOTEBOOK_OFFLINE") == "1":
+        return None
     url = base_url.rstrip("/") + "/api/tags"
     try:
         with urlopen(url, timeout=0.75) as response:
@@ -116,8 +123,8 @@ def ollama_live(
         model: Explicit model name. Empty values fall through.
 
     Returns:
-        The preferred model name, or ``None`` when the server is
-        unreachable or that model is not installed.
+        The preferred model name, or ``None`` in offline mode, when the
+        server is unreachable, or that model is not installed.
     """
 
     preferred = ollama_preferred_model(model)

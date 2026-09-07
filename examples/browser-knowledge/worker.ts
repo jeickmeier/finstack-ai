@@ -18,10 +18,9 @@ import type * as Retrieval from "./retrieval.mjs";
 // compiled `dist/` output, so it is loaded by URL (one module serves the
 // worker, the page, and the Playwright spec); the static import above is
 // type-only.
-const retrieval: typeof Retrieval = await import(
+const retrievalReady: Promise<typeof Retrieval> = import(
   new URL("../retrieval.mjs", import.meta.url).href
 );
-const { CORPUS, RETRIEVAL_TOOLSET_OPTIONS, createRetrievalHost } = retrieval;
 
 const MODEL_OPTIONS = {
   component: "know.model.browser",
@@ -52,6 +51,7 @@ exposeWorkerHost({
   },
   async create(options) {
     await wasmReady;
+    const { CORPUS, RETRIEVAL_TOOLSET_OPTIONS, createRetrievalHost } = await retrievalReady;
     const script = readScript(options);
     return Agent.create({
       model: new JsModel(scriptedModel(script), MODEL_OPTIONS),

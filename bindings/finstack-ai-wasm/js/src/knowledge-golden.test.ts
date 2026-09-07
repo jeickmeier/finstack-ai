@@ -13,6 +13,8 @@
  */
 
 import { readFileSync } from "node:fs";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
@@ -158,6 +160,92 @@ test("a scripted search_corpus call weaves the excerpt into the answer", async (
   expect(result.modelCalls).toBe(2);
   expect(result.text).toContain("architecture:");
   expect(result.text).toContain("six");
+});
+
+test("browser knowledge page asks, reloads, and passes every golden question", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.goto("/examples/browser-knowledge/");
+  await page.getByRole("button", { name: "Ask", exact: true }).click();
+  await expect(page.locator("#answer")).toContainText("From the architecture doc:");
+  await expect(page.locator("#answer")).toContainText("six");
+  await expect(page.locator("#events")).toContainText("run_completed");
+  const answer = await page.locator("#answer").innerText();
+  await page.getByRole("button", { name: "Inspect last session" }).click();
+  await expect(page.locator("#inspect-panel")).toContainText('"phase": "completed"');
+  const inspected: unknown = JSON.parse(await page.locator("#inspect-panel").innerText());
+  expect(inspected).toMatchObject({ resultText: answer, phase: "completed" });
+
+  await page.reload();
+  await page.getByRole("button", { name: "Inspect last session" }).click();
+  await expect(page.locator("#inspect-panel")).toContainText('"phase": "completed"');
+  expect(JSON.parse(await page.locator("#inspect-panel").innerText())).toEqual(inspected);
+
+  await page.getByRole("button", { name: "Run golden set" }).click();
+  await expect(page.locator("#golden-results")).toHaveText(
+    GOLDEN.map((entry) => `PASS  ${entry.id}`).join("\n"),
+  );
+  expect(errors).toEqual([]);
+});
+
+test("browser knowledge worker connects before retrieval finishes loading", async ({ page, baseURL }) => {
+  let release!: () => void;
+  let requested = false;
+  let connected = false;
+  const blocked = new Promise<void>((resolve) => { release = resolve; });
+  const server = createServer(async (request, response) => {
+    try {
+      if (request.url === "/examples/browser-knowledge/retrieval.mjs") {
+        requested = true;
+        await blocked;
+      }
+      const upstream = await fetch(new URL(request.url ?? "/", baseURL));
+      response.writeHead(upstream.status, {
+        "content-type": upstream.headers.get("content-type") ?? "application/octet-stream",
+      });
+      response.end(Buffer.from(await upstream.arrayBuffer()));
+    } catch (error) {
+      response.destroy(error instanceof Error ? error : undefined);
+    }
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  try {
+    await page.goto(origin);
+    await page.waitForFunction(() => window.finstackReady instanceof Promise);
+    await page.evaluate(() => window.finstackReady);
+    await page.exposeFunction("knowledgeWorkerConnected", () => { connected = true; });
+    const connection = page.evaluate(async () => {
+      const worker = new Worker("/examples/browser-knowledge/dist/worker.js", { type: "module" });
+      try {
+        const client = await window.finstackTest.connectWorker(worker);
+        await (window as unknown as {
+          knowledgeWorkerConnected(): Promise<void>;
+        }).knowledgeWorkerConnected();
+        const agent = await client.create({});
+        return (await agent.run("What are the six runtime ports?")).text;
+      } finally {
+        worker.terminate();
+      }
+    });
+    const outcome = connection.then(
+      (text) => ({ text }),
+      (error: unknown) => ({ error }),
+    );
+    await expect.poll(() => requested).toBe(true);
+    await expect.poll(() => connected).toBe(true);
+    release();
+    const result = await outcome;
+    if ("error" in result) {
+      throw result.error;
+    }
+    expect(result.text).toContain("From the architecture doc:");
+  } finally {
+    release();
+    await page.close();
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
 });
 
 test("golden entries hold in the browser", async ({ page }) => {

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import argparse
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -15,9 +17,11 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def main() -> None:
-    for notebook in sorted(
-        (ROOT / "examples/python-notebooks").glob("k0[1-5]_*.ipynb")
-    ):
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--all", action="store_true", help="Run every notebook offline")
+    args = parser.parse_args()
+    pattern = "*.ipynb" if args.all else "k0[1-5]_*.ipynb"
+    for notebook in sorted((ROOT / "examples/python-notebooks").glob(pattern)):
         book = nbformat.read(notebook, as_version=4)
         manager = KernelManager(kernel_name="python3")
         manager._kernel_spec = KernelSpec(
@@ -42,7 +46,13 @@ def main() -> None:
                 resources={"metadata": {"path": str(notebook.parent)}},
             )
             try:
-                client.execute()
+                client.execute(
+                    env={
+                        **os.environ,
+                        "FINSTACK_NOTEBOOK_OFFLINE": "1",
+                        "TMPDIR": directory,
+                    }
+                )
             finally:
                 if manager.has_kernel:
                     manager.shutdown_kernel(now=True)

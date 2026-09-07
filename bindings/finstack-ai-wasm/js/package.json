@@ -31,7 +31,7 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json && tsc -p ../../../examples/browser-minimal/tsconfig.json",
+    "build": "tsc -p tsconfig.json && tsc -p ../../../examples/browser-minimal/tsconfig.json && tsc -p ../../../examples/browser-knowledge/tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "playwright test"
   },

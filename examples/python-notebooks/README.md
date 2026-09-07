@@ -104,6 +104,20 @@ composition:
 mise run test-search-python
 ```
 
+## Offline verification
+
+After building the native extension, run every notebook without live provider
+calls:
+
+```bash
+mise run test-notebooks
+```
+
+This task also runs in Python CI. It sets `FINSTACK_NOTEBOOK_OFFLINE=1` in each
+notebook kernel, disabling live credential resolution and Ollama probes even
+when credentials or a local model are available. Set the same variable when
+launching Jupyter to keep interactive notebook runs offline.
+
 ## Live cells
 
 Notebooks 01–04, 08, 10, and 11 stay offline. 05 constructs `Agent.ollama` with

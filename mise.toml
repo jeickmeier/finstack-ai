@@ -166,7 +166,6 @@ set -euo pipefail
 # mise appends `mise run ... -- <args>` to this script text, not $1.
 build_rust() {
   export PYO3_PYTHON="${PYO3_PYTHON:-$(uv python find 3.14)}"
-cargo test -p finstack-ai-python --lib --locked
   case "${1:-dev}" in
     release|--release) profile=release ;;
     dev|--dev) profile=dev ;;
@@ -361,6 +360,14 @@ set -euo pipefail
 uv sync --locked --python 3.14 --no-install-package finstack-ai
 export VIRTUAL_ENV="$PWD/.venv"
 export PYO3_PYTHON="$VIRTUAL_ENV/bin/python"
+# `cargo test` links libpython. uv/mise CPython is not on the default
+# loader path, so the test harness fails with exit 127 unless LIBDIR is
+# exported (PyO3: "Building and testing" / LD_LIBRARY_PATH).
+py_libdir="$("$PYO3_PYTHON" -c 'import sysconfig; print(sysconfig.get_config_var("LIBDIR") or "")')"
+if [ -n "$py_libdir" ]; then
+  export LD_LIBRARY_PATH="${py_libdir}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+  export DYLD_LIBRARY_PATH="${py_libdir}${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
+fi
 # `callback-fixture` registers `_callback_port_conformance`. Without it the
 # six-port callback conformance suite skips itself silently on every run.
 uv run --no-project --with maturin==1.14.1 \
@@ -371,7 +378,15 @@ cargo test -p finstack-ai-python --lib --locked
 uv run --no-sync pytest -q
 mise run test-search-python
 uv run --no-sync python scripts/ci/test_recipes.py python
-uv run --no-sync python scripts/ci/test_eval_notebook.py
+mise run test-notebooks
+"""
+
+[tasks.test-notebooks]
+description = "Execute every Python learning notebook with live provider calls disabled"
+run = """
+set -euo pipefail
+uv run --no-sync pytest -q examples/python-notebooks/test_support.py
+uv run --no-sync python scripts/ci/test_knowledge_notebooks.py --all
 """
 
 [tasks.test-wasm]

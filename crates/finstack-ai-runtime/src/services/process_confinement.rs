@@ -116,7 +116,14 @@ pub struct ConfinementProfile {
     root: PathBuf,
     cwd: Option<PathBuf>,
     #[cfg(unix)]
-    _root_handle: Arc<std::os::fd::OwnedFd>,
+    #[cfg_attr(
+        not(target_os = "linux"),
+        allow(
+            dead_code,
+            reason = "kept open so the authorized root cannot be replaced; Landlock reads it on Linux"
+        )
+    )]
+    root_handle: Arc<std::os::fd::OwnedFd>,
     #[cfg(unix)]
     cwd_handle: Option<Arc<std::os::fd::OwnedFd>>,
     windows_lpac: Option<WindowsLpacProfile>,
@@ -190,7 +197,7 @@ impl ConfinementProfile {
             root,
             cwd: None,
             #[cfg(unix)]
-            _root_handle: root_handle,
+            root_handle,
             #[cfg(unix)]
             cwd_handle: None,
             windows_lpac: None,
@@ -614,7 +621,7 @@ mod linux {
             )
             .map_err(|_| ConfinementError::denied("confined program could not be opened"))?,
         );
-        let root_handle = Arc::clone(&profile._root_handle);
+        let root_handle = Arc::clone(&profile.root_handle);
         let cwd_handle = profile.cwd_handle.as_ref().map(Arc::clone);
         // SAFETY: `pre_exec` runs only in the forked child before `exec`.
         // Landlock and `no_new_privs` apply to that child only.
@@ -1044,6 +1051,10 @@ mod windows {
         thread_id: u32,
     }
 
+    // kernel32 is already linked by std. ACL/SID helpers live in advapi32;
+    // DeriveAppContainerSidFromAppContainerName lives in userenv.
+    #[link(name = "advapi32")]
+    #[link(name = "userenv")]
     unsafe extern "system" {
         fn CreateJobObjectW(
             attributes: *const core::ffi::c_void,

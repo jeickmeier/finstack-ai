@@ -145,37 +145,15 @@ const server = createServer(async (request, response) => {
     }
     return;
   }
-  if (url.pathname.startsWith("/examples/browser-knowledge/")) {
-    const relative =
-      url.pathname.slice("/examples/browser-knowledge/".length) || "index.html";
-    const resolved = resolve(join(knowledgeRoot, normalize(relative)));
-    if (!resolved.startsWith(knowledgeRoot)) {
-      response.writeHead(403);
-      response.end("forbidden");
-      return;
-    }
-    try {
-      const info = await stat(resolved);
-      if (!info.isFile()) {
-        response.writeHead(404);
-        response.end("not found");
-        return;
-      }
-      response.writeHead(200, {
-        "content-type": types.get(extname(resolved)) ?? "application/octet-stream",
-        "cache-control": "no-store",
-      });
-      createReadStream(resolved).pipe(response);
-    } catch {
-      response.writeHead(404);
-      response.end("not found");
-    }
-    return;
-  }
-  if (url.pathname.startsWith("/examples/browser-minimal/")) {
-    const relative = url.pathname.slice("/examples/browser-minimal/".length) || "index.html";
-    const resolved = resolve(join(exampleRoot, normalize(relative)));
-    if (!resolved.startsWith(exampleRoot)) {
+  const example = [
+    ["/examples/browser-minimal/", exampleRoot],
+    ["/examples/browser-knowledge/", knowledgeRoot],
+  ].find(([prefix]) => url.pathname.startsWith(prefix));
+  if (example !== undefined) {
+    const [prefix, directory] = example;
+    const relative = url.pathname.slice(prefix.length) || "index.html";
+    const resolved = resolve(join(directory, normalize(relative)));
+    if (!resolved.startsWith(directory)) {
       response.writeHead(403);
       response.end("forbidden");
       return;
