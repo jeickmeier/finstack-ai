@@ -43,6 +43,11 @@ cargo test -p finstack-ai-guest-sdk --offline --locked
 cargo test -p finstack-ai-plugin-host --offline --locked -- reference_
 ```
 
+`--check` for `generate.py` rebuilds every component and compares bytes on the
+same host. rustc wasm32 output is not cross-OS identical, so Linux CI confirms
+the sources still encode and skips that byte compare unless
+`FINSTACK_PLUGIN_WASM_REPRO=1`.
+
 Trusted native in-process batteries (providers, toolsets, stores, observers)
 live under [`../extensions/`](../extensions/), not here.
 

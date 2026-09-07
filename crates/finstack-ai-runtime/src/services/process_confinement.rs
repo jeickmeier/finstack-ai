@@ -387,18 +387,22 @@ impl ProcessConfinement {
     /// child running.
     pub fn spawn(
         &self,
-        mut command: Command,
+        command: Command,
         profile: &ConfinementProfile,
     ) -> Result<ConfinedChild, ConfinementError> {
         #[cfg(unix)]
-        configure_process_tree(&mut command)?;
+        let command = {
+            let mut command = command;
+            configure_process_tree(&mut command)?;
+            command
+        };
         match self.backend {
             ConfinementBackend::Unavailable => Err(ConfinementError::unavailable(
                 "process confinement is unavailable on this target",
             )),
             ConfinementBackend::LinuxLandlock => linux::spawn(command, profile),
             ConfinementBackend::MacosSeatbelt => macos::spawn(command, profile),
-            ConfinementBackend::WindowsLpacJob => windows::spawn(command, profile),
+            ConfinementBackend::WindowsLpacJob => windows::spawn(&command, profile),
         }
     }
 }
@@ -414,7 +418,7 @@ pub struct ConfinedChild {
     #[cfg(windows)]
     process: std::os::windows::io::OwnedHandle,
     #[cfg(windows)]
-    _job: std::os::windows::io::OwnedHandle,
+    job: std::os::windows::io::OwnedHandle,
     /// Optional stdin pipe.
     pub stdin: Option<std::fs::File>,
     /// Optional stdout pipe.
@@ -455,7 +459,7 @@ impl ConfinedChild {
         }
         #[cfg(windows)]
         {
-            windows::terminate_job(&self._job)
+            windows::terminate_job(&self.job)
         }
     }
 
@@ -599,8 +603,7 @@ mod linux {
         probe_landlock()?;
         let program = command
             .get_program()
-            .to_owned()
-            .into_os_string()
+            .to_os_string()
             .into_string()
             .map_err(|_| ConfinementError::denied("confined program path is not UTF-8"))?;
         let program_handle = Arc::new(
@@ -960,6 +963,7 @@ mod windows {
         scheduling_class: u32,
     }
 
+    #[allow(clippy::struct_field_names)] // Mirrors Windows IO_COUNTERS.
     #[repr(C)]
     struct IoCounters {
         read_operation_count: u64,
@@ -1119,8 +1123,9 @@ mod windows {
         fn GetExitCodeProcess(process: *mut core::ffi::c_void, exit_code: *mut u32) -> i32;
     }
 
+    #[allow(clippy::too_many_lines)] // LPAC CreateProcess plus job assignment is one fail-closed sequence.
     pub(super) fn spawn(
-        command: Command,
+        command: &Command,
         profile: &ConfinementProfile,
     ) -> Result<ConfinedChild, ConfinementError> {
         let lpac = profile.windows_lpac().ok_or_else(|| {
@@ -1136,13 +1141,13 @@ mod windows {
                 return Err(error);
             }
         };
-        let mut command_line = wide_command_line(&command)?;
+        let mut command_line = wide_command_line(command)?;
         let application = wide_os(command.get_program());
         let cwd = profile
             .cwd()
             .or_else(|| command.get_current_dir())
             .map(wide_os);
-        let environment = environment_block(&command);
+        let environment = environment_block(command);
         let mut security_capabilities = SecurityCapabilities {
             app_container_sid: sid.raw(),
             capabilities: ptr::null_mut(),
@@ -1258,7 +1263,7 @@ mod windows {
         Ok(unsafe {
             ConfinedChild {
                 process: OwnedHandle::from_raw_handle(info.process),
-                _job: OwnedHandle::from_raw_handle(job),
+                job: OwnedHandle::from_raw_handle(job),
                 stdin: Some(std::fs::File::from_raw_handle(pipes.parent_stdin)),
                 stdout: Some(std::fs::File::from_raw_handle(pipes.parent_stdout)),
                 stderr: Some(std::fs::File::from_raw_handle(pipes.parent_stderr)),
@@ -1641,7 +1646,7 @@ mod windows {
     use super::{ConfinedChild, ConfinementError, ConfinementProfile};
 
     pub(super) fn spawn(
-        _command: Command,
+        _command: &Command,
         _profile: &ConfinementProfile,
     ) -> Result<ConfinedChild, ConfinementError> {
         Err(ConfinementError::unavailable(
@@ -1652,6 +1657,7 @@ mod windows {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "macos")]
     use std::path::Path;
     use std::process::Command;
     use std::sync::atomic::{AtomicBool, Ordering};

@@ -3,7 +3,7 @@
   "plugins": [
     {
       "component": "calculator/component.wasm",
-      "component_digest": "97780f486cf5803791fc830bdad0ba9d152e16f263021b4bc652321ef9962183",
+      "component_digest": "d2673a07f69763532c0ac73ecc9323d4734eda4f766eab60f8210e9755c4ab3e",
       "enabled": true,
       "identity": "finstack.plugin.calculator",
       "manifest": "calculator/plugin.manifest.json",
@@ -21,7 +21,7 @@
     },
     {
       "component": "filesystem-sandbox/component.wasm",
-      "component_digest": "56586592b187d2302eef5fea51725e3cdfea8ac6805851a0eaad8b7d123a9397",
+      "component_digest": "25a3441300a1595fc7ded9bb67b0dec066ffff4e2d830c45628e65810123f744",
       "enabled": false,
       "identity": "finstack.plugin.filesystem.sandbox",
       "manifest": "filesystem-sandbox/plugin.manifest.json",

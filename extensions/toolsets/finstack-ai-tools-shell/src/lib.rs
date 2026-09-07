@@ -504,7 +504,7 @@ impl ShellToolset {
     pub fn try_with_confinement(mut self) -> Result<Self, ShellError> {
         #[cfg(not(unix))]
         {
-            return Err(ShellError::Unsupported);
+            Err(ShellError::Unsupported)
         }
         #[cfg(unix)]
         {
@@ -554,13 +554,13 @@ impl Toolset for ShellToolset {
         #[cfg(not(unix))]
         {
             let _ = (ctx, call);
-            return Box::pin(async {
+            Box::pin(async {
                 Err(tool_error(
                     SHELL_UNSUPPORTED,
                     ErrorCategory::Configuration,
                     "safe shell primitives are unavailable",
                 ))
-            });
+            })
         }
 
         #[cfg(unix)]

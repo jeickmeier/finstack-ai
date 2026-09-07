@@ -1,33 +1,49 @@
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+#[cfg(unix)]
+use std::sync::Mutex;
+#[cfg(unix)]
 use std::time::Duration;
 
+#[cfg(unix)]
 use finstack_ai_kernel::{
     ArtifactId, ArtifactRef, BlobRef, Digest, EffectId, EffectOutputContract, EffectOutputKind,
-    LaneId, OperationLocator, PrincipalRef, RawJson, RunId, Sensitivity, SessionId, ToolBatchId,
-    ToolCallBlock, ToolCallId, ToolFailurePolicy,
+    LaneId, OperationLocator, PrincipalRef, RunId, Sensitivity, SessionId, ToolBatchId,
 };
+use finstack_ai_kernel::{RawJson, ToolCallBlock, ToolCallId, ToolFailurePolicy};
+#[cfg(unix)]
 use finstack_ai_runtime::Bytes;
+#[cfg(unix)]
 use finstack_ai_runtime::artifact::{
     ArtifactError, ArtifactMetadata, ArtifactScope, ArtifactStore,
 };
+#[cfg(unix)]
 use finstack_ai_runtime::ports::PortFuture;
+#[cfg(unix)]
 use finstack_ai_runtime::ports::model::{AuthorizationContext, CancellationSignal, RunCallContext};
 use finstack_ai_runtime::ports::tool::{
-    ApprovalState, AssembledToolStream, JsonSchemaToolValidatorCompiler, ResolvedToolCatalog,
-    ToolCatalogPlan, ToolExecutionPolicy, ToolPolicyDecision, ToolStreamItem, ToolStreamLimits,
-    ToolTerminal, Toolset, ToolsetRegistration,
+    ApprovalState, JsonSchemaToolValidatorCompiler, ResolvedToolCatalog, ToolCatalogPlan,
+    ToolExecutionPolicy, ToolPolicyDecision, Toolset, ToolsetRegistration,
 };
+#[cfg(unix)]
+use finstack_ai_runtime::ports::tool::{
+    AssembledToolStream, ToolStreamItem, ToolStreamLimits, ToolTerminal,
+};
+#[cfg(unix)]
 use finstack_ai_test::{ToolsetConformanceCase, check_toolset_conformance};
+#[cfg(unix)]
 use futures_util::StreamExt;
+#[cfg(unix)]
 use tempfile::TempDir;
 
 use super::*;
 
+#[cfg(unix)]
 fn id<T>(value: u64, parse: impl FnOnce(&str) -> T) -> T {
     parse(&format!("00000000-0000-7000-8000-{value:012x}"))
 }
 
+#[cfg(unix)]
 fn context() -> ToolCallContext {
     let principal =
         PrincipalRef::try_new("issuer", "subject", Some("tenant-a")).expect("principal");
@@ -62,6 +78,7 @@ fn context() -> ToolCallContext {
     }
 }
 
+#[cfg(unix)]
 fn call(toolset: &ShellToolset, arguments: &serde_json::Value) -> ValidatedToolCall {
     let spec = &toolset.tools()[0];
     ValidatedToolCall {
@@ -85,6 +102,7 @@ fn call(toolset: &ShellToolset, arguments: &serde_json::Value) -> ValidatedToolC
     }
 }
 
+#[cfg(unix)]
 async fn invoke(
     toolset: &ShellToolset,
     arguments: serde_json::Value,
@@ -446,11 +464,13 @@ async fn published_toolset_conformance_suite() {
     .expect("published toolset conformance suite");
 }
 
+#[cfg(unix)]
 #[derive(Clone, Default)]
 struct CaptureArtifactStore {
     staged: Arc<Mutex<Vec<Bytes>>>,
 }
 
+#[cfg(unix)]
 impl ArtifactStore for CaptureArtifactStore {
     fn stage_put(
         &self,
