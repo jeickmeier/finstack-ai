@@ -1,9 +1,11 @@
 # Shared helpers for root mise test/CI tasks. Source from the repository root.
 #   . ./scripts/ci/lib.sh
 
-# Install Playwright browser binaries. `--with-deps` (apt) is used only when
-# FINSTACK_PLAYWRIGHT_WITH_DEPS=1, typically a CI cache miss. `playwright
-# install` without that flag is incremental and no-ops present browsers.
+# Install Playwright browser binaries. `~/.cache/ms-playwright` is cacheable;
+# apt/OS libraries are not. `playwright install` is incremental and no-ops
+# present browsers. `playwright install-deps` must still run on Linux CI after
+# a browser cache hit — WebKit's MiniBrowser needs libwayland-server.so.0.
+# FINSTACK_PLAYWRIGHT_WITH_DEPS=1 also installs OS deps locally.
 ensure_playwright_browsers() {
   local prefix="bindings/finstack-ai-wasm/js"
   if [ "${FINSTACK_PLAYWRIGHT_SKIP_INSTALL:-0}" = "1" ]; then
@@ -12,11 +14,11 @@ ensure_playwright_browsers() {
   if [ "$#" -eq 0 ]; then
     set -- chromium firefox webkit
   fi
-  if [ "${FINSTACK_PLAYWRIGHT_WITH_DEPS:-0}" = "1" ]; then
-    npx --prefix "${prefix}" playwright install --with-deps "$@"
-    return
-  fi
   npx --prefix "${prefix}" playwright install "$@"
+  if [ "${FINSTACK_PLAYWRIGHT_WITH_DEPS:-0}" = "1" ] \
+    || { [ "${CI:-}" = "true" ] && [ "$(uname -s)" = "Linux" ]; }; then
+    npx --prefix "${prefix}" playwright install-deps "$@"
+  fi
 }
 
 # True when consecutive WASM glue builds must be compared.

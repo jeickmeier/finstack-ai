@@ -53,8 +53,12 @@ Required checks intentionally have **no** `paths` / `paths-ignore` filters.
   build artifacts across runs, and set `CARGO_INCREMENTAL=0` and
   `CARGO_PROFILE_DEV_DEBUG=line-tables-only` to cut link time. Rust and Python
   jobs export `PYO3_PYTHON` so the PyO3 crate builds against the pinned
-  interpreter. The WASM job caches Playwright browsers and runs the glue
-  recreate compare only when glue-related paths change.
+  interpreter. `ci-rust` reclaims unused GitHub-image bulk
+  (`scripts/ci/free_github_runner_disk.sh`) before the toolchain install so
+  workspace debug artifacts fit on the runner. The WASM job caches Playwright
+  browsers; OS packages are not in that cache, so `ensure_playwright_browsers`
+  still runs `playwright install-deps` on Linux when `CI=true`. Glue recreate
+  compare runs only when glue-related paths change.
 
 Task availability is defined only by the current root `mise.toml`. Inspect it
 before invoking a task and never report an unavailable or unrun command as

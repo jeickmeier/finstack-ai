@@ -18,9 +18,11 @@ The report isolates WASM/JS crossing cost as
 
 `(wasm_drive_median / host_callback_median - 1) * 100`
 
-against a 200% diagnostic warning threshold. The v1 report retains the legacy
-field names: `host_callback_median` is the per-operation pure-JavaScript copy
-baseline, and `wasm_drive_median` is the matching per-operation WASM round trip.
+against a 200% diagnostic warning threshold. The harness records
+`binding.within_target` and does not fail the suite when a noisy runner
+exceeds that warning. The v1 report retains the legacy field names:
+`host_callback_median` is the per-operation pure-JavaScript copy baseline,
+and `wasm_drive_median` is the matching per-operation WASM round trip.
 
 ## How to run
 

@@ -53,6 +53,11 @@ mise run runtime
 mise run check-rust
 mise run check-docs
 mise run check-public-api
+# rustdoc output is not reused by tests; drop it before the workspace
+# compile so hosted runners do not exhaust the disk during nextest link.
+if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
+  rm -rf target/doc
+fi
 mise run test-rust
 mise run test-examples
 mise run test-linked-features
