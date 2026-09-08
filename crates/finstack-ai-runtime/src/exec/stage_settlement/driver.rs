@@ -125,12 +125,13 @@ pub(crate) async fn submit_command<C: Clock, R: RandomSource>(
 /// # Passthrough
 ///
 /// Returns `coordinator.submit(env, KernelInput::StageSettled(settled))`
-/// unchanged when `driver` is `None`, when the driver has no component
-/// registered at `settled.cursor.stage`, when this choke point does not fold
-/// that stage, when the base outcome is not one the stage can fold on top of
-/// (see [`foldable_base`]), or when the chain's fold is the identity. In all
-/// five cases the facade's `env` — its `now` and its pre-minted id bags — is
-/// reused verbatim.
+/// when `driver` is `None`, when the driver has no component registered at
+/// `settled.cursor.stage`, when this choke point does not fold that stage,
+/// when the base outcome is not one the stage can fold on top of (see
+/// [`foldable_base`]), or when the chain's fold is the identity. In all five
+/// cases the facade's `env.now` is kept. Its pre-minted id bags are reused
+/// unless `Kernel::decide` rejects them on cardinality because `decide_limit`
+/// intercepted — then [`submit_settled`] substitutes the limit-crossing bag.
 ///
 /// # Re-allocation
 ///
@@ -183,7 +184,7 @@ pub(crate) async fn settle_facade_stage_with_model<C: Clock, R: RandomSource>(
             && driver.is_active(cursor.stage)
             && foldable_base(cursor.stage, &settled.outcome)
     }) else {
-        return submit_settled(coordinator, env, settled).await;
+        return submit_settled(coordinator, sources, env, settled).await;
     };
     let input = stage_input(
         coordinator.state(),
@@ -227,7 +228,7 @@ pub(crate) async fn settle_facade_stage_with_model<C: Clock, R: RandomSource>(
     let fold =
         StageFold::accumulate(cursor.stage, &outcomes).map_err(|error| middleware_error(&error))?;
     if fold.is_identity() {
-        return submit_settled(coordinator, env, settled).await;
+        return submit_settled(coordinator, sources, env, settled).await;
     }
     let outcome = apply_fold(&fold, cursor, settled.outcome, sources)?;
     submit_folded(coordinator, sources, env.now, cursor, outcome).await

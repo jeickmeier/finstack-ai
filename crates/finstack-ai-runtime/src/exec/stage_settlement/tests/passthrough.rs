@@ -78,6 +78,38 @@ fn identity_fold_submits_the_facade_input_unchanged() {
     );
 }
 
+/// Identity/empty-chain passthrough reuses the facade bag only when that bag
+/// is the one `Kernel::decide` will consume. Once `now` is past the run
+/// deadline, `decide_limit` intercepts and demands the mutually exclusive
+/// `(2, 2, …)` bag. Without the shared fallback a short operational timeout
+/// fails with `allocated_ids_exhausted` instead of committing
+/// `deadline_exceeded`.
+#[test]
+fn passthrough_still_lands_when_the_deadline_has_already_elapsed() {
+    let mut coordinator =
+        accepted_coordinator_with_deadline(RunLimits::empty(), Some(timestamp(1_001)));
+    let sources = test_sources();
+
+    block_on(settle_facade_stage(
+        &mut coordinator,
+        None,
+        &sources,
+        &test_profile(),
+        env(2_000, &[2], &[], &[], &[], &[], &[], 102),
+        before_run_settled(),
+    ))
+    .expect("deadline crossing must still commit");
+
+    let Some(finstack_ai_kernel::TerminalState::Failed(failed)) = coordinator.state().terminal()
+    else {
+        panic!(
+            "expected deadline failure, got {:?}",
+            coordinator.state().terminal()
+        );
+    };
+    assert_eq!(failed.error.code.as_str(), "deadline_exceeded");
+}
+
 /// `BeforeModel` now folds, so its passthrough is no longer a stage-level
 /// exclusion — it is the ordinary identity/inactive path, and it must still
 /// reuse the facade's pre-minted ids byte for byte.

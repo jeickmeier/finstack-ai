@@ -52,6 +52,13 @@ fn env(
 }
 
 fn acceptance(limits: RunLimits) -> RunAccepted {
+    acceptance_with_deadline(limits, None)
+}
+
+fn acceptance_with_deadline(
+    limits: RunLimits,
+    effective_deadline: Option<Timestamp>,
+) -> RunAccepted {
     let run_id = id(3);
     RunAccepted::try_new(
         run_id,
@@ -66,7 +73,7 @@ fn acceptance(limits: RunLimits) -> RunAccepted {
             None,
         )
         .expect("security"),
-        None,
+        effective_deadline,
         limits,
         RunPropagationPolicy {
             cancellation: CancellationPropagation::Cascade,
@@ -488,10 +495,21 @@ impl JournalStore for MemoryStore {
 
 /// An accepted, `BeforeRun`-phase coordinator over an in-memory journal.
 fn accepted_coordinator(limits: RunLimits) -> CommitCoordinator {
+    accepted_coordinator_with_deadline(limits, None)
+}
+
+fn accepted_coordinator_with_deadline(
+    limits: RunLimits,
+    effective_deadline: Option<Timestamp>,
+) -> CommitCoordinator {
     let mut coordinator = CommitCoordinator::new(Arc::new(MemoryStore::new()));
     block_on(coordinator.submit(
         env(1_000, &[1], &[1], &[], &[], &[], &[], 101),
-        accept_input(limits),
+        KernelInput::AcceptRun(AcceptRun {
+            session_id: id::<SessionTag>(1),
+            lane_id: id::<LaneTag>(2),
+            accepted: acceptance_with_deadline(limits, effective_deadline),
+        }),
     ))
     .expect("accept");
     coordinator

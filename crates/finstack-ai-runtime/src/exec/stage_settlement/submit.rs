@@ -19,11 +19,42 @@ const LIMIT_CROSSING_RECORDS: usize = 2;
 /// `decide_limit`'s fixed event requirement (`decide.rs:684`).
 const LIMIT_CROSSING_EVENTS: usize = 2;
 
-pub(super) async fn submit_settled(
+/// Submit a stage settlement, swapping in the limit-crossing id bag when
+/// `decide_limit` intercepts.
+///
+/// Identity/passthrough and folded submits share this choke point. The facade
+/// (and [`stage_allocation`]) mint bags for `stage_id_requirements`. That table
+/// is unreachable whenever `decide_limit` returns a decision, in which case
+/// the kernel demands a fixed `IdRequirements::new(2, 2, 0, 0, 0, 0)`
+/// regardless of stage or outcome. `validate_allocated_ids` rejects both
+/// under- and over-allocation, so a short operational deadline that expires
+/// between `AcceptRun` and the next stage cannot reuse the facade bag.
+///
+/// Rather than copy `decide_limit`'s predicate, this asks the kernel.
+/// `CommitCoordinator::classify` is pure `Kernel::decide` with no commit: the
+/// caller's bag is offered first and, if and only if it is rejected on id
+/// cardinality, the fixed limit-crossing bag is offered instead. Any other
+/// classification error is left to `submit`.
+///
+/// # Errors
+///
+/// Forwards the coordinator's error, or `middleware_stage_payload_invalid`
+/// when the fallback bag cannot be constructed.
+pub(super) async fn submit_settled<C: Clock, R: RandomSource>(
     coordinator: &mut CommitCoordinator,
+    sources: &SettlementSources<C, R>,
     env: TransitionEnv,
     settled: StageSettled,
 ) -> Result<CommitOutcome, RunHandleError> {
+    let env = match coordinator.classify(&env, KernelInput::StageSettled(settled.clone())) {
+        Err(KernelError::AllocatedIdsExhausted { .. } | KernelError::UnusedAllocatedIds { .. }) => {
+            TransitionEnv {
+                now: env.now,
+                ids: limit_crossing_allocation(sources)?,
+            }
+        }
+        Ok(_) | Err(_) => env,
+    };
     coordinator
         .submit(env, KernelInput::StageSettled(settled))
         .await
@@ -32,36 +63,11 @@ pub(super) async fn submit_settled(
 
 /// Submit a folded outcome with the id bag the kernel actually demands for it.
 ///
-/// # Why this is a two-shot probe and not one table lookup
-///
-/// [`stage_allocation`] mirrors `stage_id_requirements` (`decide.rs:1101-1183`)
-/// and nothing else. That table is unreachable whenever `decide_limit`
-/// (`decide.rs:469-709`) returns a decision, in which case the kernel demands a
-/// fixed `IdRequirements::new(2, 2, 0, 0, 0, 0)` (`decide.rs:684`) regardless of
-/// stage or outcome. The crossing test is
-/// `deadline_crossing.or(first_limit_crossing(accepted, &usage))`
-/// (`decide.rs:680`), and `decide_limit` increments usage **from the submitted
-/// outcome itself** (`decide.rs:547-609`) before testing — so a fold is
-/// perfectly capable of *causing* the interception it then has to satisfy: a
-/// `ContextPrepared` fold that grows `context_bytes` past `max_context_bytes`,
-/// a `ContextPrepared` at all when `max_turns` is already reached, or a
-/// middleware `Retry` that pushes `usage.retries` past `max_retries`.
-///
-/// The two requirements cannot be satisfied at once. `validate_allocated_ids`
-/// (`allocated_ids.rs:97-107`) rejects `actual < needed` **and**
-/// `actual > needed`: allocation is an exact match, so a superset bag fails
-/// with `UnusedAllocatedIds` instead of being tolerated. The caller must
-/// therefore know *which* path the kernel will take before it allocates.
-///
-/// Rather than hand-copy `decide_limit`'s predicate — the same
-/// copy-the-kernel's-table drift that made `StageIds::for_outcome` wrong — this
-/// asks the kernel. `CommitCoordinator::classify` is the pure `Kernel::decide`
-/// with no commit, so the stage-table bag is offered first and, if and only if
-/// it is rejected on id cardinality, the fixed limit-crossing bag is offered
-/// instead. No stage tuple in `stage_id_requirements` is `(2, 2, …)`, so a
-/// limit crossing always produces a cardinality mismatch on the first probe and
-/// the fallback is always reached when it is needed. Any other classification
-/// error is left to `submit`, which surfaces the kernel's own diagnosis.
+/// [`stage_allocation`] mirrors `stage_id_requirements` and nothing else. A
+/// fold can itself *cause* a `decide_limit` interception (a `ContextPrepared`
+/// that grows past `max_context_bytes` or `max_turns`, a `Retry` past
+/// `max_retries`). [`submit_settled`] probes the kernel and substitutes the
+/// limit-crossing bag when that happens.
 ///
 /// # Errors
 ///
@@ -77,19 +83,13 @@ pub(crate) async fn submit_folded<C: Clock, R: RandomSource>(
 ) -> Result<CommitOutcome, RunHandleError> {
     let ids = stage_allocation(coordinator.state(), cursor, &outcome, sources)
         .map_err(folded_allocation_error)?;
-    let settled = StageSettled { cursor, outcome };
-    let input = KernelInput::StageSettled(settled.clone());
-    let env = TransitionEnv { now, ids };
-    let env = match coordinator.classify(&env, input) {
-        Err(KernelError::AllocatedIdsExhausted { .. } | KernelError::UnusedAllocatedIds { .. }) => {
-            TransitionEnv {
-                now,
-                ids: limit_crossing_allocation(sources)?,
-            }
-        }
-        Ok(_) | Err(_) => env,
-    };
-    submit_settled(coordinator, env, settled).await
+    submit_settled(
+        coordinator,
+        sources,
+        TransitionEnv { now, ids },
+        StageSettled { cursor, outcome },
+    )
+    .await
 }
 
 /// Re-classify [`stage_allocation`]'s rejection of a **folded** outcome as a

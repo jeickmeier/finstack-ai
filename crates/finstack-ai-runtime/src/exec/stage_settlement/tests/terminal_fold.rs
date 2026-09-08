@@ -181,7 +181,7 @@ fn the_tool_batch_chain_is_skipped_entirely_when_no_component_is_registered() {
 /// once a limit is crossed, because `validate_allocated_ids`
 /// (`allocated_ids.rs:97-107`) rejects both under- and over-allocation.
 /// This pins that exclusivity directly against the kernel, so the two-shot
-/// probe in `submit_folded` cannot be "simplified" into one lookup.
+/// probe in `submit_settled` cannot be "simplified" into one lookup.
 #[test]
 fn the_stage_table_and_the_limit_requirement_are_mutually_exclusive() {
     let sources = test_sources();
