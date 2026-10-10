@@ -1,33 +1,29 @@
 //! Native `OpenRouter` Responses provider implementation.
 
 use core::fmt;
-use core::pin::Pin;
-use core::task::{Context, Poll};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::sync::{Arc, PoisonError, RwLock};
 
 use finstack_ai_kernel::{ErrorCategory, Metadata, OutputSpec};
-use finstack_ai_provider_wire::{OpenAiResponsesAssembly, stream_norm_error};
-use finstack_ai_runtime::ports::model::{
-    MediaResolveKind, Model, ModelCapabilities, ModelDescriptor, ModelError, ModelEventStream,
-    ModelName, ModelRequest, ModelStreamItem, ModelTokenEstimate, ResolveDraftMediaError,
-    resolve_draft_media,
+use finstack_ai_provider_wire::{
+    BoundedRequest, DataSseParser, OpenAiResponsesAssembly, catalog_from_models, draft_media_error,
+    http_error, request_limit_error, stream_limit_error, transport_error,
+    unknown_model_capabilities,
 };
-use futures_util::{Stream, StreamExt};
+use finstack_ai_runtime::ports::model::{
+    Model, ModelCapabilities, ModelDescriptor, ModelError, ModelEventStream, ModelName,
+    ModelRequest, ModelTokenEstimate, StructuredOutputCapability, resolve_draft_media,
+};
+use futures_util::StreamExt;
 use reqwest::redirect::Policy;
-use tokio::sync::mpsc;
 
 use crate::catalog::model_configs_from_catalog_json;
 use crate::config::estimator_ref;
-use crate::error::{
-    CANCELLED, CODES, RESPONSE_INVALID, STREAM_LIMIT_EXCEEDED, TIMEOUT, TRANSPORT_ERROR, VENDOR,
-    config_error, error, http_error, request_error, stream_error, stream_limit_error,
-};
+use crate::error::{CODES, RESPONSE_INVALID, VENDOR, config_error, error, request_error};
 use crate::request::{ResponsesRequest, serialize_request};
-use crate::sse::SseParser;
 use crate::{OpenRouterConfig, OpenRouterModelConfig};
 
-const STREAM_CHANNEL_CAPACITY: usize = 32;
+const PROVIDER: &str = "openrouter";
 
 /// Reusable native official `OpenRouter` Responses provider.
 pub struct OpenRouterProvider {
@@ -88,7 +84,7 @@ impl OpenRouterProvider {
     ) -> Result<Self, ModelError> {
         let endpoint = config.endpoint_url()?;
         let headers = config.header_map()?;
-        let by_name = catalog_from_models(models)?;
+        let by_name = catalog(models)?;
         let client = reqwest::Client::builder()
             .default_headers(headers)
             .redirect(Policy::none())
@@ -111,7 +107,7 @@ impl OpenRouterProvider {
         &self,
         models: Vec<OpenRouterModelConfig>,
     ) -> Result<(), ModelError> {
-        let by_name = catalog_from_models(models)?;
+        let by_name = catalog(models)?;
         *self.models.write().unwrap_or_else(PoisonError::into_inner) = by_name;
         Ok(())
     }
@@ -157,18 +153,22 @@ impl OpenRouterProvider {
             .timeout(self.config.request_timeout())
             .send()
             .await
-            .map_err(|source| transport_error(&source))?;
+            .map_err(|source| transport_error(&CODES, VENDOR, &source))?;
         if !response.status().is_success() {
-            let status = response.status().as_u16();
-            return Err(http_error("models endpoint", status));
+            return Err(http_error(
+                &CODES,
+                VENDOR,
+                "models endpoint",
+                response.status().as_u16(),
+            ));
         }
         let cap = self.config.max_stream_bytes();
         let mut body = Vec::new();
         let mut stream = response.bytes_stream();
         while let Some(chunk) = stream.next().await {
-            let chunk = chunk.map_err(|source| transport_error(&source))?;
+            let chunk = chunk.map_err(|source| transport_error(&CODES, VENDOR, &source))?;
             if body.len().saturating_add(chunk.len()) > cap {
-                return Err(stream_limit_error());
+                return Err(stream_limit_error(&CODES, VENDOR));
             }
             body.extend_from_slice(&chunk);
         }
@@ -185,32 +185,23 @@ impl OpenRouterProvider {
     }
 }
 
-fn catalog_from_models(
+fn catalog(
     models: Vec<OpenRouterModelConfig>,
 ) -> Result<BTreeMap<ModelName, OpenRouterModelConfig>, ModelError> {
-    let mut by_name = BTreeMap::new();
-    for model in models {
-        if by_name.insert(model.name().clone(), model).is_some() {
-            return Err(config_error("provider contains a duplicate model name"));
-        }
-    }
-    if by_name.is_empty() {
-        return Err(config_error("provider requires at least one model"));
-    }
-    let descriptor = ModelDescriptor {
-        provider: Arc::from("openrouter"),
-        models: by_name.keys().cloned().collect::<Vec<_>>().into(),
-        metadata: Metadata::empty(),
-    };
-    descriptor.validate()?;
-    Ok(by_name)
+    catalog_from_models(
+        &CODES,
+        PROVIDER,
+        models,
+        OpenRouterModelConfig::name,
+        |_| Ok(()),
+    )
 }
 
 impl Model for OpenRouterProvider {
     fn descriptor(&self) -> ModelDescriptor {
         let models = self.models.read().unwrap_or_else(PoisonError::into_inner);
         ModelDescriptor {
-            provider: Arc::from("openrouter"),
+            provider: Arc::from(PROVIDER),
             models: models.keys().cloned().collect::<Vec<_>>().into(),
             metadata: Metadata::empty(),
         }
@@ -219,33 +210,13 @@ impl Model for OpenRouterProvider {
     fn capabilities(&self, model: &ModelName) -> ModelCapabilities {
         let models = self.models.read().unwrap_or_else(PoisonError::into_inner);
         models.get(model).map_or_else(
-            || ModelCapabilities {
-                input: finstack_ai_runtime::ports::model::InputCapabilities {
-                    text: false,
-                    json: false,
-                    images: false,
-                    audio: false,
-                    files: false,
-                },
-                context_profile: finstack_ai_runtime::ports::model::ModelContextProfile {
-                    provider: Arc::from("openrouter"),
-                    model: model.clone(),
-                    hard_input_bytes: 0,
-                    context_window_tokens: 0,
-                    max_output_tokens: 0,
-                    reserved_output_tokens: 0,
-                    provider_overhead_tokens: 0,
-                    estimator: estimator_ref(),
-                },
-                native_tool_calls: false,
-                parallel_tool_calls: false,
-                structured_output:
-                    finstack_ai_runtime::ports::model::StructuredOutputCapability::Native,
-                reasoning: false,
-                prompt_cache: false,
-                resumable_stream: false,
-                idempotent_requests: false,
-                native_capabilities: BTreeSet::new(),
+            || {
+                unknown_model_capabilities(
+                    PROVIDER,
+                    model,
+                    StructuredOutputCapability::Native,
+                    estimator_ref(),
+                )
             },
             OpenRouterModelConfig::capabilities,
         )
@@ -282,16 +253,21 @@ impl Model for OpenRouterProvider {
         let max_stream_bytes = self.config.max_stream_bytes();
         let media_resolver = self.config.media_resolver();
         Box::pin(async move {
-            let deadline = tokio::time::Instant::now() + timeout;
-            let cancellation = request.call.run.cancellation.clone();
+            let bounds = BoundedRequest::new(
+                CODES,
+                VENDOR,
+                request.call.run.cancellation.clone(),
+                timeout,
+            );
             let model = model?;
-            let resolved_media = tokio::select! {
-                () = cancellation.cancelled() => return Err(cancelled_error()),
-                () = tokio::time::sleep_until(deadline) => return Err(timeout_error()),
-                resolved = resolve_draft_media(media_resolver.as_ref(), &request.draft, max_stream_bytes) => {
-                    resolved.map_err(map_draft_media)?
-                }
-            };
+            let resolved_media = bounds
+                .guard(resolve_draft_media(
+                    media_resolver.as_ref(),
+                    &request.draft,
+                    max_stream_bytes,
+                ))
+                .await?
+                .map_err(|failure| draft_media_error(&CODES, VENDOR, failure))?;
             let wire = ResponsesRequest::try_from_draft(
                 &request.draft,
                 &model,
@@ -300,195 +276,26 @@ impl Model for OpenRouterProvider {
             )?;
             let payload = serialize_request(&wire)?;
             if payload.len() > max_stream_bytes {
-                return Err(request_limit_error());
+                return Err(request_limit_error(&CODES, VENDOR));
             }
             let request_id = request.call.request_id.to_string();
-            let send = client
-                .post(endpoint)
-                .header("x-client-request-id", &request_id)
-                .header(reqwest::header::CONTENT_TYPE, "application/json")
-                .timeout(timeout)
-                .body(payload)
-                .send();
-            let response = tokio::select! {
-                () = cancellation.cancelled() => return Err(cancelled_error()),
-                () = tokio::time::sleep_until(deadline) => return Err(timeout_error()),
-                response = send => response.map_err(|source| transport_error(&source))?,
-            };
-            if !response.status().is_success() {
-                let status = response.status().as_u16();
-                return Err(http_error("responses endpoint", status));
-            }
-            let (sender, receiver) = mpsc::channel(STREAM_CHANNEL_CAPACITY);
+            let response = bounds
+                .send(
+                    client
+                        .post(endpoint)
+                        .header("x-client-request-id", &request_id)
+                        .header(reqwest::header::CONTENT_TYPE, "application/json")
+                        .body(payload),
+                    "responses endpoint",
+                )
+                .await?;
             let structured = matches!(request.draft.output, OutputSpec::JsonSchema { .. });
-            let task = tokio::spawn(drive_response(
-                response,
-                sender,
-                cancellation,
-                request_id,
-                structured,
-                max_event_bytes,
-                max_stream_bytes,
-                deadline,
-            ));
-            Ok(Box::pin(ReceiverModelStream { receiver, task }) as ModelEventStream)
+            Ok(bounds.spawn(
+                response.bytes_stream(),
+                DataSseParser::new(max_event_bytes, max_stream_bytes),
+                OpenAiResponsesAssembly::new(request_id, structured),
+            ))
         })
-    }
-}
-
-struct ReceiverModelStream {
-    receiver: mpsc::Receiver<Result<ModelStreamItem, ModelError>>,
-    task: tokio::task::JoinHandle<()>,
-}
-
-impl Stream for ReceiverModelStream {
-    type Item = Result<ModelStreamItem, ModelError>;
-
-    fn poll_next(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.receiver.poll_recv(context)
-    }
-}
-
-impl Drop for ReceiverModelStream {
-    fn drop(&mut self) {
-        self.task.abort();
-    }
-}
-
-#[expect(
-    clippy::too_many_arguments,
-    reason = "stream driver keeps request identity, limits, cancellation, and deadline together"
-)]
-async fn drive_response(
-    response: reqwest::Response,
-    sender: mpsc::Sender<Result<ModelStreamItem, ModelError>>,
-    cancellation: finstack_ai_runtime::ports::model::CancellationSignal,
-    request_id: String,
-    structured: bool,
-    max_event_bytes: usize,
-    max_stream_bytes: usize,
-    deadline: tokio::time::Instant,
-) {
-    let mut body = response.bytes_stream();
-    let mut parser = SseParser::new(max_event_bytes, max_stream_bytes);
-    let mut assembly = OpenAiResponsesAssembly::new(request_id, structured);
-    loop {
-        let chunk = tokio::select! {
-            () = cancellation.cancelled() => {
-                let _ = sender.send(Err(cancelled_error())).await;
-                return;
-            }
-            () = tokio::time::sleep_until(deadline) => {
-                let _ = sender.send(Err(timeout_error())).await;
-                return;
-            }
-            () = sender.closed() => return,
-            chunk = body.next() => chunk,
-        };
-        let Some(chunk) = chunk else {
-            let error = match parser.finish() {
-                Ok(()) => stream_error("OpenRouter SSE stream ended before response.completed"),
-                Err(error) => error,
-            };
-            let _ = sender.send(Err(error)).await;
-            return;
-        };
-        let chunk = match chunk {
-            Ok(chunk) => chunk,
-            Err(source) => {
-                let _ = sender.send(Err(transport_error(&source))).await;
-                return;
-            }
-        };
-        let events = match parser.push(&chunk) {
-            Ok(events) => events,
-            Err(error) => {
-                let _ = sender.send(Err(error)).await;
-                return;
-            }
-        };
-        for event in events {
-            match assembly
-                .consume(&event)
-                .map_err(|error| stream_norm_error(&CODES, VENDOR, &error))
-            {
-                Ok(items) => {
-                    let mut completed = false;
-                    for item in items {
-                        completed |= matches!(item, ModelStreamItem::Completed(_));
-                        if sender.send(Ok(item)).await.is_err() {
-                            return;
-                        }
-                    }
-                    if completed {
-                        return;
-                    }
-                }
-                Err(error) => {
-                    let _ = sender.send(Err(error)).await;
-                    return;
-                }
-            }
-        }
-    }
-}
-
-fn map_draft_media(failure: ResolveDraftMediaError) -> ModelError {
-    match failure {
-        ResolveDraftMediaError::MissingResolver => {
-            request_error("media content requires a configured media resolver")
-        }
-        ResolveDraftMediaError::Resolve(inner) => match inner.kind {
-            MediaResolveKind::NotFound => request_error(inner.message),
-            MediaResolveKind::Unavailable => error(
-                TRANSPORT_ERROR,
-                ErrorCategory::Model,
-                true,
-                "OpenRouter media resolution is unavailable",
-            ),
-            MediaResolveKind::Limit => stream_limit_error(),
-        },
-        ResolveDraftMediaError::Limit => stream_limit_error(),
-    }
-}
-
-fn cancelled_error() -> ModelError {
-    error(
-        CANCELLED,
-        ErrorCategory::Cancellation,
-        false,
-        "OpenRouter request was cancelled",
-    )
-}
-
-fn timeout_error() -> ModelError {
-    error(
-        TIMEOUT,
-        ErrorCategory::Deadline,
-        true,
-        "OpenRouter request timed out",
-    )
-}
-
-fn request_limit_error() -> ModelError {
-    error(
-        STREAM_LIMIT_EXCEEDED,
-        ErrorCategory::Limit,
-        false,
-        "OpenRouter request exceeded the configured byte limit",
-    )
-}
-
-fn transport_error(source: &reqwest::Error) -> ModelError {
-    if source.is_timeout() {
-        timeout_error()
-    } else {
-        error(
-            TRANSPORT_ERROR,
-            ErrorCategory::Model,
-            true,
-            "OpenRouter transport failed",
-        )
     }
 }
 

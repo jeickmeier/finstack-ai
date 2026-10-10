@@ -1248,7 +1248,6 @@ dependencies = [
  "finstack-ai-tools-skills",
  "finstack-ai-tools-video-compose",
  "finstack-ai-workflow-hitl",
- "finstack-ai-workflow-local",
  "finstack-ai-workflow-media-pipeline",
  "finstack-ai-workflow-worker",
  "serde",
@@ -1554,6 +1553,7 @@ dependencies = [
  "serde_json",
  "serde_json_canonicalizer",
  "thiserror",
+ "tokio",
 ]
 
 [[package]]
@@ -1586,6 +1586,7 @@ dependencies = [
 name = "finstack-ai-middleware-tool-policy"
 version = "2.0.0"
 dependencies = [
+ "aho-corasick",
  "finstack-ai-kernel",
  "finstack-ai-runtime",
  "finstack-ai-test",
@@ -1656,6 +1657,7 @@ dependencies = [
  "finstack-ai-kernel",
  "finstack-ai-runtime",
  "finstack-ai-test",
+ "serde",
  "serde_json",
  "thiserror",
  "tokio",
@@ -1691,6 +1693,7 @@ name = "finstack-ai-observer-notify"
 version = "2.0.0"
 dependencies = [
  "finstack-ai-kernel",
+ "finstack-ai-net-guard",
  "finstack-ai-runtime",
  "finstack-ai-test",
  "reqwest",
@@ -1797,7 +1800,6 @@ dependencies = [
  "finstack-ai-provider-wire",
  "finstack-ai-runtime",
  "finstack-ai-test",
- "futures-util",
  "reqwest",
  "serde",
  "serde_json",
@@ -1813,7 +1815,6 @@ dependencies = [
  "finstack-ai-provider-wire",
  "finstack-ai-runtime",
  "finstack-ai-test",
- "futures-util",
  "reqwest",
  "serde",
  "serde_json",
@@ -1841,10 +1842,14 @@ dependencies = [
 name = "finstack-ai-provider-wire"
 version = "2.0.0"
 dependencies = [
+ "bytes",
  "finstack-ai-kernel",
  "finstack-ai-runtime",
+ "futures-util",
+ "reqwest",
  "serde",
  "serde_json",
+ "tokio",
  "url",
 ]
 
@@ -1975,9 +1980,11 @@ dependencies = [
  "finstack-ai-kernel",
  "finstack-ai-runtime",
  "regex",
+ "rusqlite",
  "serde",
  "serde_json",
  "serde_json_canonicalizer",
+ "tempfile",
  "thiserror",
  "tokio",
 ]
@@ -2362,7 +2369,6 @@ dependencies = [
  "finstack-ai-store-memory",
  "finstack-ai-store-sqlite",
  "finstack-ai-test",
- "finstack-ai-workflow-local",
  "finstack-ai-workflow-worker",
  "rusqlite",
  "serde",

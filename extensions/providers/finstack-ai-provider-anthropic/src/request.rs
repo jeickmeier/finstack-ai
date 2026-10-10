@@ -7,6 +7,7 @@ use base64::Engine;
 use finstack_ai_kernel::{
     ContentBlock, MediaRef, Message, MessageRole, OutputSpec, RawJson, SUBMIT_FINAL_OUTPUT_TOOL,
 };
+use finstack_ai_provider_wire::{parse_settings, raw_value, render_text, system_prefix_len};
 use finstack_ai_runtime::ports::model::{
     ModelError, ModelRequestDraft, ResolvedMedia, thinking_level_budget,
 };
@@ -14,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::AnthropicModelConfig;
-use crate::error::request_error;
+use crate::error::{CODES, request_error};
 
 /// Messages-API keys the request owns; settings may not shadow them.
 ///
@@ -158,7 +159,7 @@ impl MessagesRequest {
         if draft.model != model.name {
             return Err(request_error("requested model is not configured"));
         }
-        let mut settings = parse_settings(&draft.settings.values)?;
+        let mut settings = parse_settings(&CODES, &draft.settings.values)?;
         for reserved in RESERVED_SETTINGS {
             if settings.remove(*reserved).is_some() {
                 return Err(request_error("provider settings contain a reserved field"));
@@ -189,7 +190,7 @@ impl MessagesRequest {
             tools.push(WireTool {
                 name: tool.model_name.to_string(),
                 description: tool.description.to_string(),
-                input_schema: raw_value(&tool.input_schema)?,
+                input_schema: raw_value(&CODES, &tool.input_schema)?,
             });
         }
         if matches!(draft.output, OutputSpec::JsonSchema { .. })
@@ -265,46 +266,18 @@ fn parse_continuation(state: &RawJson) -> Result<ContinuationEnvelope, ModelErro
     Ok(envelope)
 }
 
-fn parse_settings(
-    settings: &finstack_ai_kernel::RawJson,
-) -> Result<BTreeMap<String, Value>, ModelError> {
-    let value = raw_value(settings)?;
-    let Value::Object(values) = value else {
-        return Err(request_error("provider settings must be a JSON object"));
-    };
-    Ok(values.into_iter().collect())
-}
-
-fn raw_value(value: &finstack_ai_kernel::RawJson) -> Result<Value, ModelError> {
-    serde_json::from_slice(value.as_bytes())
-        .map_err(|_| request_error("canonical provider JSON could not be decoded"))
-}
-
 fn map_messages(
     messages: &[Message],
     replay: &[ReplayBlock],
     resolved: &BTreeMap<Arc<str>, ResolvedMedia>,
     model: &AnthropicModelConfig,
 ) -> Result<(Vec<SystemBlock>, Vec<WireMessage>), ModelError> {
-    let prefix_len = messages
-        .iter()
-        .take_while(|message| {
-            matches!(message.role(), MessageRole::System | MessageRole::Developer)
-        })
-        .count();
-    if messages[prefix_len..]
-        .iter()
-        .any(|message| matches!(message.role(), MessageRole::System | MessageRole::Developer))
-    {
-        return Err(request_error(
-            "system instructions must remain a stable leading prefix",
-        ));
-    }
+    let prefix_len = system_prefix_len(&CODES, messages)?;
     let mut system = Vec::new();
     for message in &messages[..prefix_len] {
         system.push(SystemBlock {
             kind: "text",
-            text: render_text(message.content())?,
+            text: render_text(&CODES, message.content())?,
             cache_control: None,
         });
     }
@@ -436,7 +409,7 @@ fn map_assistant_content(
                 text: value.value().as_str().to_owned(),
             }),
             ContentBlock::ToolCall(call) => {
-                let input = raw_value(call.arguments())?;
+                let input = raw_value(&CODES, call.arguments())?;
                 blocks.push(WireContent::ToolUse {
                     id: call.tool_call_id().to_string(),
                     name: call.tool_name().to_owned(),
@@ -460,27 +433,11 @@ fn map_tool_results(content: &[ContentBlock]) -> Result<Vec<WireContent>, ModelE
         .map(|block| match block {
             ContentBlock::ToolResult(result) => Ok(WireContent::ToolResult {
                 tool_use_id: result.tool_call_id().to_string(),
-                content: render_text(result.content())?,
+                content: render_text(&CODES, result.content())?,
             }),
             _ => Err(request_error("tool messages contain unsupported content")),
         })
         .collect()
-}
-
-fn render_text(content: &[ContentBlock]) -> Result<String, ModelError> {
-    let mut rendered = String::new();
-    for block in content {
-        match block {
-            ContentBlock::Text(value) => rendered.push_str(value.text()),
-            ContentBlock::Json(value) => rendered.push_str(value.value().as_str()),
-            _ => {
-                return Err(request_error(
-                    "message contains unsupported provider content",
-                ));
-            }
-        }
-    }
-    Ok(rendered)
 }
 
 pub(crate) fn serialize_request(request: &MessagesRequest) -> Result<Vec<u8>, ModelError> {

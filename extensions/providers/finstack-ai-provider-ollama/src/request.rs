@@ -8,14 +8,15 @@ use finstack_ai_kernel::{
     ContentBlock, Message, MessageRole, OutputSpec, RawJson, SUBMIT_FINAL_OUTPUT_TOOL,
 };
 use finstack_ai_provider_wire::{
-    OllamaReplayEntry, ollama_content_digest, parse_ollama_continuation,
+    OllamaReplayEntry, ollama_content_digest, parse_ollama_continuation, parse_settings, raw_value,
+    render_text,
 };
 use finstack_ai_runtime::ports::model::{ModelError, ModelRequestDraft, ResolvedMedia};
 use serde::Serialize;
 use serde_json::Value;
 
 use crate::OllamaModelConfig;
-use crate::error::request_error;
+use crate::error::{CODES, request_error};
 
 const RESERVED_SETTINGS: &[&str] = &[
     "model", "messages", "tools", "stream", "format", "think", "options",
@@ -101,7 +102,7 @@ impl ChatRequest {
         }
         let matched_replay = resolve_replay(&draft.messages, continuation);
         let messages = map_messages(&draft.messages, matched_replay.as_deref(), resolved, model)?;
-        let mut settings = parse_settings(&draft.settings.values)?;
+        let mut settings = parse_settings(&CODES, &draft.settings.values)?;
         for reserved in RESERVED_SETTINGS {
             if settings.remove(*reserved).is_some() {
                 return Err(request_error("provider settings contain a reserved field"));
@@ -119,7 +120,7 @@ impl ChatRequest {
                         "structured-output schema does not match the committed schema reference",
                     ));
                 }
-                format = Some(raw_value(&tool.input_schema)?);
+                format = Some(raw_value(&CODES, &tool.input_schema)?);
                 continue;
             }
             tools.push(WireTool {
@@ -127,7 +128,7 @@ impl ChatRequest {
                 function: WireFunction {
                     name: tool.model_name.to_string(),
                     description: tool.description.to_string(),
-                    parameters: raw_value(&tool.input_schema)?,
+                    parameters: raw_value(&CODES, &tool.input_schema)?,
                 },
             });
         }
@@ -153,19 +154,6 @@ impl ChatRequest {
             matched_replay,
         })
     }
-}
-
-fn parse_settings(settings: &RawJson) -> Result<BTreeMap<String, Value>, ModelError> {
-    let value = raw_value(settings)?;
-    let Value::Object(values) = value else {
-        return Err(request_error("provider settings must be a JSON object"));
-    };
-    Ok(values.into_iter().collect())
-}
-
-fn raw_value(value: &RawJson) -> Result<Value, ModelError> {
-    serde_json::from_slice(value.as_bytes())
-        .map_err(|_| request_error("canonical provider JSON could not be decoded"))
 }
 
 /// Match a prior continuation envelope against the outgoing assistant turns.
@@ -257,7 +245,7 @@ fn map_conversation_message(
                 tool_calls.push(WireToolCall {
                     function: WireFunctionCall {
                         name: call.tool_name().to_owned(),
-                        arguments: raw_value(call.arguments())?,
+                        arguments: raw_value(&CODES, call.arguments())?,
                     },
                 });
             }
@@ -312,7 +300,7 @@ fn map_tool_results(
         .map(|block| match block {
             ContentBlock::ToolResult(result) => Ok(WireMessage {
                 role: "tool",
-                content: Some(render_text(result.content())?),
+                content: Some(render_text(&CODES, result.content())?),
                 thinking: None,
                 tool_calls: Vec::new(),
                 tool_name: Some(tool_name_for(tool_names, result.tool_call_id())?),
@@ -348,22 +336,6 @@ fn index_tool_names(messages: &[Message]) -> BTreeMap<finstack_ai_kernel::ToolCa
         }
     }
     tool_names
-}
-
-fn render_text(content: &[ContentBlock]) -> Result<String, ModelError> {
-    let mut rendered = String::new();
-    for block in content {
-        match block {
-            ContentBlock::Text(value) => rendered.push_str(value.text()),
-            ContentBlock::Json(value) => rendered.push_str(value.value().as_str()),
-            _ => {
-                return Err(request_error(
-                    "tool result contains unsupported provider content",
-                ));
-            }
-        }
-    }
-    Ok(rendered)
 }
 
 fn assistant_message_digest(message: &Message) -> Result<String, ModelError> {

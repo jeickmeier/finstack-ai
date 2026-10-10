@@ -15,6 +15,9 @@ pub(crate) const GEMINI_STREAM_INVALID: &str = "gemini_stream_invalid";
 pub(crate) const GEMINI_STREAM_LIMIT_EXCEEDED: &str = "gemini_stream_limit_exceeded";
 pub(crate) const GEMINI_RESPONSE_INVALID: &str = "gemini_response_invalid";
 
+/// Vendor label rendered into shared error messages.
+pub(crate) const VENDOR: &str = "Gemini";
+
 /// The Gemini leaf's code bundle for the shared adapter-error helpers.
 pub(crate) const CODES: ProviderErrorCodes = ProviderErrorCodes {
     config_invalid: GEMINI_CONFIG_INVALID,
@@ -52,18 +55,5 @@ pub(crate) fn request_error(message: &'static str) -> ModelError {
         ErrorCategory::Validation,
         false,
         message,
-    )
-}
-
-pub(crate) fn stream_error(message: &'static str) -> ModelError {
-    error(CODES.stream_invalid, ErrorCategory::Model, false, message)
-}
-
-pub(crate) fn stream_limit_error() -> ModelError {
-    error(
-        CODES.stream_limit_exceeded,
-        ErrorCategory::Limit,
-        false,
-        "Gemini response exceeded a configured stream limit",
     )
 }

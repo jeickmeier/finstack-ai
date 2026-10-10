@@ -24,6 +24,16 @@ unpublished.
   `100.64.0.0/10`, `192.0.0.0/24`, and `240.0.0.0/4` and un-embeds NAT64
   (`64:ff9b::/96`) and 6to4 (`2002::/16`) destinations. Teredo and
   `198.18.0.0/15` are deliberately not blocked.
+- `finstack-ai-provider-wire` gains `native` (Tokio/reqwest streaming driver
+  `BoundedRequest`, `StreamProtocol`/`StreamAssembler`, `DataSseParser`/
+  `NamedSseParser`) and `vendored-tls` features plus shared request-phase error
+  constructors, `parse_settings`/`raw_value`/`render_text`/`system_prefix_len`,
+  and `catalog_from_models`/`unknown_model_capabilities`; default features stay
+  target-neutral. Provider leaves now take stream driving, SSE/NDJSON framing,
+  media/cancel/timeout/transport error mapping, and catalog validation from the
+  wire crate (about 710 lines removed); framing and early-EOF error messages
+  drop the vendor prefix (codes, categories, retryability unchanged) and the
+  leaves no longer depend directly on `tokio`.
 - Provider leaves (`anthropic`, `gemini`, `ollama`, `openai`, `openrouter`)
   adopt shared `finstack-ai-provider-wire` adapter-error and config-rule
   helpers. Base URLs must be root-only (`*_config_invalid` otherwise). HTTP

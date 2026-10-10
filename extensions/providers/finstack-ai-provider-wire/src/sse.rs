@@ -1,4 +1,11 @@
 //! Target-neutral SSE framing and event-field parsing.
+//!
+//! [`SseEventParser`] splits frames into `event:` / `data:` fields;
+//! [`DataSseParser`] and [`NamedSseParser`] apply the per-protocol frame
+//! rules on top and implement [`StreamProtocol`] for the shared driver.
+
+use crate::StreamNormError;
+use crate::stream::StreamProtocol;
 
 /// One parsed SSE event after `event:` / `data:` field splitting.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -91,6 +98,133 @@ impl SseEventParser {
     #[must_use]
     pub fn finish_clean(&self) -> bool {
         self.buffer.iter().all(u8::is_ascii_whitespace)
+    }
+}
+
+/// Bounded SSE parser yielding `data:` payloads.
+///
+/// By default `event:` names are ignored, empty frames are dropped, and the
+/// `[DONE]` sentinel is swallowed, which is the `OpenAI` Responses and
+/// `OpenRouter` framing. [`DataSseParser::rejecting_named_events`] switches
+/// to the Gemini rule: a name other than the empty name or `message` is a
+/// protocol violation.
+///
+/// ```
+/// use finstack_ai_provider_wire::{DataSseParser, StreamProtocol};
+///
+/// let mut parser = DataSseParser::new(128, 1_024);
+/// assert!(parser.push(b"data: {\"id\":").unwrap().is_empty());
+/// assert_eq!(
+///     parser.push(b"\"one\"}\n\ndata: [DONE]\n\n").unwrap(),
+///     vec!["{\"id\":\"one\"}".to_owned()]
+/// );
+/// assert!(parser.finish().unwrap().is_empty());
+/// ```
+#[derive(Debug)]
+pub struct DataSseParser {
+    inner: SseEventParser,
+    reject_named: bool,
+}
+
+impl DataSseParser {
+    /// Construct a parser bounded by a per-event ceiling and a stream budget.
+    #[must_use]
+    pub const fn new(max_event_bytes: usize, max_stream_bytes: usize) -> Self {
+        Self {
+            inner: SseEventParser::new(max_event_bytes, max_stream_bytes),
+            reject_named: false,
+        }
+    }
+
+    /// Reject any `event:` name other than the empty name or `message`.
+    #[must_use]
+    pub const fn rejecting_named_events(mut self) -> Self {
+        self.reject_named = true;
+        self
+    }
+}
+
+impl StreamProtocol for DataSseParser {
+    type Frame = String;
+
+    fn push(&mut self, bytes: &[u8]) -> Result<Vec<String>, StreamNormError> {
+        let events = self.inner.push(bytes)?;
+        let mut payloads = Vec::new();
+        for SseEvent { name, data } in events {
+            if self.reject_named
+                && name
+                    .as_deref()
+                    .is_some_and(|name| !name.is_empty() && name != "message")
+            {
+                return Err(StreamNormError::stream(
+                    "SSE event declared an unexpected name",
+                ));
+            }
+            if data.is_empty() || data == "[DONE]" {
+                continue;
+            }
+            payloads.push(data);
+        }
+        Ok(payloads)
+    }
+
+    fn finish(self) -> Result<Vec<String>, StreamNormError> {
+        finish_clean(&self.inner)
+    }
+}
+
+/// One SSE event whose `event:` name is mandatory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NamedSseEvent {
+    /// Non-empty `event:` name.
+    pub name: String,
+    /// Concatenated `data:` payload.
+    pub data: String,
+}
+
+/// Bounded SSE parser for protocols that name every event (Anthropic Messages).
+///
+/// A frame without a non-empty `event:` field is a protocol violation.
+#[derive(Debug)]
+pub struct NamedSseParser {
+    inner: SseEventParser,
+}
+
+impl NamedSseParser {
+    /// Construct a parser bounded by a per-event ceiling and a stream budget.
+    #[must_use]
+    pub const fn new(max_event_bytes: usize, max_stream_bytes: usize) -> Self {
+        Self {
+            inner: SseEventParser::new(max_event_bytes, max_stream_bytes),
+        }
+    }
+}
+
+impl StreamProtocol for NamedSseParser {
+    type Frame = NamedSseEvent;
+
+    fn push(&mut self, bytes: &[u8]) -> Result<Vec<NamedSseEvent>, StreamNormError> {
+        let events = self.inner.push(bytes)?;
+        let mut named = Vec::with_capacity(events.len());
+        for SseEvent { name, data } in events {
+            let Some(name) = name.filter(|value| !value.is_empty()) else {
+                return Err(StreamNormError::stream("SSE event omitted its name"));
+            };
+            named.push(NamedSseEvent { name, data });
+        }
+        Ok(named)
+    }
+
+    fn finish(self) -> Result<Vec<NamedSseEvent>, StreamNormError> {
+        finish_clean(&self.inner)
+    }
+}
+
+fn finish_clean<T>(parser: &SseEventParser) -> Result<Vec<T>, StreamNormError> {
+    if parser.finish_clean() {
+        Ok(Vec::new())
+    } else {
+        Err(StreamNormError::stream("SSE stream ended mid-event"))
     }
 }
 
@@ -273,5 +407,99 @@ mod tests {
         assert!(parser.push(b"da").unwrap().is_empty());
         assert!(parser.push(b"ta").unwrap().is_empty());
         assert_eq!(parser.push(b":"), Err(SseParseError::Limit));
+    }
+
+    fn limit() -> StreamNormError {
+        StreamNormError::limit()
+    }
+
+    #[test]
+    fn data_parser_ignores_done_and_names_by_default() {
+        let mut parser = DataSseParser::new(128, 1_024);
+        assert!(parser.push(b"data: {\"id\":").unwrap().is_empty());
+        assert_eq!(
+            parser
+                .push(b"\"one\"}\r\n\r\nevent: ping\ndata: {}\n\ndata: [DONE]\n\n")
+                .unwrap(),
+            vec!["{\"id\":\"one\"}".to_owned(), "{}".to_owned()]
+        );
+        assert!(parser.push(b": comment\n\n").unwrap().is_empty());
+        assert!(parser.finish().unwrap().is_empty());
+    }
+
+    #[test]
+    fn data_parser_enforces_limits_and_clean_eof() {
+        assert_eq!(DataSseParser::new(3, 16).push(b"data: value"), Err(limit()));
+        assert_eq!(DataSseParser::new(32, 4).push(b"12345"), Err(limit()));
+        let mut parser = DataSseParser::new(128, 1_024);
+        assert!(parser.push(b"data: partial").unwrap().is_empty());
+        assert_eq!(
+            parser.finish(),
+            Err(StreamNormError::stream("SSE stream ended mid-event"))
+        );
+    }
+
+    #[test]
+    fn data_parser_rejecting_names_accepts_only_message() {
+        let mut parser = DataSseParser::new(128, 4_096).rejecting_named_events();
+        assert_eq!(
+            parser
+                .push(b"event: message\ndata: {\"id\":\"one\"}\n\ndata: {\"id\":\"two\"}\n\n")
+                .unwrap(),
+            vec!["{\"id\":\"one\"}".to_owned(), "{\"id\":\"two\"}".to_owned()]
+        );
+        assert_eq!(
+            parser.push(b"event: ping\ndata: {}\n\n"),
+            Err(StreamNormError::stream(
+                "SSE event declared an unexpected name"
+            ))
+        );
+    }
+
+    #[test]
+    fn data_parser_stream_budget_is_cumulative() {
+        let frame = |index: usize| {
+            format!("data: {{\"i\":{index},\"p\":\"{}\"}}\n\n", "x".repeat(800)).into_bytes()
+        };
+        let mut parser = DataSseParser::new(64 * 1024, 1_048_576);
+        let parsed: usize = (0..100)
+            .map(|index| parser.push(&frame(index)).unwrap().len())
+            .sum();
+        assert_eq!(parsed, 100);
+
+        let mut parser = DataSseParser::new(64 * 1024, 4_096);
+        let result = (0..10)
+            .map(|index| parser.push(&frame(index)))
+            .find(Result::is_err);
+        assert_eq!(result, Some(Err(limit())));
+    }
+
+    #[test]
+    fn named_parser_requires_names() {
+        let mut parser = NamedSseParser::new(256, 1_024);
+        assert!(parser.push(b"event: message_start\n").unwrap().is_empty());
+        assert_eq!(
+            parser
+                .push(b"data: {\"id\":\"one\"}\r\n\r\nevent: ping\ndata: {\"type\":\"ping\"}\n\n")
+                .unwrap(),
+            vec![
+                NamedSseEvent {
+                    name: "message_start".to_owned(),
+                    data: "{\"id\":\"one\"}".to_owned(),
+                },
+                NamedSseEvent {
+                    name: "ping".to_owned(),
+                    data: "{\"type\":\"ping\"}".to_owned(),
+                },
+            ]
+        );
+        assert!(parser.finish().unwrap().is_empty());
+
+        let mut parser = NamedSseParser::new(128, 1_024);
+        assert_eq!(
+            parser.push(b"data: {\"id\":\"one\"}\n\n"),
+            Err(StreamNormError::stream("SSE event omitted its name"))
+        );
+        assert_eq!(NamedSseParser::new(3, 16).push(b"event: x"), Err(limit()));
     }
 }

@@ -8,6 +8,7 @@ use finstack_ai_kernel::{
     ContentBlock, MediaRef, Message, MessageRole, OutputSpec, RawJson, SUBMIT_FINAL_OUTPUT_TOOL,
     ToolCallId,
 };
+use finstack_ai_provider_wire::{parse_settings, raw_value, render_text, system_prefix_len};
 use finstack_ai_runtime::ports::model::{ModelError, ModelRequestDraft, ResolvedMedia, ToolSpec};
 use serde::Deserialize;
 use serde::Serialize;
@@ -15,7 +16,7 @@ use serde_json::value::RawValue;
 use serde_json::{Value, json};
 
 use crate::OpenRouterModelConfig;
-use crate::error::request_error;
+use crate::error::{CODES, request_error};
 
 const CONTINUATION_PROVIDER: &str = "openai.responses";
 const CONTINUATION_VERSION: u64 = 1;
@@ -92,7 +93,7 @@ impl ResponsesRequest {
         }
         let (instructions, input) =
             map_input(&draft.messages, continuation_state, resolved, model)?;
-        let mut settings = parse_settings(&draft.settings.values)?;
+        let mut settings = parse_settings(&CODES, &draft.settings.values)?;
         for reserved in RESERVED_SETTINGS {
             if settings.remove(*reserved).is_some() {
                 return Err(request_error("provider settings contain a reserved field"));
@@ -133,7 +134,7 @@ impl ResponsesRequest {
                         "structured-output schema does not match the committed schema reference",
                     ));
                 }
-                let schema_value = raw_value(&tool.input_schema)?;
+                let schema_value = raw_value(&CODES, &tool.input_schema)?;
                 text = Some(json!({
                     "format": {
                         "type": "json_schema",
@@ -146,7 +147,7 @@ impl ResponsesRequest {
             }
             // Parse once for the strict-subset check; the wire payload reuses
             // the canonical bytes verbatim instead of re-serializing the tree.
-            let parameters = raw_value(&tool.input_schema)?;
+            let parameters = raw_value(&CODES, &tool.input_schema)?;
             let strict = supports_strict(&parameters);
             tools.push(WireTool {
                 kind: "function",
@@ -226,14 +227,6 @@ fn object_node_is_strict(node: &serde_json::Map<String, Value>) -> bool {
     properties.keys().all(|key| required.contains(key.as_str()))
 }
 
-fn parse_settings(settings: &RawJson) -> Result<BTreeMap<String, Value>, ModelError> {
-    let value = raw_value(settings)?;
-    let Value::Object(values) = value else {
-        return Err(request_error("provider settings must be a JSON object"));
-    };
-    Ok(values.into_iter().collect())
-}
-
 fn take_string_setting(
     settings: &mut BTreeMap<String, Value>,
     key: &str,
@@ -249,11 +242,6 @@ fn take_string_setting(
         return Err(request_error("provider reasoning setting is unsupported"));
     }
     Ok(Some(value))
-}
-
-fn raw_value(value: &RawJson) -> Result<Value, ModelError> {
-    serde_json::from_slice(value.as_bytes())
-        .map_err(|_| request_error("canonical provider JSON could not be decoded"))
 }
 
 /// Wrap already-canonical (RFC 8785) provider JSON for verbatim pass-through
@@ -276,20 +264,7 @@ fn map_input(
     resolved: &BTreeMap<Arc<str>, ResolvedMedia>,
     model: &OpenRouterModelConfig,
 ) -> Result<(Option<String>, Vec<Value>), ModelError> {
-    let prefix_len = messages
-        .iter()
-        .take_while(|message| {
-            matches!(message.role(), MessageRole::System | MessageRole::Developer)
-        })
-        .count();
-    if messages[prefix_len..]
-        .iter()
-        .any(|message| matches!(message.role(), MessageRole::System | MessageRole::Developer))
-    {
-        return Err(request_error(
-            "system instructions must remain a stable leading prefix",
-        ));
-    }
+    let prefix_len = system_prefix_len(&CODES, messages)?;
     let instructions = concatenate_instructions(&messages[..prefix_len])?;
     let call_ids = provider_call_ids(messages);
     let replay = match continuation_state {
@@ -353,7 +328,7 @@ fn parse_continuation(state: &RawJson) -> Result<ContinuationEnvelope, ModelErro
 fn concatenate_instructions(messages: &[Message]) -> Result<Option<String>, ModelError> {
     let mut parts = Vec::new();
     for message in messages {
-        let text = render_text(message.content())?;
+        let text = render_text(&CODES, message.content())?;
         if !text.is_empty() {
             parts.push(text);
         }
@@ -565,28 +540,12 @@ fn map_tool_results(
                 Ok(json!({
                     "type": "function_call_output",
                     "call_id": call_id,
-                    "output": render_text(result.content())?
+                    "output": render_text(&CODES, result.content())?
                 }))
             }
             _ => Err(request_error("tool messages contain unsupported content")),
         })
         .collect()
-}
-
-fn render_text(content: &[ContentBlock]) -> Result<String, ModelError> {
-    let mut rendered = String::new();
-    for block in content {
-        match block {
-            ContentBlock::Text(value) => rendered.push_str(value.text()),
-            ContentBlock::Json(value) => rendered.push_str(value.value().as_str()),
-            _ => {
-                return Err(request_error(
-                    "message contains unsupported provider content",
-                ));
-            }
-        }
-    }
-    Ok(rendered)
 }
 
 fn tool_catalog_key(tools: &[ToolSpec]) -> String {

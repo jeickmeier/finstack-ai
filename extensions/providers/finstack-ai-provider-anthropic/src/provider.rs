@@ -1,31 +1,26 @@
 //! Native Anthropic Messages provider implementation.
 
 use core::fmt;
-use core::pin::Pin;
-use core::task::{Context, Poll};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::sync::{Arc, PoisonError, RwLock};
 
 use finstack_ai_kernel::{ErrorCategory, Metadata, OutputSpec};
 use finstack_ai_provider_wire::{
-    AnthropicMessagesAssembly, StreamNormError, adapter_error, http_error, stream_norm_error,
+    AnthropicMessagesAssembly, BoundedRequest, NamedSseParser, adapter_error, catalog_from_models,
+    draft_media_error, request_limit_error, unknown_model_capabilities,
 };
 use finstack_ai_runtime::ports::model::{
-    MediaResolveKind, Model, ModelCapabilities, ModelDescriptor, ModelError, ModelEventStream,
-    ModelName, ModelRequest, ModelStreamItem, ModelTokenEstimate, ResolveDraftMediaError,
-    resolve_draft_media,
+    Model, ModelCapabilities, ModelDescriptor, ModelError, ModelEventStream, ModelName,
+    ModelRequest, ModelTokenEstimate, StructuredOutputCapability, resolve_draft_media,
 };
-use futures_util::{Stream, StreamExt};
 use reqwest::redirect::Policy;
-use tokio::sync::mpsc;
 
 use crate::config::estimator_ref;
-use crate::error::{CODES, config_error, request_error, stream_error, stream_limit_error};
+use crate::error::{CODES, VENDOR, config_error, request_error};
 use crate::request::{MessagesRequest, serialize_request};
-use crate::sse::SseParser;
 use crate::{AnthropicConfig, AnthropicModelConfig};
 
-const STREAM_CHANNEL_CAPACITY: usize = 32;
+const PROVIDER: &str = "anthropic";
 
 /// Reusable native Anthropic Messages provider.
 pub struct AnthropicProvider {
@@ -88,7 +83,7 @@ impl AnthropicProvider {
     ) -> Result<Self, ModelError> {
         let endpoint = config.endpoint_url()?;
         let headers = config.header_map()?;
-        let by_name = catalog_from_models(models)?;
+        let by_name = catalog(models)?;
         let client = reqwest::Client::builder()
             .default_headers(headers)
             .redirect(Policy::none())
@@ -111,7 +106,7 @@ impl AnthropicProvider {
         &self,
         models: Vec<AnthropicModelConfig>,
     ) -> Result<(), ModelError> {
-        let by_name = catalog_from_models(models)?;
+        let by_name = catalog(models)?;
         *self.models.write().unwrap_or_else(PoisonError::into_inner) = by_name;
         Ok(())
     }
@@ -147,52 +142,23 @@ impl AnthropicProvider {
     }
 }
 
-fn map_draft_media(failure: ResolveDraftMediaError) -> ModelError {
-    match failure {
-        ResolveDraftMediaError::MissingResolver => {
-            request_error("media content requires a configured media resolver")
-        }
-        ResolveDraftMediaError::Resolve(inner) => match inner.kind {
-            MediaResolveKind::NotFound => request_error(inner.message),
-            MediaResolveKind::Unavailable => adapter_error(
-                CODES.transport_error,
-                ErrorCategory::Model,
-                true,
-                "Anthropic media resolution is unavailable",
-            ),
-            MediaResolveKind::Limit => stream_limit_error(),
-        },
-        ResolveDraftMediaError::Limit => stream_limit_error(),
-    }
-}
-
-fn catalog_from_models(
+fn catalog(
     models: Vec<AnthropicModelConfig>,
 ) -> Result<BTreeMap<ModelName, AnthropicModelConfig>, ModelError> {
-    let mut by_name = BTreeMap::new();
-    for model in models {
-        model.validate()?;
-        if by_name.insert(model.name.clone(), model).is_some() {
-            return Err(config_error("provider contains a duplicate model name"));
-        }
-    }
-    if by_name.is_empty() {
-        return Err(config_error("provider requires at least one model"));
-    }
-    let descriptor = ModelDescriptor {
-        provider: Arc::from("anthropic"),
-        models: by_name.keys().cloned().collect::<Vec<_>>().into(),
-        metadata: Metadata::empty(),
-    };
-    descriptor.validate()?;
-    Ok(by_name)
+    catalog_from_models(
+        &CODES,
+        PROVIDER,
+        models,
+        |model| &model.name,
+        AnthropicModelConfig::validate,
+    )
 }
 
 impl Model for AnthropicProvider {
     fn descriptor(&self) -> ModelDescriptor {
         let models = self.models.read().unwrap_or_else(PoisonError::into_inner);
         ModelDescriptor {
-            provider: Arc::from("anthropic"),
+            provider: Arc::from(PROVIDER),
             models: models.keys().cloned().collect::<Vec<_>>().into(),
             metadata: Metadata::empty(),
         }
@@ -201,33 +167,13 @@ impl Model for AnthropicProvider {
     fn capabilities(&self, model: &ModelName) -> ModelCapabilities {
         let models = self.models.read().unwrap_or_else(PoisonError::into_inner);
         models.get(model).map_or_else(
-            || ModelCapabilities {
-                input: finstack_ai_runtime::ports::model::InputCapabilities {
-                    text: false,
-                    json: false,
-                    images: false,
-                    audio: false,
-                    files: false,
-                },
-                context_profile: finstack_ai_runtime::ports::model::ModelContextProfile {
-                    provider: Arc::from("anthropic"),
-                    model: model.clone(),
-                    hard_input_bytes: 0,
-                    context_window_tokens: 0,
-                    max_output_tokens: 0,
-                    reserved_output_tokens: 0,
-                    provider_overhead_tokens: 0,
-                    estimator: estimator_ref(),
-                },
-                native_tool_calls: false,
-                parallel_tool_calls: false,
-                structured_output:
-                    finstack_ai_runtime::ports::model::StructuredOutputCapability::Prompted,
-                reasoning: false,
-                prompt_cache: false,
-                resumable_stream: false,
-                idempotent_requests: false,
-                native_capabilities: BTreeSet::new(),
+            || {
+                unknown_model_capabilities(
+                    PROVIDER,
+                    model,
+                    StructuredOutputCapability::Prompted,
+                    estimator_ref(),
+                )
             },
             AnthropicModelConfig::capabilities,
         )
@@ -268,16 +214,21 @@ impl Model for AnthropicProvider {
         let max_stream_bytes = self.config.max_stream_bytes();
         let resolver = self.config.media_resolver();
         Box::pin(async move {
-            let deadline = tokio::time::Instant::now() + timeout;
-            let cancellation = request.call.run.cancellation.clone();
+            let bounds = BoundedRequest::new(
+                CODES,
+                VENDOR,
+                request.call.run.cancellation.clone(),
+                timeout,
+            );
             let model = model?;
-            let resolved = tokio::select! {
-                () = cancellation.cancelled() => return Err(cancelled_error()),
-                () = tokio::time::sleep_until(deadline) => return Err(timeout_error()),
-                resolved = resolve_draft_media(resolver.as_ref(), &request.draft, max_stream_bytes) => {
-                    resolved.map_err(map_draft_media)?
-                }
-            };
+            let resolved = bounds
+                .guard(resolve_draft_media(
+                    resolver.as_ref(),
+                    &request.draft,
+                    max_stream_bytes,
+                ))
+                .await?
+                .map_err(|failure| draft_media_error(&CODES, VENDOR, failure))?;
             let wire = MessagesRequest::try_from_draft(
                 &request.draft,
                 &model,
@@ -286,181 +237,26 @@ impl Model for AnthropicProvider {
             )?;
             let payload = serialize_request(&wire)?;
             if payload.len() > max_stream_bytes {
-                return Err(request_limit_error());
+                return Err(request_limit_error(&CODES, VENDOR));
             }
             let request_id = request.call.request_id.to_string();
-            let send = client
-                .post(endpoint)
-                .header("x-client-request-id", &request_id)
-                .header(reqwest::header::CONTENT_TYPE, "application/json")
-                .timeout(timeout)
-                .body(payload)
-                .send();
-            let response = tokio::select! {
-                () = cancellation.cancelled() => return Err(cancelled_error()),
-                () = tokio::time::sleep_until(deadline) => return Err(timeout_error()),
-                response = send => response.map_err(|source| transport_error(&source))?,
-            };
-            if !response.status().is_success() {
-                return Err(http_error(
-                    &CODES,
-                    "Anthropic",
+            let response = bounds
+                .send(
+                    client
+                        .post(endpoint)
+                        .header("x-client-request-id", &request_id)
+                        .header(reqwest::header::CONTENT_TYPE, "application/json")
+                        .body(payload),
                     "messages endpoint",
-                    response.status().as_u16(),
-                ));
-            }
-            let (sender, receiver) = mpsc::channel(STREAM_CHANNEL_CAPACITY);
+                )
+                .await?;
             let structured = matches!(request.draft.output, OutputSpec::JsonSchema { .. });
-            let task = tokio::spawn(drive_response(
-                response,
-                sender,
-                cancellation,
-                request_id,
-                structured,
-                max_event_bytes,
-                max_stream_bytes,
-                deadline,
-            ));
-            Ok(Box::pin(ReceiverModelStream { receiver, task }) as ModelEventStream)
+            Ok(bounds.spawn(
+                response.bytes_stream(),
+                NamedSseParser::new(max_event_bytes, max_stream_bytes),
+                AnthropicMessagesAssembly::new(request_id, structured),
+            ))
         })
-    }
-}
-
-struct ReceiverModelStream {
-    receiver: mpsc::Receiver<Result<ModelStreamItem, ModelError>>,
-    task: tokio::task::JoinHandle<()>,
-}
-
-impl Stream for ReceiverModelStream {
-    type Item = Result<ModelStreamItem, ModelError>;
-
-    fn poll_next(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.receiver.poll_recv(context)
-    }
-}
-
-impl Drop for ReceiverModelStream {
-    fn drop(&mut self) {
-        self.task.abort();
-    }
-}
-
-#[expect(
-    clippy::too_many_arguments,
-    reason = "stream driver keeps request identity, limits, cancellation, and deadline together"
-)]
-async fn drive_response(
-    response: reqwest::Response,
-    sender: mpsc::Sender<Result<ModelStreamItem, ModelError>>,
-    cancellation: finstack_ai_runtime::ports::model::CancellationSignal,
-    request_id: String,
-    structured: bool,
-    max_event_bytes: usize,
-    max_stream_bytes: usize,
-    deadline: tokio::time::Instant,
-) {
-    let mut body = response.bytes_stream();
-    let mut parser = SseParser::new(max_event_bytes, max_stream_bytes);
-    let mut assembly = AnthropicMessagesAssembly::new(request_id, structured);
-    loop {
-        let chunk = tokio::select! {
-            () = cancellation.cancelled() => {
-                let _ = sender.send(Err(cancelled_error())).await;
-                return;
-            }
-            () = tokio::time::sleep_until(deadline) => {
-                let _ = sender.send(Err(timeout_error())).await;
-                return;
-            }
-            () = sender.closed() => return,
-            chunk = body.next() => chunk,
-        };
-        let Some(chunk) = chunk else {
-            let error = match parser.finish() {
-                Ok(()) => stream_error("Anthropic SSE stream ended before message_stop"),
-                Err(error) => error,
-            };
-            let _ = sender.send(Err(error)).await;
-            return;
-        };
-        let chunk = match chunk {
-            Ok(chunk) => chunk,
-            Err(source) => {
-                let _ = sender.send(Err(transport_error(&source))).await;
-                return;
-            }
-        };
-        let events = match parser.push(&chunk) {
-            Ok(events) => events,
-            Err(error) => {
-                let _ = sender.send(Err(error)).await;
-                return;
-            }
-        };
-        for event in events {
-            match assembly.consume(&event.name, &event.data) {
-                Ok(items) => {
-                    let mut completed = false;
-                    for item in items {
-                        completed |= matches!(item, ModelStreamItem::Completed(_));
-                        if sender.send(Ok(item)).await.is_err() {
-                            return;
-                        }
-                    }
-                    if completed {
-                        return;
-                    }
-                }
-                Err(error) => {
-                    let _ = sender.send(Err(map_norm(&error))).await;
-                    return;
-                }
-            }
-        }
-    }
-}
-
-fn map_norm(error: &StreamNormError) -> ModelError {
-    stream_norm_error(&CODES, "Anthropic", error)
-}
-
-fn cancelled_error() -> ModelError {
-    adapter_error(
-        CODES.cancelled,
-        ErrorCategory::Cancellation,
-        false,
-        "Anthropic request was cancelled",
-    )
-}
-
-fn timeout_error() -> ModelError {
-    adapter_error(
-        CODES.timeout,
-        ErrorCategory::Deadline,
-        true,
-        "Anthropic request timed out",
-    )
-}
-
-fn request_limit_error() -> ModelError {
-    adapter_error(
-        CODES.stream_limit_exceeded,
-        ErrorCategory::Limit,
-        false,
-        "Anthropic request exceeded the configured byte limit",
-    )
-}
-
-fn transport_error(source: &reqwest::Error) -> ModelError {
-    if source.is_timeout() {
-        timeout_error()
-    } else {
-        adapter_error(
-            CODES.transport_error,
-            ErrorCategory::Model,
-            true,
-            "Anthropic transport failed",
-        )
     }
 }
 
@@ -475,7 +271,7 @@ mod tests {
     use finstack_ai_runtime::ports::model::{
         AuthorizationContext, CancellationSignal, MediaResolveError, MediaResolver,
         ModelCallContext, ModelRequest, ModelRequestDraft, ModelRequestLimits, ModelSettings,
-        ResolvedMedia, RunCallContext,
+        ModelStreamItem, ResolvedMedia, RunCallContext,
     };
 
     use super::*;

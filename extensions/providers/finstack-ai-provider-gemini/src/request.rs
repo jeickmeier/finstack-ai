@@ -8,7 +8,9 @@ use finstack_ai_kernel::{
     ContentBlock, MediaRef, Message, MessageRole, OutputSpec, RawJson, SUBMIT_FINAL_OUTPUT_TOOL,
     ToolCallId,
 };
-use finstack_ai_provider_wire::GEMINI_CONTINUATION_PROVIDER;
+use finstack_ai_provider_wire::{
+    GEMINI_CONTINUATION_PROVIDER, parse_settings, raw_value, render_text, system_prefix_len,
+};
 use finstack_ai_runtime::ports::model::{
     ModelError, ModelRequestDraft, ResolvedMedia, ToolSpec, thinking_level_budget,
 };
@@ -16,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::GeminiModelConfig;
-use crate::error::request_error;
+use crate::error::{CODES, request_error};
 
 const CONTINUATION_VERSION: u64 = 1;
 const CANDIDATE_COUNT: u32 = 1;
@@ -125,7 +127,7 @@ impl GenerateContentRequest {
         let (system_instruction, contents) =
             map_messages(&draft.messages, continuation, resolved, model)?;
 
-        let mut settings = parse_settings(&draft.settings.values)?;
+        let mut settings = parse_settings(&CODES, &draft.settings.values)?;
         for reserved in RESERVED_SETTINGS {
             if settings.remove(*reserved).is_some() {
                 return Err(request_error("provider settings contain a reserved field"));
@@ -161,18 +163,6 @@ impl GenerateContentRequest {
     pub(crate) fn serialize(&self) -> Result<Vec<u8>, ModelError> {
         serde_json::to_vec(self).map_err(|_| request_error("provider request could not be encoded"))
     }
-}
-
-fn parse_settings(settings: &RawJson) -> Result<BTreeMap<String, Value>, ModelError> {
-    let Value::Object(values) = raw_value(settings)? else {
-        return Err(request_error("provider settings must be a JSON object"));
-    };
-    Ok(values.into_iter().collect())
-}
-
-fn raw_value(value: &RawJson) -> Result<Value, ModelError> {
-    serde_json::from_slice(value.as_bytes())
-        .map_err(|_| request_error("canonical provider JSON could not be decoded"))
 }
 
 /// `gemini.thinking` > `thinking_level` > model default, with the budget
@@ -274,13 +264,13 @@ fn map_tools(
                     "structured-output schema does not match the committed schema reference",
                 ));
             }
-            response_json_schema = Some(raw_value(&tool.input_schema)?);
+            response_json_schema = Some(raw_value(&CODES, &tool.input_schema)?);
             continue;
         }
         declarations.push(json!({
             "name": tool.model_name.as_ref(),
             "description": tool.description.as_ref(),
-            "parameters": raw_value(&tool.input_schema)?
+            "parameters": raw_value(&CODES, &tool.input_schema)?
         }));
     }
     if matches!(output, OutputSpec::JsonSchema { .. }) && response_json_schema.is_none() {
@@ -297,23 +287,10 @@ fn map_messages(
     resolved: &BTreeMap<Arc<str>, ResolvedMedia>,
     model: &GeminiModelConfig,
 ) -> Result<(Option<WireContent>, Vec<Value>), ModelError> {
-    let prefix_len = messages
-        .iter()
-        .take_while(|message| {
-            matches!(message.role(), MessageRole::System | MessageRole::Developer)
-        })
-        .count();
-    if messages[prefix_len..]
-        .iter()
-        .any(|message| matches!(message.role(), MessageRole::System | MessageRole::Developer))
-    {
-        return Err(request_error(
-            "system instructions must remain a stable leading prefix",
-        ));
-    }
+    let prefix_len = system_prefix_len(&CODES, messages)?;
     let mut instruction_parts = Vec::with_capacity(prefix_len);
     for message in &messages[..prefix_len] {
-        let text = render_text(message.content())?;
+        let text = render_text(&CODES, message.content())?;
         if !text.is_empty() {
             instruction_parts.push(json!({ "text": text }));
         }
@@ -507,7 +484,7 @@ fn map_assistant_parts(content: &[ContentBlock]) -> Result<Vec<Value>, ModelErro
                     function_call.insert("id".to_owned(), json!(id));
                 }
                 function_call.insert("name".to_owned(), json!(call.tool_name()));
-                function_call.insert("args".to_owned(), raw_value(call.arguments())?);
+                function_call.insert("args".to_owned(), raw_value(&CODES, call.arguments())?);
                 parts.push(json!({ "functionCall": Value::Object(function_call) }));
             }
             ContentBlock::Opaque(_) => {}
@@ -535,7 +512,7 @@ fn map_function_responses(
             let identity = identities
                 .get(result.tool_call_id())
                 .ok_or_else(|| request_error("tool result does not match an earlier tool call"))?;
-            let payload = render_text(result.content())?;
+            let payload = render_text(&CODES, result.content())?;
             let response = if result.is_error() {
                 json!({ "error": payload })
             } else {
@@ -550,22 +527,6 @@ fn map_function_responses(
             Ok(json!({ "functionResponse": Value::Object(function_response) }))
         })
         .collect()
-}
-
-fn render_text(content: &[ContentBlock]) -> Result<String, ModelError> {
-    let mut rendered = String::new();
-    for block in content {
-        match block {
-            ContentBlock::Text(value) => rendered.push_str(value.text()),
-            ContentBlock::Json(value) => rendered.push_str(value.value().as_str()),
-            _ => {
-                return Err(request_error(
-                    "message contains unsupported provider content",
-                ));
-            }
-        }
-    }
-    Ok(rendered)
 }
 
 #[cfg(test)]

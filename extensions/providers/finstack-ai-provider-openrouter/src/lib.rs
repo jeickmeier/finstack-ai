@@ -26,7 +26,6 @@ mod config;
 mod error;
 mod provider;
 mod request;
-mod sse;
 
 pub use catalog::model_configs_from_catalog_json;
 pub use config::{OpenRouterConfig, OpenRouterModelConfig, SecretHeader};

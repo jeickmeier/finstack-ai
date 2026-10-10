@@ -7,7 +7,7 @@
 //! response body.
 
 use finstack_ai_kernel::{ErrorCategory, Metadata};
-use finstack_ai_runtime::ports::model::ModelError;
+use finstack_ai_runtime::ports::model::{MediaResolveKind, ModelError, ResolveDraftMediaError};
 
 use crate::{StreamNormError, StreamNormKind};
 
@@ -68,6 +68,107 @@ pub fn adapter_error(
 ) -> ModelError {
     ModelError::try_new(code, category, retryable, message, Metadata::empty())
         .unwrap_or_else(ModelError::from)
+}
+
+/// Build the leaf's `config_invalid` error under [`ErrorCategory::Configuration`].
+#[must_use]
+pub fn config_error(codes: &ProviderErrorCodes, message: impl AsRef<str>) -> ModelError {
+    adapter_error(
+        codes.config_invalid,
+        ErrorCategory::Configuration,
+        false,
+        message,
+    )
+}
+
+/// Build the leaf's `request_invalid` error under [`ErrorCategory::Validation`].
+#[must_use]
+pub fn request_error(codes: &ProviderErrorCodes, message: impl AsRef<str>) -> ModelError {
+    adapter_error(
+        codes.request_invalid,
+        ErrorCategory::Validation,
+        false,
+        message,
+    )
+}
+
+/// Build the final `cancelled` error (`"{vendor} request was cancelled"`).
+#[must_use]
+pub fn cancelled_error(codes: &ProviderErrorCodes, vendor: &'static str) -> ModelError {
+    adapter_error(
+        codes.cancelled,
+        ErrorCategory::Cancellation,
+        false,
+        format!("{vendor} request was cancelled"),
+    )
+}
+
+/// Build the retryable `timeout` error under [`ErrorCategory::Deadline`]
+/// (`"{vendor} request timed out"`).
+#[must_use]
+pub fn timeout_error(codes: &ProviderErrorCodes, vendor: &'static str) -> ModelError {
+    adapter_error(
+        codes.timeout,
+        ErrorCategory::Deadline,
+        true,
+        format!("{vendor} request timed out"),
+    )
+}
+
+/// Build the final limit error for an outgoing payload over the stream cap
+/// (`"{vendor} request exceeded the configured byte limit"`).
+#[must_use]
+pub fn request_limit_error(codes: &ProviderErrorCodes, vendor: &'static str) -> ModelError {
+    adapter_error(
+        codes.stream_limit_exceeded,
+        ErrorCategory::Limit,
+        false,
+        format!("{vendor} request exceeded the configured byte limit"),
+    )
+}
+
+/// Build the final `stream_limit_exceeded` error under [`ErrorCategory::Limit`]
+/// (`"{vendor} response exceeded a configured stream limit"`).
+#[must_use]
+pub fn stream_limit_error(codes: &ProviderErrorCodes, vendor: &'static str) -> ModelError {
+    adapter_error(
+        codes.stream_limit_exceeded,
+        ErrorCategory::Limit,
+        false,
+        format!("{vendor} response exceeded a configured stream limit"),
+    )
+}
+
+/// Map a draft media-resolution failure to the leaf's stable adapter error.
+///
+/// | failure | code | category | retryable |
+/// |---|---|---|---|
+/// | no resolver configured | `request_invalid` | `Validation` | `false` |
+/// | blob not found | `request_invalid` | `Validation` | `false` |
+/// | resolver unavailable | `transport_error` | `Model` | `true` |
+/// | any size limit | `stream_limit_exceeded` | `Limit` | `false` |
+#[must_use]
+pub fn draft_media_error(
+    codes: &ProviderErrorCodes,
+    vendor: &'static str,
+    failure: ResolveDraftMediaError,
+) -> ModelError {
+    match failure {
+        ResolveDraftMediaError::MissingResolver => {
+            request_error(codes, "media content requires a configured media resolver")
+        }
+        ResolveDraftMediaError::Resolve(inner) => match inner.kind {
+            MediaResolveKind::NotFound => request_error(codes, inner.message),
+            MediaResolveKind::Unavailable => adapter_error(
+                codes.transport_error,
+                ErrorCategory::Model,
+                true,
+                format!("{vendor} media resolution is unavailable"),
+            ),
+            MediaResolveKind::Limit => stream_limit_error(codes, vendor),
+        },
+        ResolveDraftMediaError::Limit => stream_limit_error(codes, vendor),
+    }
 }
 
 /// Build a durable HTTP-status failure that keeps only the status as context.
@@ -153,12 +254,7 @@ pub fn stream_norm_error(
     error: &StreamNormError,
 ) -> ModelError {
     match error.kind {
-        StreamNormKind::Limit => adapter_error(
-            codes.stream_limit_exceeded,
-            ErrorCategory::Limit,
-            false,
-            format!("{vendor} response exceeded a configured stream limit"),
-        ),
+        StreamNormKind::Limit => stream_limit_error(codes, vendor),
         StreamNormKind::Stream => adapter_error(
             codes.stream_invalid,
             ErrorCategory::Model,
@@ -235,6 +331,62 @@ mod tests {
         assert_eq!(
             error.metadata().as_raw_json().as_str(),
             r#"{"http_status":402}"#
+        );
+    }
+
+    #[test]
+    fn request_phase_errors_keep_their_categories() {
+        let cancelled = cancelled_error(&CODES, "Test");
+        assert_eq!(cancelled.code().as_str(), "test_cancelled");
+        assert_eq!(cancelled.category(), ErrorCategory::Cancellation);
+        assert!(!cancelled.retryable());
+        assert_eq!(cancelled.message(), "Test request was cancelled");
+
+        let timeout = timeout_error(&CODES, "Test");
+        assert_eq!(timeout.code().as_str(), "test_timeout");
+        assert_eq!(timeout.category(), ErrorCategory::Deadline);
+        assert!(timeout.retryable());
+
+        let limit = request_limit_error(&CODES, "Test");
+        assert_eq!(limit.code().as_str(), "test_stream_limit_exceeded");
+        assert_eq!(limit.category(), ErrorCategory::Limit);
+        assert_eq!(
+            limit.message(),
+            "Test request exceeded the configured byte limit"
+        );
+
+        let config = config_error(&CODES, "bad");
+        assert_eq!(config.code().as_str(), "test_config_invalid");
+        assert_eq!(config.category(), ErrorCategory::Configuration);
+        let request = request_error(&CODES, "bad");
+        assert_eq!(request.code().as_str(), "test_request_invalid");
+        assert_eq!(request.category(), ErrorCategory::Validation);
+    }
+
+    #[test]
+    fn draft_media_failures_map_by_kind() {
+        let missing = draft_media_error(&CODES, "Test", ResolveDraftMediaError::MissingResolver);
+        assert_eq!(missing.code().as_str(), "test_request_invalid");
+        let limit = draft_media_error(&CODES, "Test", ResolveDraftMediaError::Limit);
+        assert_eq!(limit.code().as_str(), "test_stream_limit_exceeded");
+        assert_eq!(limit.category(), ErrorCategory::Limit);
+        assert_eq!(
+            limit.message(),
+            "Test response exceeded a configured stream limit"
+        );
+        let unavailable = draft_media_error(
+            &CODES,
+            "Test",
+            ResolveDraftMediaError::Resolve(finstack_ai_runtime::ports::model::MediaResolveError {
+                kind: MediaResolveKind::Unavailable,
+                message: "down",
+            }),
+        );
+        assert_eq!(unavailable.code().as_str(), "test_transport_error");
+        assert!(unavailable.retryable());
+        assert_eq!(
+            unavailable.message(),
+            "Test media resolution is unavailable"
         );
     }
 

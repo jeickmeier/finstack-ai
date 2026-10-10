@@ -3,6 +3,10 @@
 //! This support crate is an implementation detail of the provider leaves. It
 //! depends on the provider-neutral runtime model contract, while the runtime
 //! remains independent of vendor protocols.
+//!
+//! The default feature set is target-neutral. The `native` feature adds the
+//! Tokio/reqwest streaming driver ([`BoundedRequest`]) the native leaves share;
+//! `vendored-tls` additionally forwards reqwest's vendored TLS build.
 
 #![warn(missing_docs)]
 #![forbid(unsafe_code)]
@@ -26,17 +30,25 @@
 
 mod adapter_error;
 mod anthropic_messages;
+mod catalog;
 mod config_rules;
 mod gemini_generate_content;
+#[cfg(feature = "native")]
+mod native;
 mod ndjson;
 mod ollama_chat;
 mod openai_responses;
+mod request_support;
 mod sse;
+mod stream;
 
 pub use adapter_error::{
-    ProviderErrorCodes, adapter_error, http_error, incomplete_error, stream_norm_error,
+    ProviderErrorCodes, adapter_error, cancelled_error, config_error, draft_media_error,
+    http_error, incomplete_error, request_error, request_limit_error, stream_limit_error,
+    stream_norm_error, timeout_error,
 };
 pub use anthropic_messages::AnthropicMessagesAssembly;
+pub use catalog::{catalog_from_models, unknown_model_capabilities};
 pub use config_rules::{
     BaseUrlError, ContextProfileError, validate_base_url, validate_context_profile,
     validate_request_timeout, validate_stream_limits,
@@ -46,12 +58,18 @@ pub use gemini_generate_content::{
     GEMINI_EXECUTABLE_CODE_MEDIA_TYPE, GEMINI_GROUNDING_MEDIA_TYPE, GEMINI_THOUGHTS_TOKENS_KEY,
     GeminiGenerateContentAssembly,
 };
+#[cfg(feature = "native")]
+pub use native::{BoundedRequest, STREAM_CHANNEL_CAPACITY, transport_error};
 pub use ndjson::{NdjsonError, NdjsonParser};
 pub use ollama_chat::{
     OllamaChatAssembly, OllamaReplayEntry, ollama_content_digest, parse_ollama_continuation,
 };
 pub use openai_responses::OpenAiResponsesAssembly;
-pub use sse::{SseEvent, SseEventParser, SseParseError};
+pub use request_support::{parse_settings, raw_value, render_text, system_prefix_len};
+pub use sse::{
+    DataSseParser, NamedSseEvent, NamedSseParser, SseEvent, SseEventParser, SseParseError,
+};
+pub use stream::{StreamAssembler, StreamProtocol};
 
 /// Kind of a provider wire-normalization failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

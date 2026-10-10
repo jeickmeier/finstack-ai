@@ -43,11 +43,6 @@ pub(crate) fn error(
     adapter_error(code, category, retryable, message)
 }
 
-/// Durable HTTP-status failure carrying only the status as context.
-pub(crate) fn http_error(endpoint: &'static str, status: u16) -> ModelError {
-    finstack_ai_provider_wire::http_error(&CODES, VENDOR, endpoint, status)
-}
-
 pub(crate) fn config_error(message: &'static str) -> ModelError {
     error(CONFIG_INVALID, ErrorCategory::Configuration, false, message)
 }
@@ -58,50 +53,4 @@ pub(crate) fn request_error(message: &'static str) -> ModelError {
 
 pub(crate) fn response_error(message: &'static str) -> ModelError {
     error(RESPONSE_INVALID, ErrorCategory::Model, false, message)
-}
-
-pub(crate) fn stream_error(message: &'static str) -> ModelError {
-    error(STREAM_INVALID, ErrorCategory::Model, false, message)
-}
-
-pub(crate) fn stream_limit_error() -> ModelError {
-    error(
-        STREAM_LIMIT_EXCEEDED,
-        ErrorCategory::Limit,
-        false,
-        "OpenRouter response exceeded a configured stream limit",
-    )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn http_error_carries_status_metadata() {
-        let error = http_error("responses endpoint", 402);
-        assert_eq!(error.code().as_str(), HTTP_ERROR);
-        assert_eq!(error.category(), ErrorCategory::Model);
-        assert!(!error.retryable());
-        assert_eq!(
-            error.message(),
-            "OpenRouter responses endpoint returned HTTP 402"
-        );
-        assert!(!error.message().contains("secret-canary"));
-        assert_eq!(
-            error.metadata().as_raw_json().as_str(),
-            r#"{"http_status":402}"#
-        );
-
-        let error = http_error("models endpoint", 503);
-        assert!(error.retryable());
-        assert_eq!(
-            error.message(),
-            "OpenRouter models endpoint returned HTTP 503"
-        );
-        assert_eq!(
-            error.metadata().as_raw_json().as_str(),
-            r#"{"http_status":503}"#
-        );
-    }
 }

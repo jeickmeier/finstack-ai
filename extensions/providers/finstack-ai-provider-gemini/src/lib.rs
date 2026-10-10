@@ -25,7 +25,6 @@ mod config;
 mod error;
 mod provider;
 mod request;
-mod sse;
 
 pub use config::{GeminiConfig, GeminiEndpoint, GeminiModelConfig, SecretHeader};
 pub use finstack_ai_runtime::ports::model::{

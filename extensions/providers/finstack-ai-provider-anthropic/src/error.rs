@@ -19,6 +19,9 @@ pub(crate) const STREAM_INVALID: &str = "anthropic_stream_invalid";
 pub(crate) const STREAM_LIMIT_EXCEEDED: &str = "anthropic_stream_limit_exceeded";
 pub(crate) const RESPONSE_INVALID: &str = "anthropic_response_invalid";
 
+/// Vendor label rendered into shared error messages.
+pub(crate) const VENDOR: &str = "Anthropic";
+
 /// The leaf's code bundle for the shared provider-wire error helpers.
 pub(crate) const CODES: ProviderErrorCodes = ProviderErrorCodes {
     config_invalid: CONFIG_INVALID,
@@ -47,18 +50,5 @@ pub(crate) fn request_error(message: &'static str) -> ModelError {
         ErrorCategory::Validation,
         false,
         message,
-    )
-}
-
-pub(crate) fn stream_error(message: &'static str) -> ModelError {
-    adapter_error(CODES.stream_invalid, ErrorCategory::Model, false, message)
-}
-
-pub(crate) fn stream_limit_error() -> ModelError {
-    adapter_error(
-        CODES.stream_limit_exceeded,
-        ErrorCategory::Limit,
-        false,
-        "Anthropic response exceeded a configured stream limit",
     )
 }
