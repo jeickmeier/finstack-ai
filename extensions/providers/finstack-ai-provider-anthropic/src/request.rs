@@ -5,17 +5,23 @@ use std::sync::Arc;
 
 use base64::Engine;
 use finstack_ai_kernel::{
-    ContentBlock, MediaRef, Message, MessageRole, OutputSpec, SUBMIT_FINAL_OUTPUT_TOOL,
+    ContentBlock, MediaRef, Message, MessageRole, OutputSpec, RawJson, SUBMIT_FINAL_OUTPUT_TOOL,
 };
 use finstack_ai_runtime::ports::model::{
     ModelError, ModelRequestDraft, ResolvedMedia, thinking_level_budget,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::AnthropicModelConfig;
 use crate::error::request_error;
 
+/// Messages-API keys the request owns; settings may not shadow them.
+///
+/// `thinking` is deliberately absent: `take_thinking` consumes it from the
+/// settings before they are flattened, so it is a passthrough rather than a
+/// shadowing key. `metadata` is reserved even though the request never sets
+/// it today, so a later owner can decide how it is populated.
 const RESERVED_SETTINGS: &[&str] = &[
     "model",
     "messages",
@@ -23,11 +29,32 @@ const RESERVED_SETTINGS: &[&str] = &[
     "stream",
     "system",
     "max_tokens",
-    "max_completion_tokens",
-    "response_format",
-    "parallel_tool_calls",
-    "stream_options",
+    "metadata",
 ];
+
+/// Provider tag of the continuation envelope produced by the wire assembler.
+const CONTINUATION_PROVIDER: &str = "anthropic.messages";
+const CONTINUATION_VERSION: u64 = 1;
+
+/// Opaque continuation state emitted by `AnthropicMessagesAssembly`.
+#[derive(Deserialize)]
+struct ContinuationEnvelope {
+    provider: String,
+    version: u64,
+    replay_blocks: Vec<ReplayBlock>,
+}
+
+/// One thinking-family block replayed verbatim at the head of the last
+/// assistant turn. Only the two shapes the API accepts back are decodable,
+/// so a tampered envelope fails closed as a request error.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "type")]
+enum ReplayBlock {
+    #[serde(rename = "thinking")]
+    Thinking { thinking: String, signature: String },
+    #[serde(rename = "redacted_thinking")]
+    RedactedThinking { data: String },
+}
 #[derive(Debug, Serialize)]
 pub(crate) struct MessagesRequest {
     model: String,
@@ -85,6 +112,25 @@ enum WireContent {
     Image { source: Value },
     #[serde(rename = "document")]
     Document { source: Value },
+    #[serde(rename = "thinking")]
+    Thinking { thinking: String, signature: String },
+    #[serde(rename = "redacted_thinking")]
+    RedactedThinking { data: String },
+}
+
+impl From<ReplayBlock> for WireContent {
+    fn from(block: ReplayBlock) -> Self {
+        match block {
+            ReplayBlock::Thinking {
+                thinking,
+                signature,
+            } => Self::Thinking {
+                thinking,
+                signature,
+            },
+            ReplayBlock::RedactedThinking { data } => Self::RedactedThinking { data },
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -95,16 +141,23 @@ struct WireTool {
 }
 
 impl MessagesRequest {
+    /// Translate a committed draft into one Messages request.
+    ///
+    /// `continuation` is the opaque envelope from the previous completion.
+    /// Its provider and version are always checked; its thinking blocks are
+    /// replayed at the head of the last assistant turn only when the outgoing
+    /// request has thinking enabled, because the API rejects thinking blocks
+    /// on a request without `thinking`.
     pub(crate) fn try_from_draft(
         draft: &ModelRequestDraft,
         model: &AnthropicModelConfig,
+        continuation: Option<&RawJson>,
         resolved: &BTreeMap<Arc<str>, ResolvedMedia>,
     ) -> Result<Self, ModelError> {
         draft.validate()?;
         if draft.model != model.name {
             return Err(request_error("requested model is not configured"));
         }
-        let (system, messages) = map_messages(&draft.messages, resolved, model)?;
         let mut settings = parse_settings(&draft.settings.values)?;
         for reserved in RESERVED_SETTINGS {
             if settings.remove(*reserved).is_some() {
@@ -113,6 +166,16 @@ impl MessagesRequest {
         }
         let max_tokens = draft.limits.max_output_tokens.min(model.max_output_tokens);
         let thinking = take_thinking(&mut settings, model, max_tokens)?;
+        let replay = match continuation {
+            Some(state) => parse_continuation(state)?.replay_blocks,
+            None => Vec::new(),
+        };
+        let replay = if thinking_enabled(thinking.as_ref()) {
+            replay
+        } else {
+            Vec::new()
+        };
+        let (system, messages) = map_messages(&draft.messages, &replay, resolved, model)?;
         let mut tools = Vec::with_capacity(draft.tools.len());
         for tool in draft.tools.iter() {
             if let OutputSpec::JsonSchema { schema } = &draft.output
@@ -188,6 +251,20 @@ fn take_thinking(
     Ok(None)
 }
 
+/// Whether the outgoing `thinking` parameter turns thinking on.
+fn thinking_enabled(thinking: Option<&Value>) -> bool {
+    thinking.is_some_and(|value| value.get("type").and_then(Value::as_str) != Some("disabled"))
+}
+
+fn parse_continuation(state: &RawJson) -> Result<ContinuationEnvelope, ModelError> {
+    let envelope: ContinuationEnvelope = serde_json::from_slice(state.as_bytes())
+        .map_err(|_| request_error("continuation state is invalid"))?;
+    if envelope.provider != CONTINUATION_PROVIDER || envelope.version != CONTINUATION_VERSION {
+        return Err(request_error("continuation state is invalid"));
+    }
+    Ok(envelope)
+}
+
 fn parse_settings(
     settings: &finstack_ai_kernel::RawJson,
 ) -> Result<BTreeMap<String, Value>, ModelError> {
@@ -205,6 +282,7 @@ fn raw_value(value: &finstack_ai_kernel::RawJson) -> Result<Value, ModelError> {
 
 fn map_messages(
     messages: &[Message],
+    replay: &[ReplayBlock],
     resolved: &BTreeMap<Arc<str>, ResolvedMedia>,
     model: &AnthropicModelConfig,
 ) -> Result<(Vec<SystemBlock>, Vec<WireMessage>), ModelError> {
@@ -235,15 +313,26 @@ fn map_messages(
     {
         last.cache_control = Some(CacheControl { kind: "ephemeral" });
     }
+    // Replayed thinking belongs to the latest assistant turn only; with no
+    // assistant turn there is nothing to continue and the replay is dropped.
+    let last_assistant = messages
+        .iter()
+        .rposition(|message| message.role() == MessageRole::Assistant);
     let mut mapped = Vec::new();
-    for message in &messages[prefix_len..] {
-        mapped.extend(map_conversation_message(message, resolved, model)?);
+    for (index, message) in messages.iter().enumerate().skip(prefix_len) {
+        let replay = if Some(index) == last_assistant {
+            replay
+        } else {
+            &[]
+        };
+        mapped.extend(map_conversation_message(message, replay, resolved, model)?);
     }
     Ok((system, mapped))
 }
 
 fn map_conversation_message(
     message: &Message,
+    replay: &[ReplayBlock],
     resolved: &BTreeMap<Arc<str>, ResolvedMedia>,
     model: &AnthropicModelConfig,
 ) -> Result<Vec<WireMessage>, ModelError> {
@@ -254,7 +343,7 @@ fn map_conversation_message(
         }]),
         MessageRole::Assistant => Ok(vec![WireMessage {
             role: "assistant",
-            content: map_assistant_content(message.content())?,
+            content: map_assistant_content(message.content(), replay)?,
         }]),
         MessageRole::Tool => Ok(vec![WireMessage {
             role: "user",
@@ -330,8 +419,14 @@ fn media_source(
     }
 }
 
-fn map_assistant_content(content: &[ContentBlock]) -> Result<Vec<WireContent>, ModelError> {
-    let mut blocks = Vec::new();
+/// Map one assistant turn, prepending any replayed thinking blocks so they
+/// precede the turn's text and `tool_use` blocks as the API requires.
+fn map_assistant_content(
+    content: &[ContentBlock],
+    replay: &[ReplayBlock],
+) -> Result<Vec<WireContent>, ModelError> {
+    let mut blocks = Vec::with_capacity(replay.len() + content.len());
+    blocks.extend(replay.iter().cloned().map(WireContent::from));
     for block in content {
         match block {
             ContentBlock::Text(value) => blocks.push(WireContent::Text {
@@ -403,14 +498,14 @@ mod tests {
     #[test]
     fn rejects_reserved_settings_and_keeps_system_prefix_stable() {
         let mut draft = draft(br#"{"model":"shadow"}"#);
-        let error = MessagesRequest::try_from_draft(&draft, &model(), &BTreeMap::new())
+        let error = MessagesRequest::try_from_draft(&draft, &model(), None, &BTreeMap::new())
             .expect_err("reserved setting must fail");
         assert_eq!(error.code(), crate::error::REQUEST_INVALID);
 
         draft.settings.values =
             finstack_ai_kernel::RawJson::parse(br#"{"temperature":0}"#).expect("settings");
-        let request =
-            MessagesRequest::try_from_draft(&draft, &model(), &BTreeMap::new()).expect("request");
+        let request = MessagesRequest::try_from_draft(&draft, &model(), None, &BTreeMap::new())
+            .expect("request");
         let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
         assert_eq!(value["messages"][0]["role"], "user");
         assert_eq!(value["messages"][0]["content"][0]["text"], "hello");
@@ -420,17 +515,42 @@ mod tests {
     }
 
     #[test]
+    fn bare_thinking_setting_passes_through_and_api_keys_stay_reserved() {
+        let passthrough = draft(br#"{"thinking":{"type":"enabled","budget_tokens":256}}"#);
+        let request =
+            MessagesRequest::try_from_draft(&passthrough, &model(), None, &BTreeMap::new())
+                .expect("bare thinking is a passthrough");
+        let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
+        assert_eq!(value["thinking"]["type"], "enabled");
+        assert_eq!(value["thinking"]["budget_tokens"], 256);
+
+        for reserved in RESERVED_SETTINGS {
+            let shadowing = draft(format!(r#"{{"{reserved}":1}}"#).as_bytes());
+            let error =
+                MessagesRequest::try_from_draft(&shadowing, &model(), None, &BTreeMap::new())
+                    .expect_err("reserved key must fail");
+            assert_eq!(error.code(), crate::error::REQUEST_INVALID, "{reserved}");
+        }
+        // Keys that belong to other vendors' APIs are no longer reserved.
+        let foreign = draft(br#"{"stream_options":{"include_usage":true}}"#);
+        assert!(
+            MessagesRequest::try_from_draft(&foreign, &model(), None, &BTreeMap::new()).is_ok()
+        );
+    }
+
+    #[test]
     fn thinking_budget_must_fit_the_effective_request_limit() {
         let mut configured = draft(b"{}");
         configured.limits.max_output_tokens = 512;
         let thinking_model = model().with_thinking(true, 1_024).expect("thinking model");
-        let error = MessagesRequest::try_from_draft(&configured, &thinking_model, &BTreeMap::new())
-            .expect_err("configured thinking must fit the request limit");
+        let error =
+            MessagesRequest::try_from_draft(&configured, &thinking_model, None, &BTreeMap::new())
+                .expect_err("configured thinking must fit the request limit");
         assert_eq!(error.code(), crate::error::REQUEST_INVALID);
 
         let mut requested = draft(br#"{"thinking_level":"low"}"#);
         requested.limits.max_output_tokens = 512;
-        let error = MessagesRequest::try_from_draft(&requested, &model(), &BTreeMap::new())
+        let error = MessagesRequest::try_from_draft(&requested, &model(), None, &BTreeMap::new())
             .expect_err("requested thinking must fit the request limit");
         assert_eq!(error.code(), crate::error::REQUEST_INVALID);
     }
@@ -455,8 +575,8 @@ mod tests {
             },
         };
         let model = model().with_cache_breakpoints(true);
-        let request =
-            MessagesRequest::try_from_draft(&draft, &model, &BTreeMap::new()).expect("request");
+        let request = MessagesRequest::try_from_draft(&draft, &model, None, &BTreeMap::new())
+            .expect("request");
         let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
         assert_eq!(value["system"][0]["text"], "Stable prefix.");
         assert!(value["system"][0].get("cache_control").is_none());
@@ -486,12 +606,14 @@ mod tests {
         let cached = MessagesRequest::try_from_draft(
             &draft,
             &model().with_cache_breakpoints(true),
+            None,
             &BTreeMap::new(),
         )
         .expect("cached");
         let busted = MessagesRequest::try_from_draft(
             &draft,
             &model().with_cache_breakpoints(false),
+            None,
             &BTreeMap::new(),
         )
         .expect("busted");
@@ -509,9 +631,13 @@ mod tests {
             Arc::from("blob-1"),
             ResolvedMedia::Url(Arc::from("https://cdn.example/a.png")),
         );
-        let request =
-            MessagesRequest::try_from_draft(&draft, &model().with_input_images(true), &resolved)
-                .expect("request");
+        let request = MessagesRequest::try_from_draft(
+            &draft,
+            &model().with_input_images(true),
+            None,
+            &resolved,
+        )
+        .expect("request");
         let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
         let content = value["messages"][0]["content"].as_array().unwrap();
         assert_eq!(
@@ -536,9 +662,13 @@ mod tests {
                 bytes: Arc::from(&b"pngdata"[..]),
             },
         );
-        let request =
-            MessagesRequest::try_from_draft(&draft, &model().with_input_images(true), &resolved)
-                .expect("request");
+        let request = MessagesRequest::try_from_draft(
+            &draft,
+            &model().with_input_images(true),
+            None,
+            &resolved,
+        )
+        .expect("request");
         let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
         let block = &value["messages"][0]["content"][0];
         assert_eq!(block["type"], "image");
@@ -558,9 +688,13 @@ mod tests {
             Arc::from("blob-1"),
             ResolvedMedia::Url(Arc::from("https://cdn.example/a.pdf")),
         );
-        let request =
-            MessagesRequest::try_from_draft(&draft, &model().with_input_files(true), &resolved)
-                .expect("request");
+        let request = MessagesRequest::try_from_draft(
+            &draft,
+            &model().with_input_files(true),
+            None,
+            &resolved,
+        )
+        .expect("request");
         let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
         let block = &value["messages"][0]["content"][0];
         assert_eq!(block["type"], "document");
@@ -575,9 +709,13 @@ mod tests {
             Arc::from("blob-1"),
             ResolvedMedia::Url(Arc::from("https://cdn.example/a.png")),
         );
-        let request =
-            MessagesRequest::try_from_draft(&draft, &model().with_input_images(true), &resolved)
-                .expect("request");
+        let request = MessagesRequest::try_from_draft(
+            &draft,
+            &model().with_input_images(true),
+            None,
+            &resolved,
+        )
+        .expect("request");
         let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
         let content = value["messages"][0]["content"].as_array().unwrap();
         assert_eq!(content.len(), 2);
@@ -599,9 +737,13 @@ mod tests {
             Arc::from("blob-1"),
             ResolvedMedia::Url(Arc::from("https://cdn.example/a.png")),
         );
-        let request =
-            MessagesRequest::try_from_draft(&draft, &model().with_input_images(true), &resolved)
-                .expect("request");
+        let request = MessagesRequest::try_from_draft(
+            &draft,
+            &model().with_input_images(true),
+            None,
+            &resolved,
+        )
+        .expect("request");
         let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
         let content = value["messages"][0]["content"].as_array().unwrap();
         assert_eq!(content.len(), 3, "text must not be coalesced across media");
@@ -620,7 +762,7 @@ mod tests {
             Arc::from("blob-1"),
             ResolvedMedia::Url(Arc::from("https://cdn.example/a.png")),
         );
-        let error = MessagesRequest::try_from_draft(&draft, &model(), &resolved)
+        let error = MessagesRequest::try_from_draft(&draft, &model(), None, &resolved)
             .expect_err("image input must be rejected when the flag is off");
         assert_eq!(error.code(), crate::error::REQUEST_INVALID);
     }
@@ -633,7 +775,7 @@ mod tests {
             Arc::from("blob-1"),
             ResolvedMedia::Url(Arc::from("https://cdn.example/a.pdf")),
         );
-        let error = MessagesRequest::try_from_draft(&draft, &model(), &resolved)
+        let error = MessagesRequest::try_from_draft(&draft, &model(), None, &resolved)
             .expect_err("file input must be rejected when the flag is off");
         assert_eq!(error.code(), crate::error::REQUEST_INVALID);
     }
@@ -644,6 +786,7 @@ mod tests {
         let error = MessagesRequest::try_from_draft(
             &draft,
             &model().with_input_images(true),
+            None,
             &BTreeMap::new(),
         )
         .expect_err("unresolved media must fail");
@@ -658,9 +801,174 @@ mod tests {
             Arc::from("blob-1"),
             ResolvedMedia::Url(Arc::from("https://cdn.example/a.mp3")),
         );
-        let error = MessagesRequest::try_from_draft(&draft, &model(), &resolved)
+        let error = MessagesRequest::try_from_draft(&draft, &model(), None, &resolved)
             .expect_err("audio input must stay rejected");
         assert_eq!(error.code(), crate::error::REQUEST_INVALID);
+    }
+
+    #[test]
+    fn continuation_replays_thinking_blocks_at_head_of_last_assistant_turn() {
+        let draft = tool_loop_draft();
+        let request = MessagesRequest::try_from_draft(
+            &draft,
+            &model().with_thinking(true, 512).expect("thinking"),
+            Some(&continuation()),
+            &BTreeMap::new(),
+        )
+        .expect("request");
+        let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
+        let messages = value["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 4);
+        // The earlier assistant turn is untouched.
+        assert_eq!(messages[1]["role"], "assistant");
+        assert_eq!(messages[1]["content"][0]["type"], "text");
+        assert_eq!(messages[1]["content"].as_array().unwrap().len(), 1);
+        // The last assistant turn leads with the replayed blocks, in order.
+        let last = messages[3]["content"].as_array().unwrap();
+        assert_eq!(messages[3]["role"], "assistant");
+        assert_eq!(last.len(), 4);
+        assert_eq!(last[0]["type"], "thinking");
+        assert_eq!(last[0]["thinking"], "consider");
+        assert_eq!(last[0]["signature"], "sig-1");
+        assert_eq!(last[1]["type"], "redacted_thinking");
+        assert_eq!(last[1]["data"], "opaque");
+        assert_eq!(last[2]["type"], "text");
+        assert_eq!(last[3]["type"], "tool_use");
+        assert_eq!(value["thinking"]["type"], "enabled");
+    }
+
+    #[test]
+    fn continuation_ignored_when_thinking_disabled() {
+        let draft = tool_loop_draft();
+        let request = MessagesRequest::try_from_draft(
+            &draft,
+            &model(),
+            Some(&continuation()),
+            &BTreeMap::new(),
+        )
+        .expect("request");
+        let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
+        assert!(value.get("thinking").is_none());
+        let rendered = value.to_string();
+        assert!(!rendered.contains("redacted_thinking"));
+        assert!(!rendered.contains("sig-1"));
+        assert!(!rendered.contains("\"type\":\"thinking\""));
+        let last = value["messages"][3]["content"].as_array().unwrap();
+        assert_eq!(last.len(), 2);
+        assert_eq!(last[0]["type"], "text");
+        assert_eq!(last[1]["type"], "tool_use");
+
+        // An explicit `thinking: {"type":"disabled"}` override also ignores it.
+        let mut disabled = tool_loop_draft();
+        disabled.settings.values =
+            RawJson::parse(br#"{"anthropic.thinking":{"type":"disabled"}}"#).expect("settings");
+        let request = MessagesRequest::try_from_draft(
+            &disabled,
+            &model().with_thinking(true, 512).expect("thinking"),
+            Some(&continuation()),
+            &BTreeMap::new(),
+        )
+        .expect("request");
+        let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
+        assert!(!value.to_string().contains("sig-1"));
+    }
+
+    #[test]
+    fn continuation_provider_mismatch_is_rejected() {
+        let draft = tool_loop_draft();
+        for state in [
+            br#"{"provider":"openai.responses","version":1,"replay_blocks":[]}"#.as_slice(),
+            br#"{"provider":"anthropic.messages","version":2,"replay_blocks":[]}"#.as_slice(),
+            br#"{"provider":"anthropic.messages","version":1,"replay_blocks":[{"type":"text","text":"smuggled"}]}"#.as_slice(),
+            br#"{"provider":"anthropic.messages","version":1,"replay_blocks":[{"type":"thinking","thinking":"unsigned"}]}"#.as_slice(),
+            br"[]".as_slice(),
+        ] {
+            let state = RawJson::parse(state).expect("state");
+            // Rejected whether or not thinking is enabled: a foreign envelope
+            // is a routing fault, not a thinking-mode question.
+            for thinking in [true, false] {
+                let model = if thinking {
+                    model().with_thinking(true, 512).expect("thinking")
+                } else {
+                    model()
+                };
+                let error = MessagesRequest::try_from_draft(
+                    &draft,
+                    &model,
+                    Some(&state),
+                    &BTreeMap::new(),
+                )
+                .expect_err("foreign continuation must fail");
+                assert_eq!(error.code(), crate::error::REQUEST_INVALID);
+                assert_eq!(error.message(), "continuation state is invalid");
+            }
+        }
+    }
+
+    #[test]
+    fn continuation_without_an_assistant_turn_is_dropped() {
+        let draft = draft(b"{}");
+        let request = MessagesRequest::try_from_draft(
+            &draft,
+            &model().with_thinking(true, 512).expect("thinking"),
+            Some(&continuation()),
+            &BTreeMap::new(),
+        )
+        .expect("request");
+        let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
+        assert_eq!(value["messages"].as_array().unwrap().len(), 1);
+        assert!(!value.to_string().contains("sig-1"));
+    }
+
+    fn continuation() -> RawJson {
+        RawJson::parse(
+            br#"{"provider":"anthropic.messages","version":1,"replay_blocks":[{"type":"thinking","thinking":"consider","signature":"sig-1"},{"type":"redacted_thinking","data":"opaque"}]}"#,
+        )
+        .expect("continuation")
+    }
+
+    /// `user -> assistant(text) -> user -> assistant(text + tool_use)`: the
+    /// replay must land on the last assistant turn only.
+    fn tool_loop_draft() -> ModelRequestDraft {
+        let call = finstack_ai_kernel::ToolCallBlock::try_new(
+            finstack_ai_kernel::ToolCallId::parse("01234567-89ab-7cde-89ab-0123456789cc")
+                .expect("call id"),
+            "lookup",
+            RawJson::parse(br#"{"x":1}"#).expect("arguments"),
+        )
+        .expect("tool call");
+        let last_assistant = Message::try_new(
+            MessageId::parse("01234567-89ab-7cde-89ab-0123456789ad").expect("message id"),
+            MessageRole::Assistant,
+            vec![
+                ContentBlock::Text(TextBlock::try_new("looking").expect("text")),
+                ContentBlock::ToolCall(call),
+            ],
+            Timestamp::from_unix_ms(0).expect("timestamp"),
+            None,
+            ProviderIds::empty(),
+            Metadata::empty(),
+        )
+        .expect("message");
+        ModelRequestDraft {
+            model: ModelName::try_new("fixture-model").expect("model"),
+            messages: Arc::from([
+                text_message(MessageRole::User, "hello"),
+                text_message(MessageRole::Assistant, "hi"),
+                text_message(MessageRole::User, "look it up"),
+                last_assistant,
+            ]),
+            tools: Arc::from([]),
+            output: OutputSpec::PlainText,
+            settings: ModelSettings {
+                values: RawJson::parse(b"{}").expect("settings"),
+            },
+            limits: ModelRequestLimits {
+                max_input_bytes: 1_000_000,
+                max_input_tokens: 100_000,
+                max_output_tokens: 1_024,
+            },
+        }
     }
 
     fn media_ref() -> finstack_ai_kernel::MediaRef {

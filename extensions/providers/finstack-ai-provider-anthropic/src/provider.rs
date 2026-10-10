@@ -7,7 +7,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, PoisonError, RwLock};
 
 use finstack_ai_kernel::{ErrorCategory, Metadata, OutputSpec};
-use finstack_ai_provider_wire::{AnthropicMessagesAssembly, StreamNormError, StreamNormKind};
+use finstack_ai_provider_wire::{
+    AnthropicMessagesAssembly, StreamNormError, adapter_error, http_error, stream_norm_error,
+};
 use finstack_ai_runtime::ports::model::{
     MediaResolveKind, Model, ModelCapabilities, ModelDescriptor, ModelError, ModelEventStream,
     ModelName, ModelRequest, ModelStreamItem, ModelTokenEstimate, ResolveDraftMediaError,
@@ -18,10 +20,7 @@ use reqwest::redirect::Policy;
 use tokio::sync::mpsc;
 
 use crate::config::estimator_ref;
-use crate::error::{
-    CANCELLED, HTTP_ERROR, RESPONSE_INVALID, STREAM_LIMIT_EXCEEDED, TIMEOUT, TRANSPORT_ERROR,
-    config_error, error, request_error, response_error, stream_error, stream_limit_error,
-};
+use crate::error::{CODES, config_error, request_error, stream_error, stream_limit_error};
 use crate::request::{MessagesRequest, serialize_request};
 use crate::sse::SseParser;
 use crate::{AnthropicConfig, AnthropicModelConfig};
@@ -155,8 +154,8 @@ fn map_draft_media(failure: ResolveDraftMediaError) -> ModelError {
         }
         ResolveDraftMediaError::Resolve(inner) => match inner.kind {
             MediaResolveKind::NotFound => request_error(inner.message),
-            MediaResolveKind::Unavailable => error(
-                TRANSPORT_ERROR,
+            MediaResolveKind::Unavailable => adapter_error(
+                CODES.transport_error,
                 ErrorCategory::Model,
                 true,
                 "Anthropic media resolution is unavailable",
@@ -242,8 +241,8 @@ impl Model for AnthropicProvider {
         self.model_config(model)?;
         Ok(ModelTokenEstimate {
             input_tokens: u64::try_from(canonical_request.len()).map_err(|_| {
-                error(
-                    RESPONSE_INVALID,
+                adapter_error(
+                    CODES.response_invalid,
                     ErrorCategory::Limit,
                     false,
                     "Anthropic request length overflowed the estimator",
@@ -279,7 +278,12 @@ impl Model for AnthropicProvider {
                     resolved.map_err(map_draft_media)?
                 }
             };
-            let wire = MessagesRequest::try_from_draft(&request.draft, &model, &resolved)?;
+            let wire = MessagesRequest::try_from_draft(
+                &request.draft,
+                &model,
+                request.continuation_state.as_ref(),
+                &resolved,
+            )?;
             let payload = serialize_request(&wire)?;
             if payload.len() > max_stream_bytes {
                 return Err(request_limit_error());
@@ -298,12 +302,11 @@ impl Model for AnthropicProvider {
                 response = send => response.map_err(|source| transport_error(&source))?,
             };
             if !response.status().is_success() {
-                let retryable = matches!(response.status().as_u16(), 408 | 409 | 429 | 500..=599);
-                return Err(error(
-                    HTTP_ERROR,
-                    ErrorCategory::Model,
-                    retryable,
-                    "Anthropic endpoint returned an unsuccessful status",
+                return Err(http_error(
+                    &CODES,
+                    "Anthropic",
+                    "messages endpoint",
+                    response.status().as_u16(),
                 ));
             }
             let (sender, receiver) = mpsc::channel(STREAM_CHANNEL_CAPACITY);
@@ -418,16 +421,12 @@ async fn drive_response(
 }
 
 fn map_norm(error: &StreamNormError) -> ModelError {
-    match error.kind {
-        StreamNormKind::Limit => stream_limit_error(),
-        StreamNormKind::Stream => stream_error(error.message),
-        StreamNormKind::Response | StreamNormKind::Incomplete => response_error(error.message),
-    }
+    stream_norm_error(&CODES, "Anthropic", error)
 }
 
 fn cancelled_error() -> ModelError {
-    error(
-        CANCELLED,
+    adapter_error(
+        CODES.cancelled,
         ErrorCategory::Cancellation,
         false,
         "Anthropic request was cancelled",
@@ -435,8 +434,8 @@ fn cancelled_error() -> ModelError {
 }
 
 fn timeout_error() -> ModelError {
-    error(
-        TIMEOUT,
+    adapter_error(
+        CODES.timeout,
         ErrorCategory::Deadline,
         true,
         "Anthropic request timed out",
@@ -444,8 +443,8 @@ fn timeout_error() -> ModelError {
 }
 
 fn request_limit_error() -> ModelError {
-    error(
-        STREAM_LIMIT_EXCEEDED,
+    adapter_error(
+        CODES.stream_limit_exceeded,
         ErrorCategory::Limit,
         false,
         "Anthropic request exceeded the configured byte limit",
@@ -456,8 +455,8 @@ fn transport_error(source: &reqwest::Error) -> ModelError {
     if source.is_timeout() {
         timeout_error()
     } else {
-        error(
-            TRANSPORT_ERROR,
+        adapter_error(
+            CODES.transport_error,
             ErrorCategory::Model,
             true,
             "Anthropic transport failed",
@@ -568,14 +567,22 @@ mod tests {
             panic!("expected completed");
         };
         assert_eq!(response.completion_id.as_ref(), "msg-1");
+        assert_eq!(response.assistant_content.len(), 1);
         assert!(matches!(
             response.assistant_content[0],
-            ContentBlock::Opaque(_)
-        ));
-        assert!(matches!(
-            response.assistant_content[1],
             ContentBlock::Text(_)
         ));
+        let continuation = response
+            .continuation_state
+            .as_ref()
+            .expect("signed thinking yields a continuation envelope");
+        assert!(
+            continuation
+                .as_str()
+                .contains(r#""provider":"anthropic.messages""#)
+        );
+        assert!(continuation.as_str().contains(r#""signature":"sig-1""#));
+        assert!(continuation.as_str().contains(r#""thinking":"consider""#));
         assert_eq!(response.tool_calls[0].name.as_ref(), "lookup");
         assert_eq!(response.tool_calls[0].arguments.as_str(), r#"{"x":1}"#);
         assert_eq!(response.usage.input_tokens(), Some(4));
