@@ -14,6 +14,7 @@ finstack-ai-kernel = { workspace = true }
 finstack-ai-runtime = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+url = { workspace = true }
 
 [lints]
 workspace = true

@@ -24,21 +24,32 @@
 )]
 #![doc(test(attr(allow(clippy::expect_used))))]
 
+mod adapter_error;
 mod anthropic_messages;
+mod config_rules;
 mod gemini_generate_content;
 mod ndjson;
 mod ollama_chat;
 mod openai_responses;
 mod sse;
 
+pub use adapter_error::{
+    ProviderErrorCodes, adapter_error, http_error, incomplete_error, stream_norm_error,
+};
 pub use anthropic_messages::AnthropicMessagesAssembly;
+pub use config_rules::{
+    BaseUrlError, ContextProfileError, validate_base_url, validate_context_profile,
+    validate_request_timeout, validate_stream_limits,
+};
 pub use gemini_generate_content::{
     GEMINI_CACHED_TOKENS_KEY, GEMINI_CODE_RESULT_MEDIA_TYPE, GEMINI_CONTINUATION_PROVIDER,
     GEMINI_EXECUTABLE_CODE_MEDIA_TYPE, GEMINI_GROUNDING_MEDIA_TYPE, GEMINI_THOUGHTS_TOKENS_KEY,
     GeminiGenerateContentAssembly,
 };
 pub use ndjson::{NdjsonError, NdjsonParser};
-pub use ollama_chat::{OllamaChatAssembly, OllamaReplayEntry};
+pub use ollama_chat::{
+    OllamaChatAssembly, OllamaReplayEntry, ollama_content_digest, parse_ollama_continuation,
+};
 pub use openai_responses::OpenAiResponsesAssembly;
 pub use sse::{SseEvent, SseEventParser, SseParseError};
 
@@ -56,12 +67,22 @@ pub enum StreamNormKind {
 }
 
 /// Safe provider wire-normalization failure.
+///
+/// Leaves map this to a stable [`ModelError`](finstack_ai_runtime::ports::model::ModelError)
+/// through [`stream_norm_error`]; the `kind` selects the adapter code and
+/// category, and `retryable` is honoured only for [`StreamNormKind::Stream`]
+/// failures that the upstream service itself reported as transient.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StreamNormError {
     /// Failure class used by leaves to select a stable adapter code.
     pub kind: StreamNormKind,
     /// Safe, non-secret diagnostic.
     pub message: &'static str,
+    /// Whether the upstream service classified the failure as transient.
+    ///
+    /// Only [`StreamNormError::upstream`] sets this to `true`; every locally
+    /// detected framing, protocol, limit, or truncation failure is final.
+    pub retryable: bool,
 }
 
 impl StreamNormError {
@@ -69,6 +90,7 @@ impl StreamNormError {
         Self {
             kind: StreamNormKind::Limit,
             message: "provider response exceeded a configured stream limit",
+            retryable: false,
         }
     }
 
@@ -76,6 +98,7 @@ impl StreamNormError {
         Self {
             kind: StreamNormKind::Stream,
             message,
+            retryable: false,
         }
     }
 
@@ -83,13 +106,33 @@ impl StreamNormError {
         Self {
             kind: StreamNormKind::Response,
             message,
+            retryable: false,
         }
     }
 
-    const fn incomplete(message: &'static str) -> Self {
+    /// Failure reported by the upstream service inside the stream itself.
+    ///
+    /// The kind is [`StreamNormKind::Stream`]; `retryable` carries the
+    /// provider's own transient classification (for example an overloaded or
+    /// rate-limited event) so the leaf can preserve it on the adapter error.
+    #[must_use]
+    pub const fn upstream(message: &'static str, retryable: bool) -> Self {
+        Self {
+            kind: StreamNormKind::Stream,
+            message,
+            retryable,
+        }
+    }
+
+    /// Generation stopped before completion (for example an output-token ceiling).
+    ///
+    /// The kind is [`StreamNormKind::Incomplete`] and the failure is never retryable.
+    #[must_use]
+    pub const fn incomplete(message: &'static str) -> Self {
         Self {
             kind: StreamNormKind::Incomplete,
             message,
+            retryable: false,
         }
     }
 }

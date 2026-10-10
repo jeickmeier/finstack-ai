@@ -1845,6 +1845,7 @@ dependencies = [
  "finstack-ai-runtime",
  "serde",
  "serde_json",
+ "url",
 ]
 
 [[package]]

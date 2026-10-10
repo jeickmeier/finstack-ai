@@ -56,12 +56,56 @@ struct ToolAssembly {
 }
 
 /// Prior assistant replay used to preserve thinking across turns.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+///
+/// Serialized inside the `assistant_replay` array of the Ollama continuation
+/// envelope; both fields default when absent so an older envelope still parses.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 pub struct OllamaReplayEntry {
     /// Thinking text from a prior assistant turn.
+    #[serde(default)]
     pub thinking: String,
     /// Optional content digest from a prior assistant turn.
+    #[serde(default)]
     pub digest: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ContinuationEnvelope {
+    provider: String,
+    version: u32,
+    assistant_replay: Vec<OllamaReplayEntry>,
+}
+
+/// Decode an Ollama continuation envelope into its replay entries.
+///
+/// Returns `None` when the state is not a well-formed envelope or was issued
+/// by a different provider or envelope version, so a leaf silently starts a
+/// fresh conversation instead of replaying foreign state. Matching the
+/// entries against the outgoing assistant turns stays with the leaf.
+///
+/// ```
+/// use finstack_ai_kernel::RawJson;
+/// use finstack_ai_provider_wire::parse_ollama_continuation;
+///
+/// let state = RawJson::parse(
+///     r#"{"provider":"ollama.api_chat","version":1,"assistant_replay":[{"thinking":"t"}]}"#,
+/// )
+/// .expect("state");
+/// let entries = parse_ollama_continuation(&state).expect("envelope");
+/// assert_eq!(entries[0].thinking, "t");
+/// assert_eq!(entries[0].digest, None);
+///
+/// let foreign = RawJson::parse(r#"{"provider":"other","version":1,"assistant_replay":[]}"#)
+///     .expect("state");
+/// assert!(parse_ollama_continuation(&foreign).is_none());
+/// ```
+#[must_use]
+pub fn parse_ollama_continuation(state: &RawJson) -> Option<Vec<OllamaReplayEntry>> {
+    let envelope: ContinuationEnvelope = serde_json::from_slice(state.as_bytes()).ok()?;
+    if envelope.provider != CONTINUATION_PROVIDER || envelope.version != CONTINUATION_VERSION {
+        return None;
+    }
+    Some(envelope.assistant_replay)
 }
 
 /// Incremental Ollama chat assembler.
@@ -183,7 +227,7 @@ impl OllamaChatAssembly {
         let mut replay = self.matched_replay.unwrap_or_default();
         replay.push(OllamaReplayEntry {
             thinking: self.thinking,
-            digest: Some(response_content_digest(&self.text, &digest_tools)?),
+            digest: Some(ollama_content_digest(&self.text, &digest_tools)?),
         });
         let continuation_state = encode_continuation(&replay)?;
         let provider_ids =
@@ -273,7 +317,19 @@ fn encode_arguments(arguments: Option<Value>) -> Result<String, StreamNormError>
     }
 }
 
-fn response_content_digest(
+/// Digest of one assistant turn's visible content for continuation matching.
+///
+/// `text` is the concatenated text and JSON block content; each tool call is
+/// its `(name, canonical arguments JSON)` pair in emission order. The digest
+/// is the kernel digest of the canonical JSON
+/// `{"text":..., "tool_calls":[{"arguments":..., "name":...}, ...]}`, so the
+/// assembler and the request translator compute byte-identical values.
+///
+/// # Errors
+///
+/// Returns a [`StreamNormKind::Response`](crate::StreamNormKind::Response)
+/// failure when the digest document cannot be encoded as canonical JSON.
+pub fn ollama_content_digest(
     text: &str,
     tool_calls: &[(String, String)],
 ) -> Result<String, StreamNormError> {
@@ -316,6 +372,92 @@ fn encode_continuation(entries: &[OllamaReplayEntry]) -> Result<Option<RawJson>,
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ollama_replay_entry_roundtrips() {
+        let entries = vec![
+            OllamaReplayEntry {
+                thinking: "first".to_owned(),
+                digest: Some("abc".to_owned()),
+            },
+            OllamaReplayEntry {
+                thinking: String::new(),
+                digest: None,
+            },
+        ];
+        let state = encode_continuation(&entries).unwrap().unwrap();
+        assert_eq!(parse_ollama_continuation(&state).unwrap(), entries);
+
+        // Absent fields default like the leaf's `ReplayEntry`.
+        let sparse =
+            RawJson::parse(r#"{"provider":"ollama.api_chat","version":1,"assistant_replay":[{}]}"#)
+                .unwrap();
+        assert_eq!(
+            parse_ollama_continuation(&sparse).unwrap(),
+            vec![OllamaReplayEntry::default()]
+        );
+
+        // Provider and version mismatches are rejected rather than replayed.
+        for state in [
+            r#"{"provider":"other","version":1,"assistant_replay":[]}"#,
+            r#"{"provider":"ollama.api_chat","version":2,"assistant_replay":[]}"#,
+            r#"{"provider":"ollama.api_chat","version":1}"#,
+            "[]",
+        ] {
+            assert!(parse_ollama_continuation(&RawJson::parse(state).unwrap()).is_none());
+        }
+    }
+
+    #[test]
+    fn ollama_content_digest_matches_response_digest() {
+        // The leaf's `content_digest` form: tool calls as `Value` objects.
+        fn leaf_content_digest(text: &str, tool_calls: &[Value]) -> String {
+            let value = json!({
+                "text": text,
+                "tool_calls": tool_calls,
+            });
+            let bytes = serde_json::to_vec(&value).unwrap();
+            RawJson::parse(&bytes).unwrap().digest().to_hex()
+        }
+
+        let text = "Here is the \"result\": \u{e9}";
+        let tool_calls = [
+            (
+                "lookup".to_owned(),
+                r#"{"query":"weather in Paris","units":"metric"}"#.to_owned(),
+            ),
+            ("noop".to_owned(), "{}".to_owned()),
+        ];
+        let leaf_calls = tool_calls
+            .iter()
+            .map(|(name, arguments)| json!({ "name": name, "arguments": arguments }))
+            .collect::<Vec<_>>();
+
+        let shared = ollama_content_digest(text, &tool_calls).unwrap();
+        assert_eq!(shared, leaf_content_digest(text, &leaf_calls));
+        assert_eq!(shared, ollama_content_digest(text, &tool_calls).unwrap());
+
+        let empty = ollama_content_digest("", &[]).unwrap();
+        assert_eq!(empty, leaf_content_digest("", &[]));
+        assert_ne!(empty, shared);
+    }
+
+    #[test]
+    fn finish_records_the_shared_digest_in_the_continuation() {
+        let mut assembly = OllamaChatAssembly::new("request-1".to_owned(), false, None);
+        assembly
+            .consume(r#"{"message":{"content":"hi","thinking":"why","tool_calls":[{"function":{"name":"lookup","arguments":{"q":"x"}}}]},"done":true}"#)
+            .unwrap();
+        let response = assembly.finish().unwrap();
+        let state = response.continuation_state.unwrap();
+        let entries = parse_ollama_continuation(&state).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].thinking, "why");
+        let expected =
+            ollama_content_digest("hi", &[("lookup".to_owned(), r#"{"q":"x"}"#.to_owned())])
+                .unwrap();
+        assert_eq!(entries[0].digest.as_deref(), Some(expected.as_str()));
+    }
 
     #[test]
     fn assembles_text_and_done() {
