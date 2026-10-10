@@ -81,7 +81,9 @@ impl OtelObserver {
         Self::try_new(ObserverPayloadMode::Redacted, capture_capacity)
     }
 
-    /// Construct an observer with an explicit payload mode.
+    /// Construct an observer with an explicit payload mode over a default,
+    /// processor-less in-process provider. Spans are only retained in the
+    /// bounded capture; use [`Self::try_new_with_provider`] to export them.
     ///
     /// # Errors
     ///
@@ -90,12 +92,49 @@ impl OtelObserver {
         payload_mode: ObserverPayloadMode,
         capture_capacity: usize,
     ) -> Result<Self, OtelObserverError> {
+        Self::try_new_with_provider(
+            payload_mode,
+            capture_capacity,
+            SdkTracerProvider::builder().build(),
+        )
+    }
+
+    /// Construct an observer over an operator-supplied tracer provider.
+    ///
+    /// Every observed event is ended as one span on `provider`, so the
+    /// processors and exporters configured on it (OTLP, stdout, a test
+    /// exporter) receive the same redacted spans the bounded in-memory
+    /// capture retains. The observer never flushes or shuts the provider
+    /// down on its own; the operator owns its lifecycle and may call
+    /// [`Self::force_flush`] explicitly.
+    ///
+    /// # Errors
+    ///
+    /// Rejects an invalid identity or a capture bound outside `1..=1_000_000`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use finstack_ai_observer_otel::OtelObserver;
+    /// use finstack_ai_runtime::ports::observer::ObserverPayloadMode;
+    /// use opentelemetry_sdk::trace::SdkTracerProvider;
+    ///
+    /// let provider = SdkTracerProvider::builder().build();
+    /// let observer =
+    ///     OtelObserver::try_new_with_provider(ObserverPayloadMode::Redacted, 64, provider)
+    ///         .expect("otel");
+    /// assert_eq!(observer.dropped(), 0);
+    /// ```
+    pub fn try_new_with_provider(
+        payload_mode: ObserverPayloadMode,
+        capture_capacity: usize,
+        provider: SdkTracerProvider,
+    ) -> Result<Self, OtelObserverError> {
         if capture_capacity == 0 || capture_capacity > 1_000_000 {
             return Err(OtelObserverError::Configuration {
                 reason: "invalid_capture_capacity",
             });
         }
-        let provider = SdkTracerProvider::builder().build();
         Ok(Self {
             descriptor: ObserverDescriptor {
                 component: ComponentRef::new(
@@ -145,7 +184,9 @@ impl OtelObserver {
         self.diagnostic.lock().ok().and_then(|slot| *slot)
     }
 
-    /// Flush the in-process provider. No network I/O.
+    /// Flush the provider's span processors. Batches are not flushed
+    /// automatically; an operator-supplied provider with a batching
+    /// processor decides when to export, and this call forces it.
     pub fn force_flush(&self) {
         let _ = self.provider.force_flush();
     }
@@ -224,7 +265,6 @@ impl Observer for OtelObserver {
                 self.record_capture_saturation(overflow);
             }
         }
-        self.force_flush();
         Box::pin(async { Ok(()) })
     }
 }

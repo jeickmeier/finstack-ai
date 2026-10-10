@@ -101,7 +101,11 @@ impl SlackSink {
     ///
     /// # Errors
     ///
-    /// Rejects invalid URLs and HTTP-client build failures.
+    /// Rejects an unparseable URL (`invalid_sink_url`), a scheme other than
+    /// `https`/`http` (`invalid_sink_url_scheme`), plaintext `http` to a
+    /// non-loopback host (`plaintext_http_forbidden`), userinfo, query, or
+    /// fragment components (`userinfo_forbidden`, `query_forbidden`,
+    /// `fragment_forbidden`), and HTTP-client build failures.
     pub fn try_new(webhook_url: SecretString) -> Result<Self, NotifyObserverError> {
         Ok(Self {
             poster: JsonPoster::try_new(webhook_url)?,

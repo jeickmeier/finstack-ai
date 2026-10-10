@@ -533,3 +533,21 @@ async fn tool_effect_settlement_aggregates_as_non_model_and_is_never_unattribute
     assert_eq!(row.effects, 1);
     assert_eq!(row.uncosted_effects, 1);
 }
+
+#[test]
+fn parse_model_name_ignores_unrelated_fields() {
+    let request = concat!(
+        "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}],",
+        "\"max_tokens\":128,\"tools\":[{\"name\":\"lookup\",\"input_schema\":{}}],",
+        "\"metadata\":{\"nested\":{\"deep\":[1,2,3]}},",
+        "\"model\":\"demo-model-1\",\"temperature\":0.2}"
+    );
+    assert_eq!(
+        super::parse_model_name(request).as_deref(),
+        Some("demo-model-1")
+    );
+    assert_eq!(super::parse_model_name("{\"messages\":[]}"), None);
+    assert_eq!(super::parse_model_name("{\"model\":123}"), None);
+    assert_eq!(super::parse_model_name("{\"model\":null}"), None);
+    assert_eq!(super::parse_model_name("not json"), None);
+}

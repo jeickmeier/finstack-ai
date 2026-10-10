@@ -33,6 +33,7 @@ use finstack_ai_runtime::ports::PortFuture;
 use finstack_ai_runtime::ports::observer::{
     Observer, ObserverDescriptor, ObserverDiagnostic, ObserverError, ObserverPayloadMode,
 };
+use serde::Deserialize;
 use thiserror::Error;
 
 /// Diagnostic stored when the ledger's entry bound rejects a new key.
@@ -492,11 +493,20 @@ fn push_line(out: &mut String, value: &serde_json::Value) {
     }
 }
 
+/// Top-level `"model"` projection of a model request. Every other field is
+/// skipped during deserialization so an arbitrarily large request body never
+/// materializes as a JSON tree.
+#[derive(Deserialize)]
+struct ModelOnly {
+    #[serde(default)]
+    model: Option<String>,
+}
+
 /// Extract a bounded top-level `"model"` string from canonical request JSON.
 fn parse_model_name(request: &str) -> Option<Arc<str>> {
-    let value: serde_json::Value = serde_json::from_str(request).ok()?;
-    let name = value.get("model")?.as_str()?;
-    if !label_is_valid(name) {
+    let projected: ModelOnly = serde_json::from_str(request).ok()?;
+    let name = projected.model?;
+    if !label_is_valid(&name) {
         return None;
     }
     Some(Arc::from(name))
