@@ -55,8 +55,10 @@ host code. This creates no global artifact discovery API.
 retrieval remains usable while embeddings are unavailable. The default limits are
 100,000 scanned records, 256 retained results per leg, 512 preview characters, and
 256 MiB stored document embedding bytes. Reduced limits are enforced and reported;
-these ceilings alone are not a latency claim. Index connections have bounded job
-queues and join their worker on final drop.
+these ceilings alone are not a latency claim. The three index crates open their
+databases through the `finstack-ai-search-core` `sqlite` feature (`sqlite::Database`
+with a per-crate `DatabaseSpec`): one bounded job queue per connection, in-place
+versioned migrations, and a worker joined on final drop.
 
 Native Rust implementations are T1 trusted in-process extensions. Index contents
 are T5 untrusted evidence. Errors contain stable codes/reasons without backend paths

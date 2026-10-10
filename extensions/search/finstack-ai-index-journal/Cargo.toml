@@ -15,7 +15,7 @@ finstack-ai-kernel.workspace = true
 finstack-ai-runtime.workspace = true
 finstack-ai-protocol.workspace = true
 finstack-ai-store-common.workspace = true
-finstack-ai-search-core.workspace = true
+finstack-ai-search-core = { workspace = true, features = ["sqlite"] }
 finstack-ai-embeddings.workspace = true
 rusqlite.workspace = true
 serde.workspace = true

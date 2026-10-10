@@ -114,6 +114,7 @@ FEATURED_DUMPS: dict[str, tuple[str, ...]] = {
     "finstack-ai": ("durable-host",),
     "finstack-ai-eval": ("native-tokio,sqlite",),
     "finstack-ai-memory": ("search,sqlite",),
+    "finstack-ai-search-core": ("sqlite",),
     # Both drivers are off by default, so the default dump holds neither
     # artifact store.
     "finstack-ai-store-artifact": ("local", "s3"),

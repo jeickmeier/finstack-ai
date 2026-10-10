@@ -144,12 +144,12 @@ impl DocumentSearchSource {
             }
             None => Vec::new(),
         };
-        let database = Database::open(path)?;
+        let database = crate::database::open(path)?;
         let digest = configuration_digest(
             "document-search",
             &(
                 &config,
-                database.identity,
+                database.identity(),
                 artifacts.descriptor().store_id,
                 &spaces,
                 embedder.as_ref().map(|value| {

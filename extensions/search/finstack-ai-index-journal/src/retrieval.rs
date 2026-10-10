@@ -22,8 +22,14 @@ impl JournalSearchSource {
         }
         let mut alive = Vec::new();
         let mut result = SourceResult::completed(vec![], 0);
+        let scope = self.scope_digest.clone();
+        let wanted = sessions.clone();
+        let checkpoints = self
+            .database
+            .call(move |db| crate::indexing::checkpoints(db, &scope, &wanted))
+            .await?;
         for session in sessions {
-            let Some(state) = self.checkpoint(session).await? else {
+            let Some(state) = checkpoints.get(&session) else {
                 result.truncate("journal_index_pending");
                 result.historical_complete = false;
                 continue;
@@ -32,7 +38,7 @@ impl JournalSearchSource {
                 result.historical_complete = false;
                 result.truncate("journal_history_pruned");
             }
-            match self.live(session, &state).await {
+            match self.live(session, state).await {
                 Ok(complete) => {
                     alive.push(session);
                     if !complete {
@@ -165,8 +171,10 @@ fn search(
         SearchStrategy::Lexical(LexicalKind::Keyword | LexicalKind::Bm25)
     ) {
         let expression = fts_expression(&query.text)?;
+        // The bounded scan and ranking carry row identity and sort keys only;
+        // the stored hit JSON is joined for the retained rows after LIMIT.
         let sql = format!(
-            "WITH bounded AS MATERIALIZED (SELECT e.rowid,e.hit_json,e.complete,e.session,e.lane,e.entry FROM entries e WHERE {FILTER} ORDER BY e.session,e.lane,e.entry LIMIT ?6) SELECT e.hit_json,e.complete FROM bounded e JOIN entries_fts ON entries_fts.rowid=e.rowid WHERE entries_fts MATCH ?7 ORDER BY bm25(entries_fts),e.session,e.lane,e.entry LIMIT ?8"
+            "WITH bounded AS MATERIALIZED (SELECT e.rowid,e.session,e.lane,e.entry FROM entries e WHERE {FILTER} ORDER BY e.session,e.lane,e.entry LIMIT ?6), ranked AS (SELECT b.rowid AS rowid,bm25(entries_fts) AS score,b.session,b.lane,b.entry FROM bounded b JOIN entries_fts ON entries_fts.rowid=b.rowid WHERE entries_fts MATCH ?7 ORDER BY score,b.session,b.lane,b.entry LIMIT ?8) SELECT e.hit_json,e.complete FROM ranked r JOIN entries e ON e.rowid=r.rowid ORDER BY r.score,r.session,r.lane,r.entry"
         );
         let mut stmt = db.prepare(&sql).map_err(sql_error)?;
         let rows = stmt

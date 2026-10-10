@@ -126,8 +126,13 @@ fn leg_key(leg: &HybridLeg) -> Result<(Arc<str>, String), SearchError> {
 /// The result is independent of leg order and hit order. Within a source,
 /// relevance is descending `score`, then canonical reference, then preview.
 ///
+/// Each leg must already have passed [`LegResult::validate`] at the leg
+/// boundary; fusion checks plan structure and cross-scope merging but does not
+/// revalidate individual hits.
+///
 /// # Errors
-/// Rejects invalid results/plans or reports all outcomes when no leg succeeded.
+/// Rejects invalid plans, scope-crossing duplicates, or reports all outcomes
+/// when no leg succeeded.
 pub fn fuse(
     mut legs: Vec<LegResult>,
     fusion: Fusion,
@@ -157,7 +162,6 @@ pub fn fuse(
     let mut outcomes = Vec::with_capacity(legs.len());
     let mut merged: BTreeMap<(Arc<str>, String), FusedHit> = BTreeMap::new();
     for leg in legs {
-        validate_result(&leg, limit, limits)?;
         outcomes.push(SourceOutcome {
             source: Arc::clone(&leg.leg.source),
             strategy: leg.leg.strategy.clone(),
@@ -216,25 +220,15 @@ fn add_leg(
     // Group repeated references without letting duplicates inflate rank or score.
     // Every duplicate's provenance survives in the evidence list, with zero
     // additional contribution. This also preserves higher sensitivity labels.
+    // The canonical reference key is computed once per hit; it orders groups
+    // and names the merged entry.
     let mut distinct: BTreeMap<String, Vec<_>> = BTreeMap::new();
     for hit in leg.result.hits {
         distinct.entry(hit.reference.key()?).or_default().push(hit);
     }
     let mut ranked = Vec::with_capacity(distinct.len());
     for (key, hits) in distinct {
-        let mut ordered = hits
-            .into_iter()
-            .map(|hit| {
-                serde_json_canonicalizer::to_string(&hit)
-                    .map(|canonical| (canonical, hit))
-                    .map_err(|_| SearchError::invalid("hit_encoding"))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        ordered.sort_by(|(ka, a), (kb, b)| b.score.cmp(&a.score).then_with(|| ka.cmp(kb)));
-        ranked.push((
-            key,
-            ordered.into_iter().map(|(_, hit)| hit).collect::<Vec<_>>(),
-        ));
+        ranked.push((key, order_duplicates(hits)?));
     }
     ranked.sort_by(|(ka, a), (kb, b)| {
         b.first()
@@ -301,6 +295,25 @@ fn add_leg(
         }
     }
     Ok(())
+}
+
+/// Order the hits sharing one reference: descending score, then canonical
+/// encoding. The encoding is only computed when a leg actually repeats a
+/// reference, which keeps the common single-hit case allocation-free.
+fn order_duplicates(hits: Vec<crate::SearchHit>) -> Result<Vec<crate::SearchHit>, SearchError> {
+    if hits.len() < 2 {
+        return Ok(hits);
+    }
+    let mut ordered = hits
+        .into_iter()
+        .map(|hit| {
+            serde_json_canonicalizer::to_string(&hit)
+                .map(|canonical| (canonical, hit))
+                .map_err(|_| SearchError::invalid("hit_encoding"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    ordered.sort_by(|(ka, a), (kb, b)| b.score.cmp(&a.score).then_with(|| ka.cmp(kb)));
+    Ok(ordered.into_iter().map(|(_, hit)| hit).collect())
 }
 
 fn contribution(fusion: Fusion, rank: u32, score: u32, min: u32, max: u32, weight: u32) -> u64 {

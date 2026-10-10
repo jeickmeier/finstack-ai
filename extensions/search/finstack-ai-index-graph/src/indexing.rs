@@ -129,12 +129,13 @@ impl GraphSearchSource {
         let tx = connection
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .map_err(db_error)?;
+        let previous = referenced(&tx, key)?;
         tx.execute(
             "DELETE FROM sources WHERE scope=? AND source_key=?",
             params![self.scope_digest, key],
         )
         .map_err(db_error)?;
-        cleanup(&tx)?;
+        cleanup(&tx, &previous)?;
         tx.execute(
             "INSERT INTO sources VALUES(?,?,?,?,?,?,?)",
             params![
@@ -149,6 +150,37 @@ impl GraphSearchSource {
             ],
         )
         .map_err(db_error)?;
+        self.insert_facts(&tx, key, extraction)?;
+        for (sql, max, resource) in [
+            (
+                "SELECT count(*) FROM sources WHERE scope=?",
+                self.config.max_sources,
+                "graph_sources",
+            ),
+            (
+                "SELECT count(*) FROM entities WHERE scope=?",
+                self.config.max_entities,
+                "graph_entities",
+            ),
+            (
+                "SELECT count(*) FROM edges WHERE scope=?",
+                self.config.max_edges,
+                "graph_edges",
+            ),
+        ] {
+            capacity(&tx, sql, &self.scope_digest, max, resource)?;
+        }
+        tx.commit().map_err(db_error)
+    }
+
+    /// Insert the extracted entities, aliases and edges supported by `key`,
+    /// then check per-item support once per table.
+    fn insert_facts(
+        &self,
+        tx: &Connection,
+        key: &str,
+        extraction: &Extraction,
+    ) -> Result<(), SearchError> {
         for entity in extraction.entities.values() {
             tx.execute(
                 "INSERT OR IGNORE INTO entities VALUES(?,?,?,?)",
@@ -172,14 +204,17 @@ impl GraphSearchSource {
                 )
                 .map_err(db_error)?;
             }
-            capacity(
-                &tx,
-                "SELECT count(*) FROM entity_sources WHERE entity=?",
-                &entity.id,
-                self.config.max_support_per_item,
-                "graph_entity_support",
-            )?;
         }
+        support_capacity(
+            tx,
+            ("entity_sources", "entity"),
+            extraction
+                .entities
+                .values()
+                .map(|entity| entity.id.as_str()),
+            self.config.max_support_per_item,
+            "graph_entity_support",
+        )?;
         for edge in extraction.edges.values() {
             tx.execute(
                 "INSERT OR IGNORE INTO edges VALUES(?,?,?,?,?)",
@@ -197,34 +232,15 @@ impl GraphSearchSource {
                 params![edge.id, key],
             )
             .map_err(db_error)?;
-            capacity(
-                &tx,
-                "SELECT count(*) FROM edge_sources WHERE edge=?",
-                &edge.id,
-                self.config.max_support_per_item,
-                "graph_edge_support",
-            )?;
         }
-        for (sql, max, resource) in [
-            (
-                "SELECT count(*) FROM sources WHERE scope=?",
-                self.config.max_sources,
-                "graph_sources",
-            ),
-            (
-                "SELECT count(*) FROM entities WHERE scope=?",
-                self.config.max_entities,
-                "graph_entities",
-            ),
-            (
-                "SELECT count(*) FROM edges WHERE scope=?",
-                self.config.max_edges,
-                "graph_edges",
-            ),
-        ] {
-            capacity(&tx, sql, &self.scope_digest, max, resource)?;
-        }
-        tx.commit().map_err(db_error)
+        support_capacity(
+            tx,
+            ("edge_sources", "edge"),
+            extraction.edges.values().map(|edge| edge.id.as_str()),
+            self.config.max_support_per_item,
+            "graph_edge_support",
+        )?;
+        Ok(())
     }
 
     /// Re-read a bounded page of indexed references, refreshing corrections and
@@ -306,12 +322,13 @@ impl GraphSearchSource {
                         return Ok(());
                     }
                 }
+                let previous = referenced(&tx, &key)?;
                 tx.execute(
                     "DELETE FROM sources WHERE scope=? AND source_key=?",
                     params![scope, key],
                 )
                 .map_err(db_error)?;
-                cleanup(&tx)?;
+                cleanup(&tx, &previous)?;
                 tx.commit().map_err(db_error)
             })
             .await
@@ -321,13 +338,66 @@ impl GraphSearchSource {
 pub(crate) fn db_error(_: rusqlite::Error) -> SearchError {
     SearchError::SearchUnavailable
 }
-fn cleanup(c: &Connection) -> Result<(), SearchError> {
+/// Entity and edge ids (as JSON arrays) that one stored source supports.
+struct Referenced {
+    entities: String,
+    edges: String,
+}
+fn referenced(c: &Connection, key: &str) -> Result<Referenced, SearchError> {
+    let ids = |sql: &str| -> Result<String, SearchError> {
+        let mut statement = c.prepare(sql).map_err(db_error)?;
+        let rows = statement
+            .query_map([key], |r| r.get::<_, String>(0))
+            .map_err(db_error)?;
+        let ids = rows.collect::<Result<Vec<_>, _>>().map_err(db_error)?;
+        serde_json::to_string(&ids).map_err(|_| SearchError::invalid("graph_index_reference"))
+    };
+    Ok(Referenced {
+        entities: ids("SELECT entity FROM entity_sources WHERE source_key=?")?,
+        edges: ids("SELECT edge FROM edge_sources WHERE source_key=?")?,
+    })
+}
+/// Drop facts the removed source supported that no other source still
+/// supports. Only ids the source referenced are examined; the per-row support
+/// test is unchanged. Entities cascade onto their remaining edges as before.
+fn cleanup(c: &Connection, previous: &Referenced) -> Result<(), SearchError> {
     c.execute(
-        "DELETE FROM edges WHERE NOT EXISTS(SELECT 1 FROM edge_sources WHERE edge=edges.id)",
-        [],
+        "DELETE FROM edges WHERE id IN (SELECT value FROM json_each(?1)) AND NOT EXISTS(SELECT 1 FROM edge_sources WHERE edge=edges.id)",
+        [&previous.edges],
     )
     .map_err(db_error)?;
-    c.execute("DELETE FROM entities WHERE NOT EXISTS(SELECT 1 FROM entity_sources WHERE entity=entities.id)", []).map_err(db_error)?;
+    c.execute(
+        "DELETE FROM entities WHERE id IN (SELECT value FROM json_each(?1)) AND NOT EXISTS(SELECT 1 FROM entity_sources WHERE entity=entities.id)",
+        [&previous.entities],
+    )
+    .map_err(db_error)?;
+    Ok(())
+}
+/// One grouped count over every item this source just supported, replacing a
+/// COUNT per inserted entity or edge.
+fn support_capacity<'a>(
+    c: &Connection,
+    (table, column): (&str, &str),
+    ids: impl Iterator<Item = &'a str>,
+    max: usize,
+    resource: &'static str,
+) -> Result<(), SearchError> {
+    let ids = serde_json::to_string(&ids.collect::<Vec<_>>())
+        .map_err(|_| SearchError::invalid("graph_index_reference"))?;
+    let over: usize = c
+        .query_row(
+            &format!(
+                "SELECT count(*) FROM (SELECT {column} FROM {table} WHERE {column} IN (SELECT value FROM json_each(?1)) GROUP BY {column} HAVING count(*) > ?2)"
+            ),
+            params![ids, max],
+            |r| r.get(0),
+        )
+        .map_err(db_error)?;
+    if over > 0 {
+        return Err(SearchError::SearchCapacityExceeded {
+            resource: resource.into(),
+        });
+    }
     Ok(())
 }
 fn capacity(

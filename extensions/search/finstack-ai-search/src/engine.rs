@@ -176,7 +176,8 @@ impl SearchEngine {
 
     /// Search with bounded concurrency and source deadlines. All source scope
     /// and query checks finish before any leg starts. Failures are explicit
-    /// outcomes; authorization failures fail the whole request.
+    /// outcomes: a source that rejects the query as invalid or unsupported
+    /// becomes a failed leg, while a scope denial fails the whole request.
     ///
     /// # Errors
     /// Rejects invalid/unauthorized requests and returns all leg outcomes when no
@@ -194,37 +195,41 @@ impl SearchEngine {
             journal: request.journal.clone(),
         };
         let plan = self.plan(&request)?;
-        let mut legs = plan.validate(&query, &self.config.limits, limit)?;
-        for leg in &legs {
-            if let Some(bound) = self.sources.get(&leg.source) {
-                let mut selected = query.clone();
-                selected.strategy = leg.strategy.clone();
-                selected.validate(&bound.descriptor.limits, limit)?;
-                bound.source.authorize(&self.config.scope, &selected)?;
+        let mut rejected = Vec::new();
+        let mut legs = Vec::new();
+        for leg in plan.validate(&query, &self.config.limits, limit)? {
+            let mut selected = query.clone();
+            selected.strategy = leg.strategy.clone();
+            match self.admit(&leg, &selected, limit) {
+                Ok(()) => legs.push(leg),
+                Err(SearchError::SearchScopeDenied) => return Err(SearchError::SearchScopeDenied),
+                Err(error) => {
+                    rejected.push(failed_leg(leg, SourceStatus::Unavailable, error.code()));
+                }
             }
         }
         let expanded = self.expand(&request, &query, &legs, limit).await?;
         if let Some(expanded) = &expanded {
             legs.retain(|leg| leg.source != expanded.graph.leg.source);
         }
-        let queries = legs
-            .into_iter()
-            .map(|leg| {
-                let mut selected = query.clone();
-                selected.strategy = leg.strategy.clone();
-                if let Some(expanded) = &expanded
-                    && crate::expansion::accepts_terms(&selected.strategy)
-                {
-                    selected.text = expanded.text.clone();
+        let mut queries = Vec::with_capacity(legs.len());
+        for leg in legs {
+            let mut selected = query.clone();
+            selected.strategy = leg.strategy.clone();
+            if let Some(expanded) = &expanded
+                && crate::expansion::accepts_terms(&selected.strategy)
+            {
+                selected.text = expanded.text.clone();
+            }
+            selected.validate(&self.config.limits, limit)?;
+            match self.admit(&leg, &selected, limit) {
+                Ok(()) => queries.push((leg, selected)),
+                Err(SearchError::SearchScopeDenied) => return Err(SearchError::SearchScopeDenied),
+                Err(error) => {
+                    rejected.push(failed_leg(leg, SourceStatus::Unavailable, error.code()));
                 }
-                selected.validate(&self.config.limits, limit)?;
-                if let Some(bound) = self.sources.get(&leg.source) {
-                    selected.validate(&bound.descriptor.limits, limit)?;
-                    bound.source.authorize(&self.config.scope, &selected)?;
-                }
-                Ok((leg, selected))
-            })
-            .collect::<Result<Vec<_>, SearchError>>()?;
+            }
+        }
         let pending = futures_util::stream::iter(
             queries
                 .into_iter()
@@ -235,12 +240,27 @@ impl SearchEngine {
             .try_collect::<Vec<_>>()
             .await?;
         if let Some(expanded) = expanded {
+            // Attaching graph provenance mutates validated hits, so expanded
+            // legs are re-checked; the common path stays validated once.
             for result in &mut results {
                 expanded.attach(result);
+                result.validate(limit, &self.config.limits)?;
             }
             results.push(expanded.graph);
         }
+        results.append(&mut rejected);
         fuse(results, plan.fusion, limit, &self.config.limits)
+    }
+
+    /// Validate one leg's query against its source limits and let the source
+    /// authorize it. Unknown sources are admitted here and reported as missing
+    /// by [`Self::run_leg`].
+    fn admit(&self, leg: &HybridLeg, query: &SearchQuery, limit: usize) -> Result<(), SearchError> {
+        let Some(bound) = self.sources.get(&leg.source) else {
+            return Ok(());
+        };
+        query.validate(&bound.descriptor.limits, limit)?;
+        bound.source.authorize(&self.config.scope, query)
     }
 
     async fn expand(
@@ -425,9 +445,28 @@ impl SearchEngine {
             }
         }
         let leg = LegResult { leg, result };
-        leg.validate(limit, &bound.descriptor.limits)?;
-        leg.validate(limit, &self.config.limits)?;
+        leg.validate(
+            limit,
+            &stricter(&bound.descriptor.limits, &self.config.limits),
+        )?;
         Ok(leg)
+    }
+}
+
+/// Field-wise minimum of two validated limit sets. Every ceiling shrinks
+/// together, so `max_pattern_bytes <= max_query_bytes` is preserved and the
+/// result still passes [`SearchLimits::validate`].
+fn stricter(left: &SearchLimits, right: &SearchLimits) -> SearchLimits {
+    SearchLimits {
+        max_query_bytes: left.max_query_bytes.min(right.max_query_bytes),
+        max_pattern_bytes: left.max_pattern_bytes.min(right.max_pattern_bytes),
+        max_scan_records: left.max_scan_records.min(right.max_scan_records),
+        max_results: left.max_results.min(right.max_results),
+        max_preview_chars: left.max_preview_chars.min(right.max_preview_chars),
+        max_legs: left.max_legs.min(right.max_legs),
+        max_embedding_bytes: left.max_embedding_bytes.min(right.max_embedding_bytes),
+        max_graph_nodes: left.max_graph_nodes.min(right.max_graph_nodes),
+        max_graph_edges: left.max_graph_edges.min(right.max_graph_edges),
     }
 }
 

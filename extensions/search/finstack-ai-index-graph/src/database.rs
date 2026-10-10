@@ -1,152 +1,33 @@
-//! One bounded worker owns this index's connection. SQL does not run on an
-//! async executor; queued cancelled requests are discarded before execution.
+//! Owned `SQLite` index schema on the shared search-core worker shell: one
+//! bounded thread owns the connection and queued cancelled requests are
+//! discarded before execution.
 
 use std::path::Path;
-use std::sync::Arc;
-use std::time::Duration;
 
-use finstack_ai_kernel::Digest;
-use finstack_ai_search_core::{SearchError, configuration_digest};
-use rusqlite::Connection;
-use tokio::sync::{mpsc, oneshot};
+use finstack_ai_search_core::SearchError;
+use finstack_ai_search_core::sqlite::{DatabaseSpec, Migration};
 
-type Job = Box<dyn FnOnce(&mut Connection) + Send>;
+pub(crate) type Database = finstack_ai_search_core::sqlite::Database;
 
-struct Worker {
-    sender: Option<mpsc::Sender<Job>>,
-    join: Option<std::thread::JoinHandle<()>>,
+pub(crate) fn open(path: &Path) -> Result<Database, SearchError> {
+    Database::open(path, &SPEC)
 }
 
-impl Drop for Worker {
-    fn drop(&mut self) {
-        self.sender.take();
-        if let Some(join) = self.join.take() {
-            let _ = join.join();
-        }
-    }
-}
+static SPEC: DatabaseSpec = DatabaseSpec {
+    digest_label: "graph-index-path",
+    thread_name: "finstack-graph-index",
+    meta_table: "graph_index_meta",
+    kind: "finstack.graph-index",
+    version: 2,
+    ddl: DDL,
+    migrations: &[Migration {
+        from_version: 1,
+        sql: ORDERED_INDEXES,
+    }],
+    error_prefix: "graph_index",
+};
 
-#[derive(Clone)]
-pub(crate) struct Database {
-    worker: Arc<Worker>,
-    pub(crate) identity: Digest,
-}
-
-impl Database {
-    pub(crate) fn open(path: &Path) -> Result<Self, SearchError> {
-        let mut connection = Connection::open(path).map_err(|_| SearchError::SearchUnavailable)?;
-        connection
-            .busy_timeout(Duration::from_secs(1))
-            .map_err(|_| SearchError::SearchUnavailable)?;
-        connection
-            .pragma_update(None, "foreign_keys", true)
-            .map_err(|_| SearchError::SearchUnavailable)?;
-        if path != Path::new(":memory:") {
-            connection
-                .pragma_update(None, "journal_mode", "WAL")
-                .map_err(|_| SearchError::SearchUnavailable)?;
-        }
-        schema(&mut connection)?;
-        let location = if path == Path::new(":memory:") {
-            path.to_path_buf()
-        } else {
-            std::fs::canonicalize(path).map_err(|_| SearchError::SearchUnavailable)?
-        };
-        let identity = configuration_digest("graph-index-path", &location.to_string_lossy())?;
-        let (sender, mut receiver) = mpsc::channel::<Job>(32);
-        let join = std::thread::Builder::new()
-            .name("finstack-graph-index".into())
-            .spawn(move || {
-                while let Some(job) = receiver.blocking_recv() {
-                    job(&mut connection);
-                }
-            })
-            .map_err(|_| SearchError::SearchUnavailable)?;
-        Ok(Self {
-            worker: Arc::new(Worker {
-                sender: Some(sender),
-                join: Some(join),
-            }),
-            identity,
-        })
-    }
-
-    pub(crate) async fn call<T: Send + 'static>(
-        &self,
-        operation: impl FnOnce(&mut Connection) -> Result<T, SearchError> + Send + 'static,
-    ) -> Result<T, SearchError> {
-        let (reply, result) = oneshot::channel();
-        let job: Job = Box::new(move |connection| {
-            if !reply.is_closed() {
-                let _ = reply.send(operation(connection));
-            }
-        });
-        self.worker
-            .sender
-            .as_ref()
-            .ok_or(SearchError::SearchUnavailable)?
-            .try_send(job)
-            .map_err(|_| SearchError::SearchUnavailable)?;
-        result.await.map_err(|_| SearchError::SearchUnavailable)?
-    }
-}
-
-fn schema(connection: &mut Connection) -> Result<(), SearchError> {
-    let version: u32 = connection
-        .pragma_query_value(None, "user_version", |row| row.get(0))
-        .map_err(|_| SearchError::SearchUnavailable)?;
-    if version == 1 || version == 2 {
-        let kind: String = connection
-            .query_row(
-                "SELECT kind FROM graph_index_meta WHERE singleton=1",
-                [],
-                |r| r.get(0),
-            )
-            .map_err(|_| SearchError::invalid("graph_index_schema"))?;
-        if version == 2 && kind == "finstack.graph-index.v2" {
-            return Ok(());
-        }
-        if version == 1 && kind == "finstack.graph-index.v1" {
-            let tx = connection
-                .transaction()
-                .map_err(|_| SearchError::SearchUnavailable)?;
-            tx.execute_batch(ORDERED_INDEXES)
-                .map_err(|_| SearchError::SearchUnavailable)?;
-            tx.execute(
-                "UPDATE graph_index_meta SET kind='finstack.graph-index.v2' WHERE singleton=1",
-                [],
-            )
-            .map_err(|_| SearchError::SearchUnavailable)?;
-            tx.pragma_update(None, "user_version", 2)
-                .map_err(|_| SearchError::SearchUnavailable)?;
-            return tx.commit().map_err(|_| SearchError::SearchUnavailable);
-        }
-    }
-    if version != 0 {
-        return Err(SearchError::invalid("graph_index_schema_version"));
-    }
-    let tables: u32 = connection
-        .query_row(
-            "SELECT count(*) FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'",
-            [],
-            |r| r.get(0),
-        )
-        .map_err(|_| SearchError::SearchUnavailable)?;
-    if tables != 0 {
-        return Err(SearchError::invalid("graph_index_foreign_database"));
-    }
-    let tx = connection
-        .transaction()
-        .map_err(|_| SearchError::SearchUnavailable)?;
-    tx.execute_batch(DDL)
-        .map_err(|_| SearchError::SearchUnavailable)?;
-    tx.execute_batch(ORDERED_INDEXES)
-        .map_err(|_| SearchError::SearchUnavailable)?;
-    tx.pragma_update(None, "user_version", 2)
-        .map_err(|_| SearchError::SearchUnavailable)?;
-    tx.commit().map_err(|_| SearchError::SearchUnavailable)
-}
-
+// A fresh v2 database is the v1 tables plus the ordered indexes below.
 const DDL: &str = r"
 CREATE TABLE graph_index_meta(singleton INTEGER PRIMARY KEY CHECK(singleton=1),kind TEXT NOT NULL);
 INSERT INTO graph_index_meta VALUES(1,'finstack.graph-index.v2');
@@ -161,6 +42,8 @@ CREATE TABLE edges(id TEXT PRIMARY KEY,scope TEXT NOT NULL,src TEXT NOT NULL REF
 CREATE INDEX edges_outgoing ON edges(scope,src,id);
 CREATE INDEX edges_incoming ON edges(scope,dst,id);
 CREATE TABLE edge_sources(edge TEXT NOT NULL REFERENCES edges(id) ON DELETE CASCADE,source_key TEXT NOT NULL REFERENCES sources(source_key) ON DELETE CASCADE,PRIMARY KEY(edge,source_key));
+CREATE INDEX entities_scope_id ON entities(scope,id);
+CREATE INDEX aliases_entity_alias ON aliases(entity,alias);
 ";
 
 // Preserve entity-ID/alias ordering while seeking directly into each scoped page.

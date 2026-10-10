@@ -7,7 +7,8 @@ use finstack_ai_index_documents::*;
 use finstack_ai_kernel::{Metadata, RunId, Sensitivity, SessionId, UNIX_EPOCH};
 use finstack_ai_runtime::Bytes;
 use finstack_ai_runtime::artifact::{
-    ArtifactMetadata, ArtifactScope, ArtifactStore, ArtifactStoreLimits, InProcessArtifactStore,
+    ArtifactMetadata, ArtifactOwnerId, ArtifactScope, ArtifactStore, ArtifactStoreLimits,
+    InProcessArtifactStore,
 };
 use finstack_ai_search_core::test_support::check_source_contract;
 use finstack_ai_search_core::*;
@@ -587,5 +588,182 @@ async fn federated_memory_and_documents_preserve_each_citation() {
             .hits
             .iter()
             .all(|hit| hit.evidence.iter().all(|e| e.provenance.scope == scope()))
+    );
+}
+
+#[tokio::test]
+#[allow(clippy::too_many_lines)]
+async fn ranked_retrieval_and_liveness_match_golden() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(
+        InProcessArtifactStore::default().with_limits(ArtifactStoreLimits {
+            orphan_grace_ms: 0,
+            ..ArtifactStoreLimits::default()
+        }),
+    );
+    let mut config = DocumentIndexConfig::new("documents", scope());
+    config.chunker.target_chars = 64;
+    config.chunker.overlap_chars = 0;
+    let source = DocumentSearchSource::try_open(
+        &dir.path().join("index.sqlite"),
+        store.clone(),
+        config,
+        None,
+    )
+    .unwrap();
+    let texts: [&[u8]; 3] = [
+        b"records retention one. keep records seven years. archive records yearly.",
+        b"budget review two. records of spend. unrelated closing sentence here.",
+        b"records records records three. a dense paragraph about records.",
+    ];
+    let mut inputs = Vec::new();
+    for text in texts {
+        let input = stage(store.as_ref(), text, "text/plain").await;
+        source.index_document(input.clone()).await.unwrap();
+        inputs.push(input);
+    }
+    let describe = |result: &SourceResult| {
+        (
+            result.status,
+            result.examined,
+            result.historical_complete,
+            result
+                .reasons
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            result
+                .hits
+                .iter()
+                .map(|hit| {
+                    let SourceRef::ArtifactChunk {
+                        ordinal, artifact, ..
+                    } = &hit.reference
+                    else {
+                        panic!("chunk reference");
+                    };
+                    let doc = inputs
+                        .iter()
+                        .position(|input| &input.artifact == artifact.as_ref())
+                        .unwrap();
+                    (doc, *ordinal, hit.score, hit.preview.to_string())
+                })
+                .collect::<Vec<_>>(),
+        )
+    };
+    let one = "records retention one. keep records seven years. archive records";
+    let two = "budget review two. records of spend. unrelated closing sentence ";
+    let three = "records records records three. a dense paragraph about records.";
+    let bm25 = SearchQuery::lexical("records", LexicalKind::Bm25);
+    let full = source.search(scope(), bm25.clone(), 8).await.unwrap();
+    assert_eq!(
+        describe(&full),
+        (
+            SourceStatus::Completed,
+            5,
+            true,
+            vec![],
+            vec![
+                (2, 0, u32::MAX, three.to_owned()),
+                (0, 0, u32::MAX - 1, one.to_owned()),
+                (1, 0, u32::MAX - 2, two.to_owned()),
+            ]
+        )
+    );
+    let top = source.search(scope(), bm25.clone(), 2).await.unwrap();
+    assert_eq!(
+        describe(&top),
+        (
+            SourceStatus::Truncated,
+            5,
+            true,
+            vec!["document_result_limit".to_owned()],
+            vec![
+                (2, 0, u32::MAX, three.to_owned()),
+                (0, 0, u32::MAX - 1, one.to_owned()),
+            ]
+        )
+    );
+    let scan_order = vec![
+        (1, 0, 1, two.to_owned()),
+        (2, 0, 1, three.to_owned()),
+        (0, 0, 1, one.to_owned()),
+    ];
+    let literal = source
+        .search(
+            scope(),
+            SearchQuery::lexical("records", LexicalKind::Literal),
+            3,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        describe(&literal),
+        (SourceStatus::Completed, 5, true, vec![], scan_order.clone())
+    );
+    let regex = source
+        .search(
+            scope(),
+            SearchQuery::lexical("rec(ords|ent)", LexicalKind::Regex),
+            8,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        describe(&regex),
+        (SourceStatus::Completed, 5, true, vec![], scan_order)
+    );
+    // Delete only the top-ranked document: liveness runs after ranking and
+    // the next live candidates fill the requested limit.
+    let owner = ArtifactOwnerId::try_new("test").unwrap();
+    for input in &inputs[..2] {
+        store
+            .pin(
+                input.artifact_scope.clone(),
+                input.artifact.clone(),
+                owner.clone(),
+            )
+            .await
+            .unwrap();
+    }
+    store
+        .collect_orphans(inputs[2].artifact_scope.clone(), UNIX_EPOCH, 8)
+        .await
+        .unwrap();
+    assert_eq!(
+        store
+            .collect_orphans(inputs[2].artifact_scope.clone(), UNIX_EPOCH, 8)
+            .await
+            .unwrap()
+            .deleted,
+        1
+    );
+    let after = source.search(scope(), bm25.clone(), 2).await.unwrap();
+    assert_eq!(
+        describe(&after),
+        (
+            SourceStatus::Truncated,
+            5,
+            true,
+            vec!["document_sources_removed".to_owned()],
+            vec![
+                (0, 0, u32::MAX - 1, one.to_owned()),
+                (1, 0, u32::MAX - 2, two.to_owned()),
+            ]
+        )
+    );
+    let again = source.search(scope(), bm25, 8).await.unwrap();
+    assert_eq!(
+        describe(&again),
+        (
+            SourceStatus::Completed,
+            4,
+            true,
+            vec![],
+            vec![
+                (0, 0, u32::MAX, one.to_owned()),
+                (1, 0, u32::MAX - 1, two.to_owned()),
+            ]
+        )
     );
 }

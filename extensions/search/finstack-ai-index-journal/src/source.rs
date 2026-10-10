@@ -100,10 +100,10 @@ impl JournalSearchSource {
         config: JournalIndexConfig,
     ) -> Result<Self, SearchError> {
         config.validate()?;
-        let database = Database::open(path)?;
+        let database = crate::database::open(path)?;
         let digest = configuration_digest(
             "journal-search",
-            &(&config, store.descriptor().store_id, database.identity),
+            &(&config, store.descriptor().store_id, database.identity()),
         )?;
         let descriptor = SearchSourceDescriptor {
             source_id: config.source_id.clone(),
