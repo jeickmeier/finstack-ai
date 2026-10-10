@@ -37,7 +37,7 @@ jobs:
         run: mise run build-wasm -- release
 
       - name: Stage npm pack artifacts
-        run: uv run --no-project python scripts/wasm_package/stage.py
+        run: python scripts/wasm_package/stage.py
 
       - name: Upload staged npm artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

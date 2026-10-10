@@ -2,11 +2,12 @@
 
 Owner: `me@jeickmeier.com`
 
-Hosted CI runs `mise run ci-rust`, `ci-python`, and `ci-wasm` in parallel.
-`mise run ci-all` is the sequential local equivalent. Do not reimplement
-those task bodies in YAML. Workflows that are not the required CI gate may
-invoke a remaining language task or a documented Python tool when no mise
-task exists.
+Hosted CI runs `mise run ci-rust`, `ci-python`, `ci-wasm`, `coverage-rust`,
+and `coverage-wasm` in parallel. `mise run ci-all` is the sequential local
+equivalent of the language checks and does not collect coverage. Do not
+reimplement those task bodies in YAML. Workflows that are not the required CI
+gate may invoke a remaining language task or a documented Python tool when no
+mise task exists.
 
 ## Tasks
 
@@ -23,14 +24,16 @@ Root [`mise.toml`](../../mise.toml) defines the required tasks:
 | `check-all` / `check-rust` / `check-python` / `check-wasm` | Formatting, lint, and typecheck |
 | `test-all` / `test-rust` / `test-python` / `test-wasm` | Language test suites |
 | `test-fast` | Workspace nextest (not plugin-host), venv pytest, and Chromium-only WASM |
-| `coverage-all` / `coverage-rust` / `coverage-python` / `coverage-wasm` | Diagnostic coverage reports under `target/coverage/` (not in `ci-all`) |
+| `coverage-all` | Local wrapper for the Rust, Python, and WASM coverage reports. Not a hosted job. |
+| `coverage-rust` / `coverage-wasm` | Hosted CI jobs. Write LCOV under `target/coverage/`; SonarQube imports the merged report. Not in `ci-all`. |
+| `coverage-python` | Local Python coverage report under `target/coverage/python/` (not in hosted CI) |
 | `bench-all` / `bench-rust` / `bench-python` / `bench-wasm` | Language benchmarks |
 
 ## Workflows
 
 | Workflow | Triggers | Purpose |
 | --- | --- | --- |
-| [`ci.yml`](../workflows/ci.yml) | every PR, `main` push, manual | Parallel Ubuntu jobs for `ci-rust`, `ci-python`, and `ci-wasm`, plus a `ci` aggregator. Dirty-tree vs committed Darwin glue stays a same-host `check.py dirty` obligation. |
+| [`ci.yml`](../workflows/ci.yml) | every PR, `main` push, manual | Parallel Ubuntu jobs for `ci-rust`, `ci-python`, `ci-wasm`, `coverage-rust`, and `coverage-wasm`, plus a `ci` aggregator. The SonarQube job imports the merged Rust LCOV report. Dirty-tree vs committed Darwin glue stays a same-host `check.py dirty` obligation. |
 | [`nightly.yml`](../workflows/nightly.yml) | daily, manual | In-tree starter RC against staged artifacts. Does not publish. |
 | [`npm-release-staging.yml`](../workflows/npm-release-staging.yml) | manual | Stage, sign, and upload unpublished `@finstack/ai` artifacts. Does not publish. |
 

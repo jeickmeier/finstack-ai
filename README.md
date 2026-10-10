@@ -147,8 +147,10 @@ Common tasks:
   suites.
 - `mise run test-fast` — workspace nextest, virtual-environment pytest, and the
   Chromium WASM path.
-- `mise run coverage-all` and `mise run bench-all` — diagnostic coverage and
-  benchmark entry points.
+- `mise run coverage-rust` and `coverage-wasm` — Rust LCOV reports. Hosted CI
+  runs both and SonarQube imports the merged report.
+- `mise run coverage-python` and `mise run bench-all` — local Python coverage
+  and benchmark entry points.
 
 Prefer `mise run <task>` over ad-hoc wrappers. The task definitions live in
 [`mise.toml`](mise.toml); hosted CI details live in

@@ -48,7 +48,7 @@ jobs:
       - name: Starter RC against staged canary artifacts
         run: |
           mise run build-wasm -- release
-          uv run --no-project python scripts/release/starter_rc.py
+          python scripts/release/starter_rc.py
 
       - name: Fuzz smoke over every target
         run: mise run fuzz-smoke

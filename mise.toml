@@ -373,6 +373,7 @@ if [ -n "$py_libdir" ]; then
   export LD_LIBRARY_PATH="${py_libdir}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
   export DYLD_LIBRARY_PATH="${py_libdir}${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
 fi
+uv run --no-sync pytest -q scripts/ci/test_merge_lcov.py
 # `callback-fixture` registers `_callback_port_conformance`. Without it the
 # six-port callback conformance suite skips itself silently on every run.
 uv run --no-project --with maturin==1.14.1 \
@@ -418,7 +419,7 @@ test_wasm
 """
 
 [tasks.coverage-all]
-description = "Write diagnostic Rust, Python, and WASM coverage reports"
+description = "Write Rust, Python, and WASM coverage reports"
 run = """
 set -euo pipefail
 mise run coverage-rust
@@ -427,15 +428,23 @@ mise run coverage-wasm
 """
 
 [tasks.coverage-rust]
-description = "Write diagnostic Rust workspace coverage (HTML + LCOV)"
+description = "Write Rust workspace coverage (LCOV, plus HTML outside GitHub Actions)"
 run = """
 set -euo pipefail
 export PATH="$(mise where github:taiki-e/cargo-llvm-cov):${PATH}"
 mkdir -p target/coverage/rust
 cargo llvm-cov clean --workspace
-cargo llvm-cov --workspace --locked --html \
-  --output-dir target/coverage/rust/html
-cargo llvm-cov report --lcov --output-path target/coverage/rust/lcov.info
+# Hosted CI only needs the LCOV report. HTML for the whole workspace is large
+# enough to exhaust the runner disk that ci-rust already has to reclaim.
+if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
+  cargo llvm-cov --workspace --locked --lcov \
+    --output-path target/coverage/rust/lcov.info
+else
+  cargo llvm-cov --workspace --locked --html \
+    --output-dir target/coverage/rust/html
+  cargo llvm-cov report --lcov --output-path target/coverage/rust/lcov.info
+fi
+python scripts/ci/merge_lcov.py --relativize target/coverage/rust/lcov.info
 """
 
 [tasks.coverage-python]
@@ -464,6 +473,7 @@ rustup component add llvm-tools-preview --toolchain "${nightly}"
 export FINSTACK_WASM_CLANG="$(mise where github:WebAssembly/wasi-sdk)/bin/clang"
 FINSTACK_COVERAGE_NIGHTLY="${nightly}" \
   uv run --no-project python scripts/perf/wasm_coverage.py
+python scripts/ci/merge_lcov.py --relativize target/coverage/wasm/lcov.info
 """
 
 [tasks.fuzz-smoke]

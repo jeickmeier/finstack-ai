@@ -21,8 +21,10 @@ Before opening a pull request, run at least:
 mise run ci-all
 ```
 
-The hosted `ci.yml` workflow runs `mise run ci-rust`, `ci-python`, and
-`ci-wasm` in parallel. `mise run ci-all` is the sequential local equivalent.
+The hosted `ci.yml` workflow runs `mise run ci-rust`, `ci-python`,
+`ci-wasm`, `coverage-rust`, and `coverage-wasm` in parallel. `mise run ci-all`
+is the sequential local equivalent of the language checks and does not collect
+coverage.
 Do not reimplement those task bodies in workflow YAML.
 
 Tasks:
@@ -36,7 +38,8 @@ Tasks:
 - `mise run check-all` / `check-rust` / `check-python` / `check-wasm` — formatting, lint, and typecheck
 - `mise run test-all` / `test-rust` / `test-python` / `test-wasm` — language test suites
 - `mise run test-fast` — workspace nextest (not plugin-host), venv pytest, Chromium-only WASM
-- `mise run coverage-all` / `coverage-rust` / `coverage-python` / `coverage-wasm` — diagnostic coverage reports
+- `mise run coverage-rust` / `coverage-wasm` — LCOV reports. Hosted CI runs both and SonarQube imports the merged report. `ci-all` does not.
+- `mise run coverage-python` — local Python coverage report
 - `mise run bench-all` / `bench-rust` / `bench-python` / `bench-wasm` — language benchmarks
 
 ## Developer Certificate of Origin (DCO)
