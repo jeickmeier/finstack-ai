@@ -29,7 +29,10 @@ const RESERVED_SETTINGS: &[&str] = &[
     "previous_response_id",
     "reasoning",
     "text",
+    "include",
 ];
+/// Output members requested so reasoning survives stateless replay.
+const REASONING_INCLUDE: &[&str] = &["reasoning.encrypted_content"];
 const REASONING_EFFORTS: &[&str] = &["none", "minimal", "low", "medium", "high", "xhigh", "max"];
 const REASONING_SUMMARIES: &[&str] = &["auto", "concise", "detailed"];
 
@@ -50,6 +53,10 @@ pub(crate) struct ResponsesRequest {
     text: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     reasoning: Option<Value>,
+    /// Extra output members to request; with `store: false` the encrypted
+    /// reasoning content is the only way reasoning can be replayed.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    include: Vec<&'static str>,
     #[serde(flatten)]
     settings: BTreeMap<String, Value>,
 }
@@ -100,6 +107,13 @@ impl ResponsesRequest {
             (None, Some(summary)) => Some(json!({ "summary": summary })),
             (Some(effort), Some(summary)) => Some(json!({ "effort": effort, "summary": summary })),
         };
+        // Requests are stateless (`store: false`), so reasoning is only
+        // replayable when its encrypted content is returned in the output.
+        let include = if reasoning.is_some() || model.reasoning {
+            REASONING_INCLUDE.to_vec()
+        } else {
+            Vec::new()
+        };
 
         let mut text = None;
         let mut tools = Vec::with_capacity(draft.tools.len());
@@ -149,6 +163,7 @@ impl ResponsesRequest {
             tools,
             text,
             reasoning,
+            include,
             settings,
         })
     }
@@ -270,7 +285,13 @@ fn map_input(
         if let Some((replay_index, envelope)) = &replay
             && *replay_index == index
         {
-            input.extend(envelope.replay_items.iter().cloned());
+            input.extend(
+                envelope
+                    .replay_items
+                    .iter()
+                    .cloned()
+                    .map(strip_reasoning_id),
+            );
         } else {
             input.extend(map_conversation_message(
                 message, &call_ids, resolved, model,
@@ -278,6 +299,20 @@ fn map_input(
         }
     }
     Ok((instructions, input))
+}
+
+/// Drop the server-assigned `id` from a replayed `reasoning` item.
+///
+/// Stateless requests (`store: false`) cannot resolve a prior `rs_*` id, so
+/// the endpoint rejects it; the `encrypted_content` member alone carries the
+/// reasoning forward. Every other item is returned unchanged.
+fn strip_reasoning_id(mut item: Value) -> Value {
+    if let Value::Object(node) = &mut item
+        && node.get("type").and_then(Value::as_str) == Some("reasoning")
+    {
+        node.remove("id");
+    }
+    item
 }
 
 fn parse_continuation(state: &RawJson) -> Result<ContinuationEnvelope, ModelError> {
@@ -616,10 +651,76 @@ mod tests {
 
     #[test]
     fn rejects_reserved_settings() {
-        let draft = draft(br#"{"model":"shadow"}"#);
-        let error = ResponsesRequest::try_from_draft(&draft, &model(), None, &BTreeMap::new())
-            .expect_err("reserved setting must fail");
-        assert_eq!(error.code(), crate::error::REQUEST_INVALID);
+        for settings in [
+            br#"{"model":"shadow"}"#.as_slice(),
+            br#"{"include":["reasoning.encrypted_content"]}"#.as_slice(),
+        ] {
+            let draft = draft(settings);
+            let error = ResponsesRequest::try_from_draft(&draft, &model(), None, &BTreeMap::new())
+                .expect_err("reserved setting must fail");
+            assert_eq!(error.code(), crate::error::REQUEST_INVALID);
+        }
+    }
+
+    #[test]
+    fn reasoning_request_includes_encrypted_content() {
+        // Reasoning requested through settings on a model without the flag.
+        let draft_with_effort = draft(br#"{"reasoning_effort":"low"}"#);
+        let request =
+            ResponsesRequest::try_from_draft(&draft_with_effort, &model(), None, &BTreeMap::new())
+                .expect("request");
+        let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
+        assert_eq!(value["include"], json!(["reasoning.encrypted_content"]));
+        assert_eq!(value["store"], false);
+
+        // Reasoning advertised by the model with no reasoning settings.
+        let plain = draft(b"{}");
+        let request = ResponsesRequest::try_from_draft(
+            &plain,
+            &model().with_reasoning(true),
+            None,
+            &BTreeMap::new(),
+        )
+        .expect("request");
+        let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
+        assert_eq!(value["include"], json!(["reasoning.encrypted_content"]));
+
+        // Neither: the member is omitted entirely.
+        let request = ResponsesRequest::try_from_draft(&plain, &model(), None, &BTreeMap::new())
+            .expect("request");
+        let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
+        assert!(value.get("include").is_none());
+    }
+
+    #[test]
+    fn replayed_reasoning_items_drop_id() {
+        let mut draft = draft(b"{}");
+        draft.messages = Arc::from([
+            text_message(MessageRole::User, "hello"),
+            text_message(MessageRole::Assistant, "earlier answer"),
+            text_message(MessageRole::User, "and then?"),
+        ]);
+        let continuation = RawJson::parse(
+            br#"{"provider":"openai.responses","replay_items":[{"encrypted_content":"secret-reasoning","id":"rs_123","summary":[],"type":"reasoning"},{"content":[{"text":"earlier answer","type":"output_text"}],"id":"msg_123","role":"assistant","type":"message"}],"version":1}"#,
+        )
+        .expect("continuation");
+        let request = ResponsesRequest::try_from_draft(
+            &draft,
+            &model(),
+            Some(&continuation),
+            &BTreeMap::new(),
+        )
+        .expect("request");
+        let value: Value = serde_json::from_slice(&serialize_request(&request).unwrap()).unwrap();
+        let input = value["input"].as_array().expect("input");
+        assert_eq!(input.len(), 4);
+        assert_eq!(input[1]["type"], "reasoning");
+        assert!(input[1].get("id").is_none());
+        assert_eq!(input[1]["encrypted_content"], "secret-reasoning");
+        // Only reasoning items lose their id; other replayed items are verbatim.
+        assert_eq!(input[2]["type"], "message");
+        assert_eq!(input[2]["id"], "msg_123");
+        assert_eq!(input[3]["content"][0]["text"], "and then?");
     }
 
     #[test]
@@ -705,7 +806,7 @@ mod tests {
             tool,
         ]);
         let continuation = RawJson::parse(
-            br#"{"provider":"openai.responses","replay_items":[{"call_id":"call_abc","type":"function_call"},{"encrypted_content":"secret-reasoning","type":"reasoning"}],"version":1}"#,
+            br#"{"provider":"openai.responses","replay_items":[{"call_id":"call_abc","id":"fc_123","type":"function_call"},{"encrypted_content":"secret-reasoning","id":"rs_123","type":"reasoning"}],"version":1}"#,
         )
         .expect("continuation");
         let request = ResponsesRequest::try_from_draft(
@@ -719,7 +820,10 @@ mod tests {
         assert_eq!(value["instructions"], "Be brief.");
         assert_eq!(value["input"].as_array().expect("input").len(), 6);
         assert_eq!(value["input"][3]["type"], "function_call");
+        assert_eq!(value["input"][3]["id"], "fc_123");
         assert_eq!(value["input"][4]["type"], "reasoning");
+        assert!(value["input"][4].get("id").is_none());
+        assert_eq!(value["input"][4]["encrypted_content"], "secret-reasoning");
         assert_eq!(value["input"][5]["type"], "function_call_output");
         assert_eq!(value["input"][5]["call_id"], "call_abc");
         assert_eq!(value["input"][5]["output"], "ok");

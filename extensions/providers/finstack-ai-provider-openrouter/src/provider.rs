@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, PoisonError, RwLock};
 
 use finstack_ai_kernel::{ErrorCategory, Metadata, OutputSpec};
-use finstack_ai_provider_wire::{OpenAiResponsesAssembly, StreamNormError, StreamNormKind};
+use finstack_ai_provider_wire::{OpenAiResponsesAssembly, stream_norm_error};
 use finstack_ai_runtime::ports::model::{
     MediaResolveKind, Model, ModelCapabilities, ModelDescriptor, ModelError, ModelEventStream,
     ModelName, ModelRequest, ModelStreamItem, ModelTokenEstimate, ResolveDraftMediaError,
@@ -20,9 +20,8 @@ use tokio::sync::mpsc;
 use crate::catalog::model_configs_from_catalog_json;
 use crate::config::estimator_ref;
 use crate::error::{
-    CANCELLED, RESPONSE_INVALID, STREAM_LIMIT_EXCEEDED, TIMEOUT, TRANSPORT_ERROR, config_error,
-    error, http_error, incomplete_error, request_error, response_error, stream_error,
-    stream_limit_error,
+    CANCELLED, CODES, RESPONSE_INVALID, STREAM_LIMIT_EXCEEDED, TIMEOUT, TRANSPORT_ERROR, VENDOR,
+    config_error, error, http_error, request_error, stream_error, stream_limit_error,
 };
 use crate::request::{ResponsesRequest, serialize_request};
 use crate::sse::SseParser;
@@ -409,7 +408,10 @@ async fn drive_response(
             }
         };
         for event in events {
-            match assembly.consume(&event).map_err(|error| map_norm(&error)) {
+            match assembly
+                .consume(&event)
+                .map_err(|error| stream_norm_error(&CODES, VENDOR, &error))
+            {
                 Ok(items) => {
                     let mut completed = false;
                     for item in items {
@@ -428,15 +430,6 @@ async fn drive_response(
                 }
             }
         }
-    }
-}
-
-fn map_norm(error: &StreamNormError) -> ModelError {
-    match error.kind {
-        StreamNormKind::Limit => stream_limit_error(),
-        StreamNormKind::Stream => stream_error(error.message),
-        StreamNormKind::Response => response_error(error.message),
-        StreamNormKind::Incomplete => incomplete_error(),
     }
 }
 

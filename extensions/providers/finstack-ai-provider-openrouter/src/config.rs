@@ -2,10 +2,10 @@
 
 use core::fmt;
 use std::collections::BTreeSet;
-use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
+use finstack_ai_provider_wire::{BaseUrlError, validate_request_timeout, validate_stream_limits};
 use finstack_ai_runtime::ports::model::{
     Authentication, CredentialReference, CredentialStore, InputCapabilities, MediaResolver,
     ModelCapabilities, ModelContextProfile, ModelError, ModelName, SecretString,
@@ -205,7 +205,7 @@ impl OpenRouterConfig {
     ///
     /// Rejects zero and durations above one hour.
     pub fn with_request_timeout(mut self, timeout: Duration) -> Result<Self, ModelError> {
-        if timeout.is_zero() || timeout > Duration::from_hours(1) {
+        if !validate_request_timeout(timeout) {
             return Err(config_error("provider request timeout is invalid"));
         }
         self.request_timeout = timeout;
@@ -222,7 +222,7 @@ impl OpenRouterConfig {
         max_event_bytes: usize,
         max_stream_bytes: usize,
     ) -> Result<Self, ModelError> {
-        if max_event_bytes == 0 || max_stream_bytes < max_event_bytes {
+        if !validate_stream_limits(max_event_bytes, max_stream_bytes) {
             return Err(config_error("provider stream limits are invalid"));
         }
         self.max_event_bytes = max_event_bytes;
@@ -339,29 +339,19 @@ fn validate_attribution(value: &str) -> Result<Arc<str>, ModelError> {
     Ok(Arc::from(value))
 }
 
+/// Apply the shared base-URL rule and map each verdict to the leaf's stable
+/// configuration message.
 fn validate_base_url(value: &str) -> Result<(), ModelError> {
-    let url = Url::parse(value).map_err(|_| config_error("provider base URL is invalid"))?;
-    if !matches!(url.scheme(), "http" | "https")
-        || !url.username().is_empty()
-        || url.password().is_some()
-        || url.query().is_some()
-        || url.fragment().is_some()
-    {
-        return Err(config_error(
-            "provider base URL contains forbidden components",
-        ));
-    }
-    if url.scheme() == "http"
-        && !url
-            .host_str()
-            .and_then(|host| host.trim_matches(['[', ']']).parse::<IpAddr>().ok())
-            .is_some_and(|address| address.is_loopback())
-    {
-        return Err(config_error(
-            "plaintext provider base URL must use a loopback IP",
-        ));
-    }
-    Ok(())
+    finstack_ai_provider_wire::validate_base_url(value).map_err(|error| {
+        config_error(match error {
+            BaseUrlError::Invalid => "provider base URL is invalid",
+            BaseUrlError::ForbiddenComponents => "provider base URL contains forbidden components",
+            BaseUrlError::PlaintextNotLoopback => {
+                "plaintext provider base URL must use a loopback IP"
+            }
+            BaseUrlError::NonRootPath => "OpenRouter base URL must not carry a path",
+        })
+    })
 }
 
 /// Provider facts for one configured `OpenRouter` model name.
@@ -614,18 +604,14 @@ fn validate_context_profile(
     reserved_output_tokens: u64,
     provider_overhead_tokens: u64,
 ) -> Result<(), ModelError> {
-    if hard_input_bytes == 0
-        || context_window_tokens == 0
-        || max_output_tokens == 0
-        || reserved_output_tokens == 0
-        || max_output_tokens > context_window_tokens
-        || reserved_output_tokens
-            .checked_add(provider_overhead_tokens)
-            .is_none_or(|total| total > context_window_tokens)
-    {
-        return Err(config_error("provider model context profile is invalid"));
-    }
-    Ok(())
+    finstack_ai_provider_wire::validate_context_profile(
+        hard_input_bytes,
+        context_window_tokens,
+        max_output_tokens,
+        reserved_output_tokens,
+        provider_overhead_tokens,
+    )
+    .map_err(|_| config_error("provider model context profile is invalid"))
 }
 
 pub(crate) fn estimator_ref() -> TokenEstimatorRef {
@@ -730,6 +716,22 @@ mod tests {
             assert!(OpenRouterConfig::try_new(url).is_ok());
         }
         assert!(OpenRouterConfig::try_new("https://example.test").is_ok());
+    }
+
+    #[test]
+    fn base_url_rejects_non_root_path() {
+        for url in [
+            "https://openrouter.test/api/v1",
+            "https://openrouter.test/api/v1/",
+            "http://127.0.0.1:8080/responses",
+        ] {
+            let error = OpenRouterConfig::try_new(url).expect_err("path-bearing URL");
+            assert_eq!(error.code(), crate::error::CONFIG_INVALID);
+            assert_eq!(error.message(), "OpenRouter base URL must not carry a path");
+        }
+        for url in ["https://openrouter.test", "https://openrouter.test/"] {
+            assert!(OpenRouterConfig::try_new(url).is_ok(), "{url}");
+        }
     }
 
     #[test]
