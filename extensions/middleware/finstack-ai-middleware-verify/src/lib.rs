@@ -7,12 +7,16 @@
 //!   message. `Accept` continues, `Bounce` requests a semantic
 //!   [`finstack_ai_kernel::RetryClassification::Framework`] retry, and
 //!   `Reject` fails the run with the stable `verify_rejected` code.
-//! - `before_model` re-derives the same verdict from the trailing draft
-//!   message (present on the bounce cycle), fed to the verifier as the same
-//!   JCS-canonical `Message` JSON `before_finalize` uses, and, when it is
+//! - `before_model` derives the same verdict for the trailing draft message
+//!   (present on the bounce cycle), keyed by the digest of the same
+//!   JCS-canonical `Message` JSON `before_finalize` judged, and, when it is
 //!   not `Accept`, renders the findings as one user-visible feedback context
-//!   item. This channel is deliberately stateless: nothing is journaled, so
-//!   crash recovery just re-runs the pure verifier.
+//!   item. Findings that `before_finalize` just bounced are memoized in a
+//!   small in-memory table keyed by that digest, so the bounce cycle calls
+//!   the verifier once per candidate; on a miss (fresh process, evicted
+//!   entry, or a draft the facade bounced for another reason) the pure
+//!   verifier is simply re-run. Nothing is journaled: the memo is a cache
+//!   over a deterministic function, and crash recovery re-derives it.
 //!
 //! The middleware never writes a store.
 
@@ -37,8 +41,9 @@
 // Allow expect() in doc tests (they are test code)
 #![doc(test(attr(allow(clippy::expect_used))))]
 
+use std::collections::{BTreeMap, VecDeque};
 use std::fmt;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use finstack_ai_kernel::{
     ComponentId, ComponentInvocation, ContentBlock, Digest, Duration, ErrorCategory,
@@ -64,6 +69,8 @@ const VERIFY_VERSION: Version = Version {
 const MAX_FINDINGS: usize = 64;
 const MAX_FINDING_NOTE_BYTES: usize = 4 * 1024;
 const MAX_FINDINGS_TOTAL_BYTES: usize = 64 * 1024;
+/// Hard cap on memoized bounce findings; the oldest entry is evicted first.
+const MAX_BOUNCED_ENTRIES: usize = 64;
 
 /// Evidence category a finding refers to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -217,12 +224,48 @@ pub enum VerifyError {
     },
 }
 
+/// Bounded FIFO memo of findings `before_finalize` bounced, keyed by the
+/// digest of the canonical assistant message they were derived from.
+///
+/// Insertion evicts the oldest digest once [`MAX_BOUNCED_ENTRIES`] is
+/// reached; a hit at `before_model` removes the entry, so each bounce is
+/// consumed at most once and the table never grows beyond its cap.
+#[derive(Debug, Default)]
+struct BounceMemo {
+    findings: BTreeMap<Digest, EvidenceFindings>,
+    order: VecDeque<Digest>,
+}
+
+impl BounceMemo {
+    fn insert(&mut self, digest: Digest, findings: EvidenceFindings) {
+        if self.findings.insert(digest, findings).is_none() {
+            self.order.push_back(digest);
+        }
+        while self.findings.len() > MAX_BOUNCED_ENTRIES {
+            let Some(oldest) = self.order.pop_front() else {
+                break;
+            };
+            self.findings.remove(&oldest);
+        }
+    }
+
+    fn take(&mut self, digest: &Digest) -> Option<EvidenceFindings> {
+        let findings = self.findings.remove(digest)?;
+        self.order.retain(|entry| entry != digest);
+        Some(findings)
+    }
+}
+
 /// Evidence-verifier battery middleware. It never writes a store.
 #[derive(Debug, Clone)]
 pub struct VerifyMiddleware {
     descriptor: MiddlewareDescriptor,
     verifier: Arc<dyn EvidenceVerifier>,
     policy: VerifyPolicy,
+    /// In-memory bounce memo shared by every clone of this middleware. The
+    /// lock is held only for map operations, never across the verifier or
+    /// any await.
+    bounced: Arc<Mutex<BounceMemo>>,
 }
 
 impl VerifyMiddleware {
@@ -264,7 +307,24 @@ impl VerifyMiddleware {
             },
             verifier,
             policy,
+            bounced: Arc::new(Mutex::new(BounceMemo::default())),
         })
+    }
+
+    /// Memoize findings `before_finalize` just bounced for `digest`.
+    fn remember_bounce(&self, digest: Digest, findings: EvidenceFindings) {
+        self.bounced
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(digest, findings);
+    }
+
+    /// Consume memoized bounce findings for `digest`, if any.
+    fn take_bounce(&self, digest: &Digest) -> Option<EvidenceFindings> {
+        self.bounced
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take(digest)
     }
 }
 
@@ -278,6 +338,7 @@ impl Middleware for VerifyMiddleware {
         _ctx: MiddlewareContext,
         input: StageInput,
     ) -> PortFuture<Result<StageOutcome, MiddlewareError>> {
+        let middleware = self.clone();
         let verifier = Arc::clone(&self.verifier);
         let backoff = self.policy.backoff;
         let policy_version = Arc::clone(&self.policy.policy_version);
@@ -287,7 +348,7 @@ impl Middleware for VerifyMiddleware {
                     None => Ok(StageOutcome::Continue),
                     Some(message) => match verifier.verify(&message) {
                         Verdict::Accept => Ok(StageOutcome::Continue),
-                        Verdict::Bounce(_findings) => {
+                        Verdict::Bounce(findings) => {
                             let directive = RetryDirective::try_new(
                                 RetryClassification::Framework,
                                 backoff,
@@ -299,6 +360,7 @@ impl Middleware for VerifyMiddleware {
                                     "verify retry directive is invalid",
                                 )
                             })?;
+                            middleware.remember_bounce(message.digest(), findings);
                             Ok(StageOutcome::Retry(directive))
                         }
                         Verdict::Reject(findings) => {
@@ -328,7 +390,15 @@ impl Middleware for VerifyMiddleware {
                         .last()
                         .filter(|message| message.role() == MessageRole::Assistant)
                         .map(|message| {
-                            assistant_message_raw_json(message).map(|raw| verifier.verify(&raw))
+                            let raw = assistant_message_raw_json(message)?;
+                            // The bounce memo is keyed by the digest of the
+                            // very bytes `before_finalize` judged, so a hit
+                            // is the verifier's own earlier answer.
+                            Ok::<_, MiddlewareError>(
+                                middleware
+                                    .take_bounce(&raw.digest())
+                                    .map_or_else(|| verifier.verify(&raw), Verdict::Bounce),
+                            )
                         })
                         .transpose()?;
                     match trailing_verdict {

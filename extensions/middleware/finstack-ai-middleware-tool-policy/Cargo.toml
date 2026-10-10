@@ -11,6 +11,7 @@ description = "Tool policy filter middleware for finstack-ai: role allowlists, w
 readme = "README.md"
 
 [dependencies]
+aho-corasick = { workspace = true }
 finstack-ai-kernel = { workspace = true }
 finstack-ai-runtime = { workspace = true, default-features = false }
 serde = { workspace = true }

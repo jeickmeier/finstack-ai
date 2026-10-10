@@ -69,9 +69,11 @@ use finstack_ai_kernel::{
     ToolResultBlock, Version,
 };
 use finstack_ai_runtime::ports::PortFuture;
+use finstack_ai_runtime::ports::context::ContextItem;
 use finstack_ai_runtime::ports::middleware::{
-    BeforeModelInput, Middleware, MiddlewareContext, MiddlewareDescriptor, MiddlewareError,
-    MiddlewareOrder, MiddlewareRole, OrderTier, StageInput, StageMask, StageOutcome,
+    BeforeModelInput, CompactedSummary, CompactionResult, Middleware, MiddlewareContext,
+    MiddlewareDescriptor, MiddlewareError, MiddlewareOrder, MiddlewareRole, OrderTier, StageInput,
+    StageMask, StageOutcome, compaction_projection_digest, compaction_summary_digest,
 };
 use finstack_ai_runtime::ports::model::ModelRequestDraft;
 use thiserror::Error;
@@ -382,13 +384,25 @@ impl RedactionMiddleware {
         .map_err(|_| rewrite_error())
     }
 
-    /// Redact whatever draft the wrapped middleware produced.
+    /// Redact whatever the wrapped middleware produced.
     ///
-    /// `Replace` payloads are parsed back into a [`ModelRequestDraft`],
-    /// redacted, and re-canonicalized; an unparsable payload or failed
-    /// reconstruction aborts with a stable non-secret middleware error.
-    /// `Continue` falls back to redacting the base draft, and every other
-    /// outcome passes through untouched.
+    /// Every content-bearing outcome is rewritten through the same block
+    /// redactor the standalone path uses:
+    ///
+    /// - `Replace` payloads are parsed back into a [`ModelRequestDraft`],
+    ///   redacted, and re-canonicalized; an unparsable payload or failed
+    ///   reconstruction aborts with a stable non-secret middleware error.
+    /// - `Continue` falls back to redacting the base draft.
+    /// - `AddContext` / `AddInstructions` items are rebuilt with redacted
+    ///   blocks (see [`Self::redact_context_items`]).
+    /// - `CompactContext` projections have their replacement messages and
+    ///   derived summaries redacted and their digests rebuilt (see
+    ///   [`Self::redact_compaction_result`]); a projection whose evidence
+    ///   cannot be rebuilt consistently fails closed.
+    ///
+    /// `FilterTools`, `RequestCompactionModel`, `RequestInteraction`,
+    /// `Retry`, `Suspend`, `Complete`, and `Fail` carry no model-visible
+    /// content and pass through untouched.
     fn redact_inner_outcome(
         &self,
         before_model: &BeforeModelInput,
@@ -404,8 +418,126 @@ impl RedactionMiddleware {
                 encode_replacement(&draft)
             }
             StageOutcome::Continue => self.redact_before_model(before_model),
-            other => Ok(other),
+            StageOutcome::AddContext(items) => Ok(StageOutcome::AddContext(
+                self.redact_context_items(&items)?.unwrap_or(items),
+            )),
+            StageOutcome::AddInstructions(items) => Ok(StageOutcome::AddInstructions(
+                self.redact_context_items(&items)?.unwrap_or(items),
+            )),
+            StageOutcome::CompactContext(result) => {
+                match self.redact_compaction_result(before_model, &result)? {
+                    Some(redacted) => Ok(StageOutcome::CompactContext(Box::new(redacted))),
+                    None => Ok(StageOutcome::CompactContext(result)),
+                }
+            }
+            passthrough @ (StageOutcome::FilterTools(_)
+            | StageOutcome::RequestCompactionModel(_)
+            | StageOutcome::RequestInteraction(_)
+            | StageOutcome::Retry(_)
+            | StageOutcome::Suspend(_)
+            | StageOutcome::Complete(_)
+            | StageOutcome::Fail(_)) => Ok(passthrough),
         }
+    }
+
+    /// Redact the content blocks of every context item, rebuilding changed
+    /// items through [`ContextItem::try_new`] so their canonical byte count
+    /// is recomputed. Attribution, authority, priority, token estimate,
+    /// sensitivity, and protection are preserved exactly. Returns `None`
+    /// when no item changed; a rebuild failure fails closed.
+    fn redact_context_items(
+        &self,
+        items: &[ContextItem],
+    ) -> Result<Option<Arc<[ContextItem]>>, MiddlewareError> {
+        let Some(items) = redact_slice(items, |item| self.redact_context_item(item))? else {
+            return Ok(None);
+        };
+        Ok(Some(items.into()))
+    }
+
+    fn redact_context_item(
+        &self,
+        item: &ContextItem,
+    ) -> Result<Option<ContextItem>, MiddlewareError> {
+        let Some(blocks) = redact_slice(&item.content, |block| self.redact_block(block))? else {
+            return Ok(None);
+        };
+        ContextItem::try_new(
+            item.kind,
+            blocks,
+            item.provenance.clone(),
+            item.authority,
+            item.priority,
+            item.estimated_tokens,
+            item.sensitivity,
+            item.protected,
+        )
+        .map(Some)
+        .map_err(|_| rewrite_error())
+    }
+
+    /// Redact a compaction projection: its replacement messages and derived
+    /// summaries are rewritten and the projection and summary digests are
+    /// recomputed over the redacted content.
+    ///
+    /// Returns `None` when nothing changed. Fails closed with the rewrite
+    /// error whenever the evidence cannot be rebuilt consistently: a
+    /// redacted message that the source history marks protected (the
+    /// runtime requires protected entries byte-identical, so the redacted
+    /// projection could never validate), or a changed derived summary whose
+    /// checkpoint summary is artifact-backed and therefore cannot be
+    /// rewritten alongside it.
+    fn redact_compaction_result(
+        &self,
+        before_model: &BeforeModelInput,
+        result: &CompactionResult,
+    ) -> Result<Option<CompactionResult>, MiddlewareError> {
+        let messages = redact_slice(&result.replacement_messages, |message| {
+            self.redact_message(message)
+        })?;
+        let summaries = self.redact_context_items(&result.derived_summaries)?;
+        if messages.is_none() && summaries.is_none() {
+            return Ok(None);
+        }
+        let mut redacted = result.clone();
+        if let Some(messages) = messages {
+            let changed_ids = messages
+                .iter()
+                .zip(result.replacement_messages.iter())
+                .filter(|(after, before)| after != before)
+                .map(|(after, _)| *after.id())
+                .collect::<std::collections::BTreeSet<_>>();
+            if before_model
+                .source_entries
+                .iter()
+                .any(|entry| entry.protected && changed_ids.contains(entry.message.id()))
+            {
+                return Err(rewrite_error());
+            }
+            redacted.replacement_messages = messages.into();
+            redacted.evidence.projection_digest =
+                compaction_projection_digest(&redacted.replacement_messages)
+                    .map_err(|_| rewrite_error())?;
+        }
+        if let Some(summaries) = summaries {
+            redacted.derived_summaries = Arc::clone(&summaries);
+            if let Some(checkpoint) = redacted.checkpoint.as_mut() {
+                let CompactedSummary::Inline(_) = &checkpoint.summary else {
+                    return Err(rewrite_error());
+                };
+                checkpoint.summary = CompactedSummary::Inline(summaries);
+                let summary_digest =
+                    compaction_summary_digest(&checkpoint.summary).map_err(|_| rewrite_error())?;
+                checkpoint.summary_digest = summary_digest;
+                redacted.evidence.summary_digest = Some(summary_digest);
+            } else if redacted.evidence.summary_digest.is_some() {
+                let summary_digest =
+                    compaction_summary_digest(&CompactedSummary::Inline(summaries))
+                        .map_err(|_| rewrite_error())?;
+                redacted.evidence.summary_digest = Some(summary_digest);
+            }
+        }
+        Ok(Some(redacted))
     }
 
     /// Apply the configured [`OutputPolicy`] to the assistant message the

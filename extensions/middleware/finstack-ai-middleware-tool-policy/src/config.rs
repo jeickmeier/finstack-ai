@@ -3,6 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+use aho_corasick::AhoCorasick;
 use finstack_ai_kernel::ToolId;
 use serde::Serialize;
 use thiserror::Error;
@@ -63,6 +64,14 @@ pub(crate) struct WriteBudget {
 }
 
 /// Jailbreak-trigger patterns and the action taken when one matches.
+///
+/// `patterns` is the serialized, digest-bearing form. The two derived
+/// fields are the compiled scan plan built once at configuration time and
+/// skipped by serialization so the configuration digest stays a function
+/// of the patterns alone: ASCII patterns compile into one
+/// [`AhoCorasick`] automaton with ASCII case folding and scan the text as
+/// is, while any non-ASCII pattern falls back to the allocating
+/// `to_lowercase` substring path (see [`JailbreakTriggers::matches`]).
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) struct JailbreakTriggers {
@@ -70,6 +79,40 @@ pub(crate) struct JailbreakTriggers {
     pub(crate) patterns: Arc<[Arc<str>]>,
     /// Action taken when a pattern matches.
     pub(crate) action: JailbreakAction,
+    /// ASCII patterns compiled with ASCII case-insensitivity; `None` when
+    /// every pattern is non-ASCII.
+    #[serde(skip)]
+    pub(crate) ascii_matcher: Option<AhoCorasick>,
+    /// Lowercased non-ASCII patterns, matched against the lowercased text.
+    #[serde(skip)]
+    pub(crate) unicode_patterns: Arc<[Arc<str>]>,
+}
+
+impl JailbreakTriggers {
+    /// Whether any trigger pattern occurs in `text`, case-insensitively.
+    ///
+    /// ASCII patterns are found by the precompiled automaton without
+    /// allocating or copying `text`. Non-ASCII patterns (rare; config
+    /// strings are expected to be ASCII-ish) keep the historical
+    /// behaviour: `text` is lowercased once and each pattern is searched
+    /// as a plain substring of that Unicode-lowercased form, which may not
+    /// equal every locale's notion of "same word".
+    pub(crate) fn matches(&self, text: &str) -> bool {
+        if self
+            .ascii_matcher
+            .as_ref()
+            .is_some_and(|matcher| matcher.is_match(text))
+        {
+            return true;
+        }
+        if self.unicode_patterns.is_empty() {
+            return false;
+        }
+        let lowered = text.to_lowercase();
+        self.unicode_patterns
+            .iter()
+            .any(|pattern| lowered.contains(pattern.as_ref()))
+    }
 }
 
 /// Restricts a tool set once the run's child-agent depth reaches a threshold.
@@ -187,7 +230,9 @@ impl ToolPolicyConfig {
     /// # Errors
     ///
     /// Rejects too many patterns, an empty or oversized pattern, a pattern
-    /// containing a NUL byte, or a jailbreak slot already set.
+    /// containing a NUL byte, a jailbreak slot already set, or (unreachably
+    /// within the pattern bounds) an ASCII pattern set the matcher cannot
+    /// compile.
     pub fn with_jailbreak_triggers(
         mut self,
         patterns: Vec<Arc<str>>,
@@ -203,7 +248,7 @@ impl ToolPolicyConfig {
                 reason: "too_many_patterns",
             });
         }
-        let mut normalized_patterns = Vec::with_capacity(patterns.len());
+        let mut normalized_patterns: Vec<Arc<str>> = Vec::with_capacity(patterns.len());
         for pattern in patterns {
             let normalized = pattern.trim().to_lowercase();
             if normalized.is_empty() {
@@ -230,9 +275,27 @@ impl ToolPolicyConfig {
                 reason: "too_many_tools",
             });
         }
+        let (ascii, unicode): (Vec<Arc<str>>, Vec<Arc<str>>) = normalized_patterns
+            .iter()
+            .cloned()
+            .partition(|pattern| pattern.is_ascii());
+        let ascii_matcher = if ascii.is_empty() {
+            None
+        } else {
+            Some(
+                AhoCorasick::builder()
+                    .ascii_case_insensitive(true)
+                    .build(ascii.iter().map(AsRef::<str>::as_ref))
+                    .map_err(|_| ToolPolicyError::Configuration {
+                        reason: "pattern_matcher_build_failed",
+                    })?,
+            )
+        };
         self.jailbreak = Some(JailbreakTriggers {
             patterns: normalized_patterns.into(),
             action,
+            ascii_matcher,
+            unicode_patterns: unicode.into(),
         });
         Ok(self)
     }

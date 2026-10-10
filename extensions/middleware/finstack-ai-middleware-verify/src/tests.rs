@@ -459,3 +459,104 @@ async fn middleware_satisfies_the_published_port_conformance_suite() {
     .expect("published middleware conformance suite");
     assert_eq!(outcome, StageOutcome::Continue);
 }
+
+#[tokio::test]
+async fn bounce_findings_are_reused_at_before_model() {
+    let verifier = Arc::new(ScriptedVerifier::default());
+    let mw = middleware(Arc::clone(&verifier) as Arc<dyn EvidenceVerifier>);
+    let assistant = text_message(1, MessageRole::Assistant, "please bounce this");
+    let canonical = serde_json_canonicalizer::to_vec(&assistant).expect("canonical");
+    let finalize = StageInput::BeforeFinalize {
+        candidate: RawJson::parse(br#""candidate""#).expect("candidate"),
+        result_message: Some(RawJson::parse(canonical).expect("raw message")),
+    };
+    let bounced = mw.invoke(ctx(), finalize).await.expect("finalize");
+    assert!(matches!(bounced, StageOutcome::Retry(_)));
+    assert_eq!(verifier.call_count(), 1);
+
+    let outcome = mw
+        .invoke(
+            ctx(),
+            before_model_input(vec![
+                text_message(0, MessageRole::User, "question"),
+                assistant.clone(),
+            ]),
+        )
+        .await
+        .expect("before_model");
+    let StageOutcome::AddContext(items) = outcome else {
+        panic!("expected add_context, got {outcome:?}");
+    };
+    let ContentBlock::Text(block) = &items[0].content[0] else {
+        panic!("expected text block");
+    };
+    assert!(block.text().contains("missing citation"));
+    assert_eq!(
+        verifier.call_count(),
+        1,
+        "the bounced findings must be reused instead of re-verifying"
+    );
+
+    // The memo is consumed by the hit: the next pass over the same trailing
+    // message falls back to the pure verifier.
+    mw.invoke(ctx(), before_model_input(vec![assistant]))
+        .await
+        .expect("before_model again");
+    assert_eq!(verifier.call_count(), 2, "a consumed memo entry is a miss");
+}
+
+#[tokio::test]
+async fn bounce_memo_is_bounded_fifo() {
+    let verifier = Arc::new(ScriptedVerifier::default());
+    let mw = middleware(Arc::clone(&verifier) as Arc<dyn EvidenceVerifier>);
+    let count = MAX_BOUNCED_ENTRIES + 1;
+    let mut messages = Vec::with_capacity(count);
+    for ordinal in 0..count {
+        let assistant = text_message(
+            u64::try_from(ordinal).expect("ordinal"),
+            MessageRole::Assistant,
+            &format!("please bounce candidate {ordinal}"),
+        );
+        let canonical = serde_json_canonicalizer::to_vec(&assistant).expect("canonical");
+        let finalize = StageInput::BeforeFinalize {
+            candidate: RawJson::parse(br#""candidate""#).expect("candidate"),
+            result_message: Some(RawJson::parse(canonical).expect("raw message")),
+        };
+        mw.invoke(ctx(), finalize).await.expect("finalize");
+        messages.push(assistant);
+    }
+    assert_eq!(verifier.call_count(), count);
+    assert_eq!(
+        mw.bounced.lock().expect("memo").findings.len(),
+        MAX_BOUNCED_ENTRIES
+    );
+
+    // The oldest bounce was evicted and is re-verified; the newest is a hit.
+    mw.invoke(ctx(), before_model_input(vec![messages[0].clone()]))
+        .await
+        .expect("evicted");
+    assert_eq!(verifier.call_count(), count + 1);
+    mw.invoke(ctx(), before_model_input(vec![messages[count - 1].clone()]))
+        .await
+        .expect("memoized");
+    assert_eq!(verifier.call_count(), count + 1);
+}
+
+#[tokio::test]
+async fn before_model_miss_still_runs_the_verifier() {
+    let verifier = Arc::new(ScriptedVerifier::default());
+    let mw = middleware(Arc::clone(&verifier) as Arc<dyn EvidenceVerifier>);
+    let outcome = mw
+        .invoke(
+            ctx(),
+            before_model_input(vec![text_message(
+                1,
+                MessageRole::Assistant,
+                "please bounce this",
+            )]),
+        )
+        .await
+        .expect("invoke");
+    assert!(matches!(outcome, StageOutcome::AddContext(_)));
+    assert_eq!(verifier.call_count(), 1, "a memo miss re-runs the verifier");
+}
