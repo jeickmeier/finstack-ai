@@ -40,6 +40,7 @@ use finstack_ai_runtime::artifact::{
     ArtifactError, ArtifactMetadata, ArtifactScope, ArtifactStore, stage_required_artifact,
     validate_retrieved_artifact,
 };
+use finstack_ai_runtime::ids::{Clock as _, SystemClock};
 use finstack_ai_runtime::ports::PortFuture;
 use finstack_ai_runtime::ports::model::{
     ApprovalMetadata, ApprovalRequirement, SideEffectClass, ToolDeferralSupport, ToolSpec,
@@ -52,8 +53,9 @@ use futures_util::stream;
 use serde::Deserialize;
 use thiserror::Error;
 
+use crate::exec::{Budget, InputContainer, sniff_container};
 use crate::graph::{ClipInput, build_ffmpeg_args};
-use crate::spec::{CompositionSpec, validate_spec};
+use crate::spec::{CompositionSpec, Container, validate_spec};
 
 /// Ceiling for [`VideoComposeConfig::render_timeout`].
 const MAX_RENDER_TIMEOUT: Duration = Duration::from_hours(1);
@@ -69,7 +71,8 @@ pub const VIDEO_COMPOSE_CONFIG_INVALID: &str = "video_compose_config_invalid";
 pub const VIDEO_COMPOSE_INVALID_ARGUMENTS: &str = "video_compose_invalid_arguments";
 /// Stable code for a `validate_spec` rejection (the message carries the reason).
 pub const VIDEO_COMPOSE_SPEC_INVALID: &str = "video_compose_spec_invalid";
-/// Stable code for an `ffmpeg`/`ffprobe` process failure.
+/// Stable code for an `ffmpeg`/`ffprobe` process failure: a non-zero exit,
+/// or a child that started but could not be waited on.
 pub const VIDEO_COMPOSE_FFMPEG_FAILED: &str = "video_compose_ffmpeg_failed";
 /// Stable code for a render exceeding `render_timeout`.
 pub const VIDEO_COMPOSE_TIMEOUT: &str = "video_compose_timeout";
@@ -89,8 +92,11 @@ pub struct VideoComposeConfig {
     /// output artifact. Required: this toolset never reads or writes a
     /// caller-supplied filesystem path.
     pub artifact_store: Arc<dyn ArtifactStore>,
-    /// Scratch directory for intermediate render files. Created (recursively)
-    /// during construction if it does not already exist.
+    /// Scratch root for intermediate render files. Created (recursively)
+    /// during construction if it does not already exist. Each call works in
+    /// its own subdirectory, removed when the call finishes. The path may
+    /// only contain `[A-Za-z0-9/_.-]`: it is spliced into `ffmpeg` filter
+    /// options, so no other character is allowed to reach a filtergraph.
     pub scratch_dir: PathBuf,
     /// Wall-clock ceiling for one render. Must be in `(0, 1 hour]`.
     pub render_timeout: Duration,
@@ -112,7 +118,8 @@ impl std::fmt::Debug for VideoComposeConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum VideoComposeError {
     /// An `ffmpeg`/`ffprobe` path was not absolute, `render_timeout` was
-    /// zero or over one hour, or `scratch_dir` could not be created.
+    /// zero or over one hour, or `scratch_dir` contained a character outside
+    /// `[A-Za-z0-9/_.-]` or could not be created.
     #[error("{VIDEO_COMPOSE_CONFIG_INVALID}: {reason}")]
     ConfigInvalid {
         /// Stable non-secret reason.
@@ -153,10 +160,16 @@ impl VideoComposeToolset {
     ///
     /// Returns [`VideoComposeError::ConfigInvalid`] when `ffmpeg_path` or
     /// `ffprobe_path` is not absolute, `render_timeout` is zero or exceeds
-    /// one hour, `scratch_dir` cannot be created, or a built-in
-    /// [`ToolSpec`] fails its own validation.
+    /// one hour, `scratch_dir` is empty, contains a character outside
+    /// `[A-Za-z0-9/_.-]`, or cannot be created, or a built-in [`ToolSpec`]
+    /// fails its own validation.
     #[allow(clippy::too_many_lines)]
     pub fn try_new(config: VideoComposeConfig) -> Result<Self, VideoComposeError> {
+        if !scratch_dir_is_filter_safe(&config.scratch_dir) {
+            return Err(VideoComposeError::ConfigInvalid {
+                reason: "scratch_dir must be non-empty and contain only [A-Za-z0-9/_.-]",
+            });
+        }
         if !config.ffmpeg_path.is_absolute() {
             return Err(VideoComposeError::ConfigInvalid {
                 reason: "ffmpeg_path must be an absolute path",
@@ -226,7 +239,7 @@ impl VideoComposeToolset {
             model_name: Arc::from(PROBE_TOOL_NAME),
             title: Arc::from("Probe media"),
             description: Arc::from(
-                "Probe duration, dimensions, and streams of one stored media artifact.",
+                "Probe duration, dimensions, and streams of one stored mp4 or matroska/webm artifact.",
             ),
             input_schema: RawJson::parse(
                 br#"{"additionalProperties":false,"properties":{"artifact":{"type":"object"}},"required":["artifact"],"type":"object"}"#,
@@ -273,6 +286,35 @@ impl VideoComposeToolset {
             render_timeout: config.render_timeout,
         })
     }
+}
+
+/// Whether `path` can be spliced verbatim into an `ffmpeg` filter option:
+/// non-empty UTF-8 drawn from `[A-Za-z0-9/_.-]` only.
+fn scratch_dir_is_filter_safe(path: &Path) -> bool {
+    path.to_str().is_some_and(|text| {
+        !text.is_empty()
+            && text
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'/' | b'_' | b'.' | b'-'))
+    })
+}
+
+/// The wall-clock budget for one call: the configured `render_timeout`,
+/// shortened to whatever remains of the call's semantic deadline.
+///
+/// A call without a deadline gets the full timeout. If the system clock
+/// cannot be read while a deadline is set, the budget is zero (fail closed).
+fn call_budget(ctx: &ToolCallContext, render_timeout: Duration) -> Budget {
+    let from_deadline = if ctx.run.deadline.is_some() {
+        SystemClock
+            .now()
+            .ok()
+            .and_then(|now| ctx.run.deadline_remaining(now))
+            .unwrap_or(Duration::ZERO)
+    } else {
+        render_timeout
+    };
+    Budget::start(render_timeout.min(from_deadline))
 }
 
 impl Toolset for VideoComposeToolset {
@@ -345,7 +387,7 @@ fn artifact_scope(ctx: &ToolCallContext) -> ArtifactScope {
     }
 }
 
-/// Fetch one stored artifact to a scratch file and return its path.
+/// Fetch one stored artifact to a file under `dir` and return its path.
 ///
 /// # Errors
 ///
@@ -357,7 +399,7 @@ async fn fetch_artifact_to_file(
     artifact: &ArtifactRef,
     dir: &Path,
     stem: &str,
-) -> Result<PathBuf, ToolError> {
+) -> Result<(PathBuf, Bytes), ToolError> {
     let content = store
         .get(scope.clone(), artifact.clone())
         .await
@@ -385,22 +427,71 @@ async fn fetch_artifact_to_file(
             "scratch write failed",
         )
     })?;
-    Ok(path)
+    Ok((path, content))
+}
+
+/// Fetch one stored media artifact to a file under `dir` and pin its
+/// container from the staged bytes.
+///
+/// # Errors
+///
+/// Propagates [`fetch_artifact_to_file`] failures and returns
+/// [`VIDEO_COMPOSE_INVALID_ARGUMENTS`] when the bytes are neither an ISO
+/// base media file nor an EBML/Matroska stream.
+async fn fetch_media_to_file(
+    store: &Arc<dyn ArtifactStore>,
+    scope: &ArtifactScope,
+    artifact: &ArtifactRef,
+    dir: &Path,
+    stem: &str,
+) -> Result<(PathBuf, InputContainer), ToolError> {
+    let (path, content) = fetch_artifact_to_file(store, scope, artifact, dir, stem).await?;
+    let container = sniff_container(&content).ok_or_else(|| {
+        tool_error(
+            VIDEO_COMPOSE_INVALID_ARGUMENTS,
+            ErrorCategory::Validation,
+            "media artifact is not an mp4 or matroska/webm container",
+        )
+    })?;
+    Ok((path, container))
 }
 
 /// Stage a rendered scratch file as a required output artifact.
 ///
+/// The file size is checked against `max_artifact_bytes` before any of it is
+/// read: `ffmpeg -fs` stops writing at the ceiling but still exits
+/// successfully, so this is the gate that keeps an oversized render out of
+/// memory.
+///
 /// # Errors
 ///
-/// Returns [`VIDEO_COMPOSE_LIMIT_EXCEEDED`] when the store rejects the
-/// content as oversized, or [`VIDEO_COMPOSE_MEDIA_FAILURE`] for any other
-/// read or staging failure.
+/// Returns [`VIDEO_COMPOSE_LIMIT_EXCEEDED`] when the rendered file is larger
+/// than `max_artifact_bytes` or the store rejects the content as oversized,
+/// or [`VIDEO_COMPOSE_MEDIA_FAILURE`] for any other read or staging failure.
 async fn stage_output(
     store: &Arc<dyn ArtifactStore>,
     scope: &ArtifactScope,
     path: &Path,
     media_type: &str,
+    max_artifact_bytes: u64,
 ) -> Result<(ArtifactRef, u64), ToolError> {
+    let byte_length = tokio::fs::metadata(path)
+        .await
+        .map_err(|_| {
+            tool_error(
+                VIDEO_COMPOSE_MEDIA_FAILURE,
+                ErrorCategory::Tool,
+                "render output read failed",
+            )
+        })?
+        .len();
+    if byte_length > max_artifact_bytes {
+        return Err(tool_error(
+            VIDEO_COMPOSE_LIMIT_EXCEEDED,
+            ErrorCategory::Limit,
+            "render output exceeds the artifact store limit",
+        ));
+    }
     let content = tokio::fs::read(path).await.map_err(|_| {
         tool_error(
             VIDEO_COMPOSE_MEDIA_FAILURE,
@@ -426,7 +517,7 @@ async fn stage_output(
         ArtifactError::TooLarge { .. } => tool_error(
             VIDEO_COMPOSE_LIMIT_EXCEEDED,
             ErrorCategory::Limit,
-            "render output exceeds the artifact store limit",
+            "artifact store rejected the render output as oversized",
         ),
         _ => tool_error(
             VIDEO_COMPOSE_MEDIA_FAILURE,
@@ -437,25 +528,43 @@ async fn stage_output(
     Ok((artifact, byte_length))
 }
 
-/// Best-effort scratch-file cleanup. Tracked files are removed when the
-/// guard drops, whether the enclosing call succeeded or failed early.
-#[derive(Default)]
+/// One call's private scratch directory, `<scratch_root>/<render stem>/`.
+///
+/// Every staged clip, probe target, side input, and rendered output of the
+/// call lives under it, and the whole directory is removed when the guard
+/// drops, whether the call succeeded or failed early. Removal is best
+/// effort: a failure leaves files behind but never fails the call.
 struct ScratchGuard {
-    paths: Vec<PathBuf>,
+    dir: PathBuf,
 }
 
 impl ScratchGuard {
-    fn track(&mut self, path: PathBuf) -> PathBuf {
-        self.paths.push(path.clone());
-        path
+    /// Create `<root>/<stem>/` and take ownership of it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`VIDEO_COMPOSE_MEDIA_FAILURE`] when the directory cannot be
+    /// created.
+    async fn create(root: &Path, stem: &str) -> Result<Self, ToolError> {
+        let dir = root.join(stem);
+        tokio::fs::create_dir_all(&dir).await.map_err(|_| {
+            tool_error(
+                VIDEO_COMPOSE_MEDIA_FAILURE,
+                ErrorCategory::Tool,
+                "scratch directory could not be created",
+            )
+        })?;
+        Ok(Self { dir })
+    }
+
+    fn dir(&self) -> &Path {
+        &self.dir
     }
 }
 
 impl Drop for ScratchGuard {
     fn drop(&mut self) {
-        for path in &self.paths {
-            let _ = std::fs::remove_file(path);
-        }
+        let _ = std::fs::remove_dir_all(&self.dir);
     }
 }
 
@@ -481,13 +590,26 @@ async fn handle_probe(
                 "probe_media arguments are invalid",
             )
         })?;
+    let budget = call_budget(ctx, render_timeout);
     let scope = artifact_scope(ctx);
-    let mut scratch = ScratchGuard::default();
-    let path = scratch.track(
-        fetch_artifact_to_file(artifact_store, &scope, &args.artifact, scratch_dir, "probe")
-            .await?,
-    );
-    let probe = exec::probe(ffprobe_path, &path, render_timeout, &ctx.run.cancellation).await?;
+    let scratch = ScratchGuard::create(scratch_dir, &render_file_stem(ctx.run.effect_id)).await?;
+    let (path, container) = fetch_media_to_file(
+        artifact_store,
+        &scope,
+        &args.artifact,
+        scratch.dir(),
+        "probe",
+    )
+    .await?;
+    let probe = exec::probe(
+        ffprobe_path,
+        &path,
+        container,
+        &budget,
+        &ctx.run.cancellation,
+    )
+    .await?;
+    drop(scratch);
 
     let media_type = args.artifact.blob().media_type();
     let mut fields = serde_json::Map::new();
@@ -532,53 +654,43 @@ async fn handle_compose(
         )
     })?;
 
+    let budget = call_budget(ctx, render_timeout);
+    let max_artifact_bytes =
+        u64::try_from(artifact_store.limits().max_artifact_bytes).unwrap_or(u64::MAX);
     let scope = artifact_scope(ctx);
-    let mut scratch = ScratchGuard::default();
+    let stem = render_file_stem(ctx.run.effect_id);
+    let scratch = ScratchGuard::create(scratch_dir, &stem).await?;
+    let dir = scratch.dir();
 
-    let mut clip_paths = Vec::with_capacity(spec.clips.len());
+    let mut staged_clips = Vec::with_capacity(spec.clips.len());
     for (idx, clip) in spec.clips.iter().enumerate() {
-        let path = scratch.track(
-            fetch_artifact_to_file(
+        staged_clips.push(
+            fetch_media_to_file(
                 artifact_store,
                 &scope,
                 &clip.artifact,
-                scratch_dir,
+                dir,
                 &format!("clip-{idx}"),
             )
             .await?,
         );
-        clip_paths.push(path);
     }
 
     let audio_path = match &spec.audio {
         Some(audio) => Some(
-            scratch.track(
-                fetch_artifact_to_file(
-                    artifact_store,
-                    &scope,
-                    &audio.artifact,
-                    scratch_dir,
-                    "audio",
-                )
-                .await?,
-            ),
+            fetch_artifact_to_file(artifact_store, &scope, &audio.artifact, dir, "audio")
+                .await?
+                .0,
         ),
         None => None,
     };
 
     let subtitles_path = match &spec.subtitles {
         Some(subtitles) => {
-            let staged = scratch.track(
-                fetch_artifact_to_file(
-                    artifact_store,
-                    &scope,
-                    &subtitles.artifact,
-                    scratch_dir,
-                    "subs",
-                )
-                .await?,
-            );
-            let srt_path = scratch.track(staged.with_extension("srt"));
+            let (staged, _) =
+                fetch_artifact_to_file(artifact_store, &scope, &subtitles.artifact, dir, "subs")
+                    .await?;
+            let srt_path = staged.with_extension("srt");
             tokio::fs::rename(&staged, &srt_path).await.map_err(|_| {
                 tool_error(
                     VIDEO_COMPOSE_MEDIA_FAILURE,
@@ -591,21 +703,28 @@ async fn handle_compose(
         None => None,
     };
 
-    let mut clip_inputs = Vec::with_capacity(clip_paths.len());
-    for path in &clip_paths {
-        let probed = exec::probe(ffprobe_path, path, render_timeout, &ctx.run.cancellation).await?;
+    let mut clip_inputs = Vec::with_capacity(staged_clips.len());
+    for (path, container) in staged_clips {
+        let probed = exec::probe(
+            ffprobe_path,
+            &path,
+            container,
+            &budget,
+            &ctx.run.cancellation,
+        )
+        .await?;
         clip_inputs.push(ClipInput {
-            path: path.clone(),
+            path,
+            container,
             duration_s: probed.duration_s,
+            width: probed.width,
+            height: probed.height,
+            fps: probed.fps,
             has_audio: probed.has_audio,
         });
     }
 
-    let output_path = scratch.track(scratch_dir.join(format!(
-        "{}.{}",
-        render_file_stem(ctx.run.effect_id),
-        spec.output.container.extension()
-    )));
+    let output_path = dir.join(format!("{stem}.{}", spec.output.container.extension()));
 
     let args = build_ffmpeg_args(
         &spec,
@@ -613,6 +732,7 @@ async fn handle_compose(
         audio_path.as_deref(),
         subtitles_path.as_deref(),
         &output_path,
+        max_artifact_bytes,
     )
     .map_err(|reason| {
         tool_error(
@@ -622,12 +742,19 @@ async fn handle_compose(
         )
     })?;
 
-    exec::run_bounded(ffmpeg_path, &args, render_timeout, &ctx.run.cancellation).await?;
+    exec::render(ffmpeg_path, &args, &budget, &ctx.run.cancellation).await?;
 
+    // The output container is the spec's, never sniffed: the toolset wrote
+    // it, so the demuxer is pinned from what was asked for.
+    let output_container = match spec.output.container {
+        Container::Mp4 => InputContainer::Mp4,
+        Container::Webm => InputContainer::Matroska,
+    };
     let probed = exec::probe(
         ffprobe_path,
         &output_path,
-        render_timeout,
+        output_container,
+        &budget,
         &ctx.run.cancellation,
     )
     .await?;
@@ -637,6 +764,7 @@ async fn handle_compose(
         &scope,
         &output_path,
         spec.output.container.media_type(),
+        max_artifact_bytes,
     )
     .await?;
     drop(scratch);
@@ -721,8 +849,8 @@ mod tests {
     use bytes::Bytes;
     use finstack_ai_kernel::{
         Digest, EffectId, EffectOutputContract, EffectOutputKind, LaneId, Metadata,
-        OperationLocator, PrincipalRef, RawJson, RunId, Sensitivity, SessionId, ToolBatchId,
-        ToolCallBlock, ToolCallId, ToolFailurePolicy, ValidatedToolCall,
+        OperationLocator, PrincipalRef, RawJson, RunId, Sensitivity, SessionId, Timestamp,
+        ToolBatchId, ToolCallBlock, ToolCallId, ToolFailurePolicy, ValidatedToolCall,
     };
     use finstack_ai_runtime::artifact::{
         ArtifactMetadata, ArtifactScope, ArtifactStore, InProcessArtifactStore,
@@ -736,9 +864,12 @@ mod tests {
     use futures_util::StreamExt;
     use tempfile::tempdir;
 
+    use finstack_ai_runtime::ids::{Clock as _, SystemClock};
+
     use super::{
-        ArtifactRef, VIDEO_COMPOSE_FFMPEG_FAILED, VIDEO_COMPOSE_LIMIT_EXCEEDED,
-        VIDEO_COMPOSE_SPEC_INVALID, VIDEO_COMPOSE_TIMEOUT, VideoComposeConfig, VideoComposeToolset,
+        ArtifactRef, VIDEO_COMPOSE_CONFIG_INVALID, VIDEO_COMPOSE_FFMPEG_FAILED,
+        VIDEO_COMPOSE_INVALID_ARGUMENTS, VIDEO_COMPOSE_LIMIT_EXCEEDED, VIDEO_COMPOSE_SPEC_INVALID,
+        VIDEO_COMPOSE_TIMEOUT, VideoComposeConfig, VideoComposeError, VideoComposeToolset,
     };
 
     fn write_stub(dir: &Path, name: &str, body: &str) -> PathBuf {
@@ -752,6 +883,38 @@ mod tests {
 
     const FFPROBE_STUB_BODY: &str = r#"printf '%s' '{"format":{"duration":"4.0"},"streams":[{"codec_type":"video","width":640,"height":360,"avg_frame_rate":"24/1"},{"codec_type":"audio"}]}'"#;
     const FFMPEG_STUB_BODY: &str = r#"d=$(dirname "$0"); printf '%s\n' "$@" > "$d/ffmpeg-args.txt"; eval last=\"\${$#}\"; printf 'x' > "$last""#;
+
+    /// A minimal ISO base media file header (`ftyp` at offset 4) followed by
+    /// `tag`, so the staged bytes sniff as mp4 while staying distinct.
+    fn mp4_bytes(tag: &[u8]) -> Vec<u8> {
+        let mut bytes = vec![
+            0, 0, 0, 0x18, b'f', b't', b'y', b'p', b'i', b's', b'o', b'm',
+        ];
+        bytes.extend_from_slice(tag);
+        bytes
+    }
+
+    /// Lines of the argv the fake `ffmpeg` recorded.
+    fn recorded_args(stub_dir: &Path) -> Vec<String> {
+        std::fs::read_to_string(stub_dir.join("ffmpeg-args.txt"))
+            .expect("args file")
+            .lines()
+            .map(str::to_owned)
+            .collect()
+    }
+
+    fn compose_args(clips: &[ArtifactRef]) -> serde_json::Value {
+        serde_json::json!({
+            "version": 1,
+            "clips": clips.iter().map(|c| serde_json::json!({"artifact": c})).collect::<Vec<_>>(),
+            "output": {"container": "mp4"},
+        })
+    }
+
+    fn deadline_in(offset_ms: i64) -> Timestamp {
+        let now = SystemClock.now().expect("clock").as_unix_ms();
+        Timestamp::from_unix_ms(now + offset_ms).expect("deadline")
+    }
 
     fn scope() -> ArtifactScope {
         ArtifactScope {
@@ -885,8 +1048,8 @@ mod tests {
         write_stub(stub_dir.path(), "ffprobe", FFPROBE_STUB_BODY);
         write_stub(stub_dir.path(), "ffmpeg", FFMPEG_STUB_BODY);
         let store = Arc::new(InProcessArtifactStore::default());
-        let clip_a = stage(&store, b"clip-a", "video", "video/mp4").await;
-        let clip_b = stage(&store, b"clip-b", "video", "video/mp4").await;
+        let clip_a = stage(&store, &mp4_bytes(b"clip-a"), "video", "video/mp4").await;
+        let clip_b = stage(&store, &mp4_bytes(b"clip-b"), "video", "video/mp4").await;
         let tools = toolset_with_store(
             stub_dir.path().join("ffmpeg"),
             stub_dir.path().join("ffprobe"),
@@ -957,7 +1120,7 @@ mod tests {
         write_stub(stub_dir.path(), "ffprobe", FFPROBE_STUB_BODY);
         write_stub(stub_dir.path(), "ffmpeg", FFMPEG_STUB_BODY);
         let store = Arc::new(InProcessArtifactStore::default());
-        let clip = stage(&store, b"clip", "video", "video/mp4").await;
+        let clip = stage(&store, &mp4_bytes(b"clip"), "video", "video/mp4").await;
         let subs = stage(
             &store,
             b"1\n00:00:00,000 --> 00:00:01,000\nHi\n",
@@ -1011,7 +1174,7 @@ mod tests {
             r#"echo "boom: filter parse error" >&2; exit 1"#,
         );
         let store = Arc::new(InProcessArtifactStore::default());
-        let clip = stage(&store, b"clip", "video", "video/mp4").await;
+        let clip = stage(&store, &mp4_bytes(b"clip"), "video", "video/mp4").await;
         let tools = toolset_with_store(
             stub_dir.path().join("ffmpeg"),
             stub_dir.path().join("ffprobe"),
@@ -1039,9 +1202,9 @@ mod tests {
         let stub_dir = tempdir().expect("stub dir");
         let scratch_dir = tempdir().expect("scratch dir");
         write_stub(stub_dir.path(), "ffprobe", FFPROBE_STUB_BODY);
-        write_stub(stub_dir.path(), "ffmpeg", "sleep 30");
+        write_stub(stub_dir.path(), "ffmpeg", "exec sleep 30");
         let store = Arc::new(InProcessArtifactStore::default());
-        let clip = stage(&store, b"clip", "video", "video/mp4").await;
+        let clip = stage(&store, &mp4_bytes(b"clip"), "video", "video/mp4").await;
         let tools = toolset_with_store(
             stub_dir.path().join("ffmpeg"),
             stub_dir.path().join("ffprobe"),
@@ -1069,7 +1232,7 @@ mod tests {
         write_stub(stub_dir.path(), "ffprobe", FFPROBE_STUB_BODY);
         write_stub(stub_dir.path(), "ffmpeg", FFMPEG_STUB_BODY);
         let store = Arc::new(InProcessArtifactStore::default());
-        let clip = stage(&store, b"clip", "video", "video/mp4").await;
+        let clip = stage(&store, &mp4_bytes(b"clip"), "video", "video/mp4").await;
         let tools = toolset_with_store(
             stub_dir.path().join("ffmpeg"),
             stub_dir.path().join("ffprobe"),
@@ -1137,13 +1300,13 @@ mod tests {
             r#"d=$(dirname "$0"); printf '%s\n' "$@" > "$d/ffmpeg-args.txt"; eval last=\"\${$#}\"; head -c 64 /dev/zero > "$last""#,
         );
         // A ceiling small enough to reject the 64-byte render output while
-        // still accepting the 1-byte fixture clip staged below.
+        // still accepting the 12-byte fixture clip staged below.
         let store: Arc<dyn ArtifactStore> =
-            Arc::new(InProcessArtifactStore::default().with_max_artifact_bytes(8));
+            Arc::new(InProcessArtifactStore::default().with_max_artifact_bytes(16));
         let clip = stage_required_artifact(
             store.as_ref(),
             scope(),
-            Bytes::from_static(b"c"),
+            Bytes::from(mp4_bytes(b"")),
             ArtifactMetadata {
                 kind: Arc::from("video"),
                 media_type: Arc::from("video/mp4"),
@@ -1171,6 +1334,438 @@ mod tests {
             panic!("oversized render output must fail closed")
         };
         assert_eq!(error.code(), VIDEO_COMPOSE_LIMIT_EXCEEDED);
+    }
+
+    #[tokio::test]
+    async fn output_over_limit_is_rejected_before_read() {
+        let stub_dir = tempdir().expect("stub dir");
+        let scratch_dir = tempdir().expect("scratch dir");
+        write_stub(stub_dir.path(), "ffprobe", FFPROBE_STUB_BODY);
+        write_stub(
+            stub_dir.path(),
+            "ffmpeg",
+            r#"d=$(dirname "$0"); printf '%s\n' "$@" > "$d/ffmpeg-args.txt"; eval last=\"\${$#}\"; head -c 65536 /dev/zero > "$last""#,
+        );
+        let store: Arc<dyn ArtifactStore> =
+            Arc::new(InProcessArtifactStore::default().with_max_artifact_bytes(16));
+        let clip = stage_required_artifact(
+            store.as_ref(),
+            scope(),
+            Bytes::from(mp4_bytes(b"")),
+            ArtifactMetadata {
+                kind: Arc::from("video"),
+                media_type: Arc::from("video/mp4"),
+                name: None,
+                attributes: Metadata::empty(),
+            },
+        )
+        .await
+        .expect("stage tiny clip");
+        let tools = toolset_with_store(
+            stub_dir.path().join("ffmpeg"),
+            stub_dir.path().join("ffprobe"),
+            scratch_dir.path().to_path_buf(),
+            Duration::from_secs(5),
+            store,
+        );
+        let spec = spec_for(super::COMPOSE_TOOL_NAME, &tools.tools());
+        let call = validated_call(&spec, &compose_args(&[clip]));
+        let Err(error) = tools.call(tool_context(), call).await else {
+            panic!("oversized render output must fail closed")
+        };
+        assert_eq!(error.code(), VIDEO_COMPOSE_LIMIT_EXCEEDED);
+        // The metadata gate fires, not the store's post-read rejection.
+        assert_eq!(
+            error.message(),
+            "render output exceeds the artifact store limit"
+        );
+        let args = recorded_args(stub_dir.path());
+        let fs = args.iter().position(|a| a == "-fs").expect("-fs present");
+        assert_eq!(args[fs + 1], "16", "ffmpeg is told the store ceiling");
+        assert_eq!(
+            fs + 2,
+            args.len() - 1,
+            "-fs is the last option before the output"
+        );
+    }
+
+    #[tokio::test]
+    async fn scratch_dir_is_per_call_and_removed() {
+        let stub_dir = tempdir().expect("stub dir");
+        let scratch_dir = tempdir().expect("scratch dir");
+        write_stub(stub_dir.path(), "ffprobe", FFPROBE_STUB_BODY);
+        // Record the directory the output lands in and what sits beside it.
+        write_stub(
+            stub_dir.path(),
+            "ffmpeg",
+            r#"d=$(dirname "$0"); eval last=\"\${$#}\"; dirname "$last" > "$d/out-dir.txt"; ls "$(dirname "$last")" > "$d/listing.txt"; printf 'x' > "$last""#,
+        );
+        let store = Arc::new(InProcessArtifactStore::default());
+        let clip_a = stage(&store, &mp4_bytes(b"clip-a"), "video", "video/mp4").await;
+        let subs = stage(
+            &store,
+            b"1\n00:00:00,000 --> 00:00:01,000\nHi\n",
+            "subtitles",
+            "text/srt",
+        )
+        .await;
+        let tools = toolset_with_store(
+            stub_dir.path().join("ffmpeg"),
+            stub_dir.path().join("ffprobe"),
+            scratch_dir.path().to_path_buf(),
+            Duration::from_secs(5),
+            store,
+        );
+        let spec = spec_for(super::COMPOSE_TOOL_NAME, &tools.tools());
+        let args = serde_json::json!({
+            "version": 1,
+            "clips": [{"artifact": clip_a}],
+            "subtitles": {"artifact": subs, "mode": "burn_in"},
+            "output": {"container": "mp4"},
+        });
+        let call = validated_call(&spec, &args);
+        let mut stream = tools
+            .call(tool_context(), call)
+            .await
+            .expect("call started");
+        let item = stream.next().await.expect("item").expect("ok");
+        assert!(matches!(item, ToolStreamItem::Completed(_)));
+
+        let expected_dir = scratch_dir
+            .path()
+            .join(format!("render-{}", "04".repeat(16)));
+        let out_dir =
+            std::fs::read_to_string(stub_dir.path().join("out-dir.txt")).expect("out dir");
+        assert_eq!(
+            PathBuf::from(out_dir.trim()),
+            expected_dir,
+            "every staged file lives under the per-call directory"
+        );
+        let listing =
+            std::fs::read_to_string(stub_dir.path().join("listing.txt")).expect("listing");
+        assert!(listing.contains("clip-0-"), "{listing}");
+        assert!(listing.contains(".srt"), "{listing}");
+        assert!(
+            !expected_dir.exists(),
+            "the per-call directory is removed after the call"
+        );
+        assert!(
+            std::fs::read_dir(scratch_dir.path())
+                .expect("scratch root")
+                .next()
+                .is_none(),
+            "nothing is left under the scratch root"
+        );
+    }
+
+    #[tokio::test]
+    async fn scratch_dir_is_removed_when_the_call_fails() {
+        let stub_dir = tempdir().expect("stub dir");
+        let scratch_dir = tempdir().expect("scratch dir");
+        write_stub(stub_dir.path(), "ffprobe", FFPROBE_STUB_BODY);
+        write_stub(stub_dir.path(), "ffmpeg", "exit 1");
+        let store = Arc::new(InProcessArtifactStore::default());
+        let clip = stage(&store, &mp4_bytes(b"clip"), "video", "video/mp4").await;
+        let tools = toolset_with_store(
+            stub_dir.path().join("ffmpeg"),
+            stub_dir.path().join("ffprobe"),
+            scratch_dir.path().to_path_buf(),
+            Duration::from_secs(5),
+            store,
+        );
+        let spec = spec_for(super::COMPOSE_TOOL_NAME, &tools.tools());
+        let call = validated_call(&spec, &compose_args(&[clip]));
+        assert!(tools.call(tool_context(), call).await.is_err());
+        assert!(
+            std::fs::read_dir(scratch_dir.path())
+                .expect("scratch root")
+                .next()
+                .is_none(),
+            "the per-call directory is removed on failure too"
+        );
+    }
+
+    #[test]
+    fn scratch_dir_charset_is_validated() {
+        let store: Arc<dyn ArtifactStore> = Arc::new(InProcessArtifactStore::default());
+        for bad in [
+            "/tmp/with space",
+            "/tmp/quote'd",
+            "/tmp/colon:x",
+            "/tmp/back\\slash",
+            "",
+        ] {
+            let error = VideoComposeToolset::try_new(VideoComposeConfig {
+                ffmpeg_path: PathBuf::from("/usr/bin/ffmpeg"),
+                ffprobe_path: PathBuf::from("/usr/bin/ffprobe"),
+                artifact_store: Arc::clone(&store),
+                scratch_dir: PathBuf::from(bad),
+                render_timeout: Duration::from_secs(5),
+            })
+            .expect_err(bad);
+            let VideoComposeError::ConfigInvalid { reason } = error;
+            assert!(reason.contains("scratch_dir"), "{bad}: {reason}");
+            assert!(error.to_string().starts_with(VIDEO_COMPOSE_CONFIG_INVALID));
+        }
+        let ok = tempdir().expect("dir");
+        assert!(super::scratch_dir_is_filter_safe(ok.path()));
+        assert!(super::scratch_dir_is_filter_safe(Path::new(
+            "/var/tmp/finstack_video-compose.v1"
+        )));
+    }
+
+    #[tokio::test]
+    async fn unknown_container_is_rejected() {
+        let stub_dir = tempdir().expect("stub dir");
+        let scratch_dir = tempdir().expect("scratch dir");
+        write_stub(
+            stub_dir.path(),
+            "ffprobe",
+            &format!("touch \"$(dirname \"$0\")/probed\"; {FFPROBE_STUB_BODY}"),
+        );
+        write_stub(stub_dir.path(), "ffmpeg", FFMPEG_STUB_BODY);
+        let store = Arc::new(InProcessArtifactStore::default());
+        let not_video = stage(&store, b"RIFF....WAVEfmt ", "video", "video/mp4").await;
+        let tools = toolset_with_store(
+            stub_dir.path().join("ffmpeg"),
+            stub_dir.path().join("ffprobe"),
+            scratch_dir.path().to_path_buf(),
+            Duration::from_secs(5),
+            store,
+        );
+        let compose = spec_for(super::COMPOSE_TOOL_NAME, &tools.tools());
+        let call = validated_call(&compose, &compose_args(std::slice::from_ref(&not_video)));
+        let Err(error) = tools.call(tool_context(), call).await else {
+            panic!("unknown container must be rejected")
+        };
+        assert_eq!(error.code(), VIDEO_COMPOSE_INVALID_ARGUMENTS);
+
+        let probe = spec_for(super::PROBE_TOOL_NAME, &tools.tools());
+        let call = validated_call(&probe, &serde_json::json!({ "artifact": not_video }));
+        let Err(error) = tools.call(tool_context(), call).await else {
+            panic!("unknown container must be rejected by probe_media too")
+        };
+        assert_eq!(error.code(), VIDEO_COMPOSE_INVALID_ARGUMENTS);
+        assert!(
+            !stub_dir.path().join("probed").exists(),
+            "ffprobe never runs on an unpinned container"
+        );
+    }
+
+    #[tokio::test]
+    async fn argv_pins_container_format() {
+        let stub_dir = tempdir().expect("stub dir");
+        let scratch_dir = tempdir().expect("scratch dir");
+        write_stub(
+            stub_dir.path(),
+            "ffprobe",
+            &format!(
+                r#"d=$(dirname "$0"); printf '%s\n' "$@" >> "$d/ffprobe-args.txt"; {FFPROBE_STUB_BODY}"#
+            ),
+        );
+        write_stub(stub_dir.path(), "ffmpeg", FFMPEG_STUB_BODY);
+        let store = Arc::new(InProcessArtifactStore::default());
+        let mp4 = stage(&store, &mp4_bytes(b"a"), "video", "video/mp4").await;
+        let webm = stage(
+            &store,
+            &[
+                0x1A, 0x45, 0xDF, 0xA3, 0x9F, 0x42, 0x86, 0x81, b'w', b'e', b'b', b'm',
+            ],
+            "video",
+            "video/webm",
+        )
+        .await;
+        let tools = toolset_with_store(
+            stub_dir.path().join("ffmpeg"),
+            stub_dir.path().join("ffprobe"),
+            scratch_dir.path().to_path_buf(),
+            Duration::from_secs(5),
+            store,
+        );
+        let spec = spec_for(super::COMPOSE_TOOL_NAME, &tools.tools());
+        let args = serde_json::json!({
+            "version": 1,
+            "clips": [{"artifact": mp4}, {"artifact": webm}],
+            "output": {"container": "webm"},
+        });
+        let call = validated_call(&spec, &args);
+        let mut stream = tools
+            .call(tool_context(), call)
+            .await
+            .expect("call started");
+        let item = stream.next().await.expect("item").expect("ok");
+        assert!(matches!(item, ToolStreamItem::Completed(_)));
+
+        let ffmpeg = recorded_args(stub_dir.path()).join(" ");
+        assert!(ffmpeg.contains("-f mov -i "), "{ffmpeg}");
+        assert!(ffmpeg.contains("-f matroska -i "), "{ffmpeg}");
+        let ffprobe =
+            std::fs::read_to_string(stub_dir.path().join("ffprobe-args.txt")).expect("probe args");
+        let probe_lines: Vec<&str> = ffprobe.lines().collect();
+        let pinned: Vec<&str> = probe_lines
+            .windows(2)
+            .filter(|w| w[0] == "-f")
+            .map(|w| w[1])
+            .collect();
+        // clip 0 (mp4), clip 1 (webm), then the rendered webm output.
+        assert_eq!(pinned, ["mov", "matroska", "matroska"]);
+        for w in probe_lines.windows(3).filter(|w| w[0] == "-f") {
+            assert!(
+                !w[2].starts_with('-'),
+                "-f immediately precedes the input: {w:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn trim_beyond_probed_duration_is_rejected() {
+        let stub_dir = tempdir().expect("stub dir");
+        let scratch_dir = tempdir().expect("scratch dir");
+        write_stub(stub_dir.path(), "ffprobe", FFPROBE_STUB_BODY);
+        write_stub(stub_dir.path(), "ffmpeg", FFMPEG_STUB_BODY);
+        let store = Arc::new(InProcessArtifactStore::default());
+        let clip = stage(&store, &mp4_bytes(b"clip"), "video", "video/mp4").await;
+        let tools = toolset_with_store(
+            stub_dir.path().join("ffmpeg"),
+            stub_dir.path().join("ffprobe"),
+            scratch_dir.path().to_path_buf(),
+            Duration::from_secs(5),
+            store,
+        );
+        let spec = spec_for(super::COMPOSE_TOOL_NAME, &tools.tools());
+        // The stub probes every clip at 4.0 s.
+        let args = serde_json::json!({
+            "version": 1,
+            "clips": [{"artifact": clip, "trim": {"start_s": 1.0, "end_s": 4.5}}],
+            "output": {"container": "mp4"},
+        });
+        let call = validated_call(&spec, &args);
+        let Err(error) = tools.call(tool_context(), call).await else {
+            panic!("trim past the probed end must be rejected")
+        };
+        assert_eq!(error.code(), VIDEO_COMPOSE_SPEC_INVALID);
+        assert_eq!(
+            error.message(),
+            "clip trim exceeds the probed clip duration"
+        );
+        assert!(!stub_dir.path().join("ffmpeg-args.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn transition_longer_than_clip_is_rejected() {
+        let stub_dir = tempdir().expect("stub dir");
+        let scratch_dir = tempdir().expect("scratch dir");
+        write_stub(stub_dir.path(), "ffprobe", FFPROBE_STUB_BODY);
+        write_stub(stub_dir.path(), "ffmpeg", FFMPEG_STUB_BODY);
+        let store = Arc::new(InProcessArtifactStore::default());
+        let clip_a = stage(&store, &mp4_bytes(b"clip-a"), "video", "video/mp4").await;
+        let clip_b = stage(&store, &mp4_bytes(b"clip-b"), "video", "video/mp4").await;
+        let tools = toolset_with_store(
+            stub_dir.path().join("ffmpeg"),
+            stub_dir.path().join("ffprobe"),
+            scratch_dir.path().to_path_buf(),
+            Duration::from_secs(5),
+            store,
+        );
+        let spec = spec_for(super::COMPOSE_TOOL_NAME, &tools.tools());
+        // Both clips probe at 4.0 s; a 5 s crossfade cannot fit either.
+        let args = serde_json::json!({
+            "version": 1,
+            "clips": [{"artifact": clip_a}, {"artifact": clip_b}],
+            "transitions": [{"type": "crossfade", "duration_s": 5.0}],
+            "output": {"container": "mp4"},
+        });
+        let call = validated_call(&spec, &args);
+        let Err(error) = tools.call(tool_context(), call).await else {
+            panic!("over-long transition must be rejected")
+        };
+        assert_eq!(error.code(), VIDEO_COMPOSE_SPEC_INVALID);
+        assert_eq!(
+            error.message(),
+            "transition is longer than an adjacent clip"
+        );
+        assert!(!stub_dir.path().join("ffmpeg-args.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn render_budget_is_min_of_timeout_and_deadline() {
+        let stub_dir = tempdir().expect("stub dir");
+        let scratch_dir = tempdir().expect("scratch dir");
+        write_stub(
+            stub_dir.path(),
+            "ffprobe",
+            &format!("touch \"$(dirname \"$0\")/probed\"; {FFPROBE_STUB_BODY}"),
+        );
+        write_stub(stub_dir.path(), "ffmpeg", "exec sleep 30");
+        let store = Arc::new(InProcessArtifactStore::default());
+        let clip = stage(&store, &mp4_bytes(b"clip"), "video", "video/mp4").await;
+        // A generous render timeout: only the deadline can cut this short.
+        let tools = toolset_with_store(
+            stub_dir.path().join("ffmpeg"),
+            stub_dir.path().join("ffprobe"),
+            scratch_dir.path().to_path_buf(),
+            Duration::from_secs(30),
+            store,
+        );
+        let spec = spec_for(super::COMPOSE_TOOL_NAME, &tools.tools());
+
+        // Deadline 50 ms in the past: nothing may spawn at all.
+        let mut ctx = tool_context();
+        ctx.run.deadline = Some(deadline_in(-50));
+        let call = validated_call(&spec, &compose_args(std::slice::from_ref(&clip)));
+        let Err(error) = tools.call(ctx, call).await else {
+            panic!("an elapsed deadline must fail the call")
+        };
+        assert_eq!(error.code(), VIDEO_COMPOSE_TIMEOUT);
+        assert!(
+            !stub_dir.path().join("probed").exists(),
+            "no child runs on a spent budget"
+        );
+
+        // Deadline shortly ahead: the probe fits, the 30 s render does not.
+        let mut ctx = tool_context();
+        ctx.run.deadline = Some(deadline_in(400));
+        let call = validated_call(&spec, &compose_args(&[clip]));
+        let started = std::time::Instant::now();
+        let Err(error) = tools.call(ctx, call).await else {
+            panic!("the deadline must bound the render")
+        };
+        assert_eq!(error.code(), VIDEO_COMPOSE_TIMEOUT);
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "the deadline, not render_timeout, bounded the call: {:?}",
+            started.elapsed()
+        );
+        assert!(stub_dir.path().join("probed").exists());
+    }
+
+    #[tokio::test]
+    async fn probe_tool_error_omits_stderr() {
+        let stub_dir = tempdir().expect("stub dir");
+        let scratch_dir = tempdir().expect("scratch dir");
+        write_stub(
+            stub_dir.path(),
+            "ffprobe",
+            r#"echo "$1: No such file or directory" >&2; exit 1"#,
+        );
+        write_stub(stub_dir.path(), "ffmpeg", FFMPEG_STUB_BODY);
+        let store = Arc::new(InProcessArtifactStore::default());
+        let clip = stage(&store, &mp4_bytes(b"clip"), "video", "video/mp4").await;
+        let tools = toolset_with_store(
+            stub_dir.path().join("ffmpeg"),
+            stub_dir.path().join("ffprobe"),
+            scratch_dir.path().to_path_buf(),
+            Duration::from_secs(5),
+            store,
+        );
+        let probe = spec_for(super::PROBE_TOOL_NAME, &tools.tools());
+        let call = validated_call(&probe, &serde_json::json!({ "artifact": clip }));
+        let Err(error) = tools.call(tool_context(), call).await else {
+            panic!("probe must fail")
+        };
+        assert_eq!(error.code(), VIDEO_COMPOSE_FFMPEG_FAILED);
+        assert_eq!(error.message(), "probe process failed");
+        assert!(!error.message().contains("No such file"));
     }
 
     #[test]

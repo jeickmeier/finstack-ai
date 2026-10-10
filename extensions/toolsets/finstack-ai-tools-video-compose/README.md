@@ -17,6 +17,18 @@ silent lane of the clip's effective duration instead of referencing an audio
 stream that does not exist, so mixing silent and voiced clips renders
 normally.
 
+Clips must be mp4 (ISO base media) or Matroska/WebM: the container is
+sniffed from the staged bytes and pinned onto every `ffprobe`/`ffmpeg`
+input with `-f`, so `ffmpeg` never auto-detects a demuxer. Trims are checked
+against each clip's probed duration and transitions against the clips they
+join; when the spec omits `resolution`/`fps`, every lane is normalised to
+clip 0's probed geometry and rate. Each call works in its own
+`scratch_dir/<render id>/` directory, removed when the call ends, and the
+whole call (probes and render) shares one wall-clock budget: the configured
+`render_timeout`, shortened to the call's remaining deadline. `scratch_dir`
+may only contain `[A-Za-z0-9/_.-]` because it is spliced into filter
+options.
+
 ```rust
 use std::path::PathBuf;
 use std::sync::Arc;
