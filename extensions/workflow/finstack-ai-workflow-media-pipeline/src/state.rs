@@ -16,6 +16,13 @@ use rusqlite::{Connection, ErrorCode, OptionalExtension, TransactionBehavior, pa
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+/// Stable code: the adapter schema table in the sqlite file carries a version
+/// this crate does not understand.
+pub const MEDIA_PIPELINE_SCHEMA_VERSION: &str = "media_pipeline_schema_version";
+
+/// The adapter schema version this crate reads and writes.
+const STATE_SCHEMA_VERSION: i64 = 1;
+
 /// Per-scene progress stage.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -69,7 +76,10 @@ pub enum RenderStatus {
     /// One caller owns a durable tick claim. If that caller is interrupted,
     /// the outcome is uncertain: advancing again returns the stored state
     /// without dispatching tools. The host must reconcile provider effects
-    /// and update this row before resuming; claims never expire automatically.
+    /// and update this row before resuming, either through
+    /// [`RenderStateStore::update`] or by abandoning the render with
+    /// `MediaPipelineDriver::release_claim`; claims never expire
+    /// automatically.
     Advancing,
     /// Scenes are still being generated.
     Running,
@@ -104,6 +114,13 @@ pub struct RenderState {
     pub transcript_srt_artifact: Option<ArtifactRef>,
     /// Composed WebVTT transcript artifact, when captions are requested.
     pub transcript_vtt_artifact: Option<ArtifactRef>,
+    /// Render-level failure reason, when `status` is [`RenderStatus::Failed`]
+    /// for a reason that is not one scene's own failure: a persisted row that
+    /// cannot be composed, or a claim the host released. Absent from the
+    /// stored JSON when `None`, so rows written before this field existed
+    /// read back unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure: Option<String>,
     /// Optimistic-concurrency revision. Starts at `0`; `update` persists
     /// `revision + 1` on success.
     pub revision: u64,
@@ -236,7 +253,16 @@ impl RenderStateStore for MemoryRenderStateStore {
     }
 }
 
+/// Adapter DDL. The singleton `_schema` table versions the adapter's own
+/// tables; `PRAGMA user_version` belongs to the journal that may share the
+/// file. A file whose render table predates the schema table is adopted as
+/// version 1: the render table's shape has not changed since it was created.
 const STATE_DDL: &str = "
+CREATE TABLE IF NOT EXISTS finstack_workflow_media_pipeline_schema (
+  singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+  version INTEGER NOT NULL
+);
+INSERT OR IGNORE INTO finstack_workflow_media_pipeline_schema (singleton, version) VALUES (1, 1);
 CREATE TABLE IF NOT EXISTS finstack_workflow_media_pipeline (
   tenant_scope TEXT NOT NULL,
   render_id TEXT NOT NULL,
@@ -246,21 +272,30 @@ CREATE TABLE IF NOT EXISTS finstack_workflow_media_pipeline (
 );
 ";
 
-/// Sqlite table in the same file as the journal store.
+/// Sqlite tables in the same file as the journal store.
 ///
 /// Rows are adapter state: they do not change `PRAGMA user_version` and are
-/// not kernel records.
+/// not kernel records. The adapter versions its own tables through the
+/// `finstack_workflow_media_pipeline_schema` singleton row, which `open`
+/// seeds at version 1 and refuses to read past.
 pub struct SqliteRenderStateStore {
     conn: Mutex<Connection>,
 }
 
 impl SqliteRenderStateStore {
-    /// Open or create the adapter table in `path`.
+    /// Open or create the adapter tables in `path`.
+    ///
+    /// A file whose render table predates the schema table is adopted as
+    /// version 1 without rewriting any row.
     ///
     /// # Errors
     ///
     /// Returns [`StateError::Unavailable`] when the file cannot be opened or
-    /// the table cannot be created.
+    /// the tables cannot be created, and [`StateError::Integrity`] with
+    /// [`MEDIA_PIPELINE_SCHEMA_VERSION`] when the schema row cannot be read or
+    /// names a version other than the one this crate understands; the store
+    /// then fails closed rather than reinterpret rows written by a newer
+    /// adapter.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, StateError> {
         let path: PathBuf = path.as_ref().to_path_buf();
         let conn = Connection::open(&path).map_err(|_| StateError::Unavailable {
@@ -280,6 +315,20 @@ impl SqliteRenderStateStore {
             .map_err(|_| StateError::Unavailable {
                 code: "sqlite_state_schema",
             })?;
+        let version: i64 = conn
+            .query_row(
+                "SELECT version FROM finstack_workflow_media_pipeline_schema WHERE singleton = 1",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|_| StateError::Integrity {
+                code: MEDIA_PIPELINE_SCHEMA_VERSION,
+            })?;
+        if version != STATE_SCHEMA_VERSION {
+            return Err(StateError::Integrity {
+                code: MEDIA_PIPELINE_SCHEMA_VERSION,
+            });
+        }
         Ok(Self {
             conn: Mutex::new(conn),
         })
@@ -441,8 +490,134 @@ mod tests {
             final_artifact: None,
             transcript_srt_artifact: None,
             transcript_vtt_artifact: None,
+            failure: None,
             revision: 0,
         }
+    }
+
+    /// The render table exactly as the crate created it before the schema
+    /// table existed.
+    const UNVERSIONED_DDL: &str = "
+CREATE TABLE IF NOT EXISTS finstack_workflow_media_pipeline (
+  tenant_scope TEXT NOT NULL,
+  render_id TEXT NOT NULL,
+  revision INTEGER NOT NULL,
+  state_json TEXT NOT NULL,
+  PRIMARY KEY (tenant_scope, render_id)
+);
+";
+
+    fn schema_row(path: &Path) -> (i64, i64) {
+        let conn = Connection::open(path).expect("raw connection");
+        conn.query_row(
+            "SELECT singleton, version FROM finstack_workflow_media_pipeline_schema",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("schema row")
+    }
+
+    #[test]
+    fn schema_table_is_adopted_for_existing_unversioned_table() {
+        let dir = tempfile::tempdir().expect("dir");
+        let path = dir.path().join("journal.sqlite");
+        let state = sample_state();
+
+        // A file written by the pre-schema-table crate: the render table and
+        // one row, nothing else.
+        {
+            let legacy = Connection::open(&path).expect("legacy connection");
+            legacy.execute_batch(UNVERSIONED_DDL).expect("legacy ddl");
+            legacy
+                .execute(
+                    "INSERT INTO finstack_workflow_media_pipeline (
+                        tenant_scope, render_id, revision, state_json
+                     ) VALUES (?1, ?2, ?3, ?4)",
+                    params![
+                        state.tenant_scope.as_ref(),
+                        state.render_id.as_ref(),
+                        0_i64,
+                        serde_json::to_string(&state).expect("encode"),
+                    ],
+                )
+                .expect("legacy row");
+            let has_schema: i64 = legacy
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' \
+                     AND name = 'finstack_workflow_media_pipeline_schema'",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("count");
+            assert_eq!(has_schema, 0, "the legacy file has no schema table");
+        }
+
+        // Cold open over the same path adopts the file as version 1.
+        let store = SqliteRenderStateStore::open(&path).expect("adopt legacy file");
+        let reloaded = store
+            .load("tenant-a", state.render_id.as_ref())
+            .expect("load")
+            .expect("the legacy row survives adoption");
+        assert_eq!(reloaded, state);
+        assert_eq!(schema_row(&path), (1, 1));
+
+        // Reopening is idempotent: the seed is `INSERT OR IGNORE`.
+        drop(store);
+        SqliteRenderStateStore::open(&path).expect("reopen");
+        assert_eq!(schema_row(&path), (1, 1));
+    }
+
+    #[test]
+    fn unknown_schema_version_fails_closed() {
+        let dir = tempfile::tempdir().expect("dir");
+        let path = dir.path().join("journal.sqlite");
+        let store = SqliteRenderStateStore::open(&path).expect("open");
+        store.insert(&sample_state()).expect("insert");
+        drop(store);
+
+        // A newer adapter bumped the version; this crate must not guess at
+        // the rows' meaning.
+        let saboteur = Connection::open(&path).expect("saboteur connection");
+        saboteur
+            .execute(
+                "UPDATE finstack_workflow_media_pipeline_schema SET version = 7 WHERE singleton = 1",
+                [],
+            )
+            .expect("bump version");
+        drop(saboteur);
+
+        let Err(error) = SqliteRenderStateStore::open(&path) else {
+            panic!("version 7 is unknown and must fail closed")
+        };
+        assert_eq!(
+            error,
+            StateError::Integrity {
+                code: MEDIA_PIPELINE_SCHEMA_VERSION,
+            }
+        );
+        assert_eq!(error.code(), "media_pipeline_schema_version");
+        // The seed does not overwrite the foreign version.
+        assert_eq!(schema_row(&path), (1, 7));
+    }
+
+    #[test]
+    fn failure_field_is_omitted_when_none_and_read_back_when_set() {
+        let state = sample_state();
+        let json = serde_json::to_string(&state).expect("encode");
+        let top_level: serde_json::Value = serde_json::from_str(&json).expect("json");
+        assert!(
+            top_level.get("failure").is_none(),
+            "an unset render reason keeps the pre-field JSON shape: {json}"
+        );
+        let legacy_shape: RenderState = serde_json::from_str(&json).expect("decode");
+        assert_eq!(legacy_shape.failure, None);
+
+        let mut failed = state;
+        failed.status = RenderStatus::Failed;
+        failed.failure = Some("host released the claim".to_owned());
+        let json = serde_json::to_string(&failed).expect("encode");
+        let reloaded: RenderState = serde_json::from_str(&json).expect("decode");
+        assert_eq!(reloaded.failure.as_deref(), Some("host released the claim"));
     }
 
     #[test]

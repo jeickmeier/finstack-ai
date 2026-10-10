@@ -29,7 +29,7 @@ mod subtitles;
 mod tools;
 
 pub use driver::{
-    MEDIA_PIPELINE_BUDGET_EXCEEDED, MEDIA_PIPELINE_CONFIG_INVALID,
+    MAX_RELEASE_REASON_BYTES, MEDIA_PIPELINE_BUDGET_EXCEEDED, MEDIA_PIPELINE_CONFIG_INVALID,
     MEDIA_PIPELINE_INVALID_ARGUMENTS, MEDIA_PIPELINE_NOT_FOUND, MEDIA_PIPELINE_PLAN_INVALID,
     MEDIA_PIPELINE_STAGE_FAILED, MEDIA_PIPELINE_STORE_FAILURE, MediaPipelineConfig,
     MediaPipelineDriver, PipelineError,
@@ -40,7 +40,7 @@ pub use plan::{
     validate_plan,
 };
 pub use state::{
-    MemoryRenderStateStore, RenderState, RenderStateStore, RenderStatus, SceneStage, SceneState,
-    SqliteRenderStateStore, StateError,
+    MEDIA_PIPELINE_SCHEMA_VERSION, MemoryRenderStateStore, RenderState, RenderStateStore,
+    RenderStatus, SceneStage, SceneState, SqliteRenderStateStore, StateError,
 };
 pub use tools::MediaPipelineToolset;

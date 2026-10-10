@@ -76,6 +76,14 @@ let pipeline_tools = MediaPipelineToolset::try_new(driver)?;
 `MemoryRenderStateStore` replaces the sqlite store for tests and for
 throwaway renders; a restart cannot resume that state.
 
+`SqliteRenderStateStore` shares its file with the journal, so it versions
+its own tables through a `finstack_workflow_media_pipeline_schema` singleton
+row rather than `PRAGMA user_version` (which belongs to the journal). `open`
+seeds version 1, adopts a file whose render table predates the schema row
+without rewriting anything, and fails closed with
+`StateError::Integrity { code: "media_pipeline_schema_version" }` on any
+other version so rows written by a newer adapter are never reinterpreted.
+
 The `finstack-ai` facade wires the same stack from a linked constructor.
 Enable `workflow-media-pipeline` (which turns on `tool-video-compose` and
 `tool-openrouter-media`) and set `LinkedCommon::openrouter_media`,
@@ -172,6 +180,30 @@ provider jobs, reconcile the outcome through `RenderStateStore::update` using
 the current revision, and only then restore `Running` or a terminal status.
 Never clear a live claim or automatically resubmit an uncertain stage.
 
-Compatibility: readers must accept the new `RenderStatus::Advancing` variant
-(`"advancing"` in JSON). Existing rows remain readable. Upgrade all readers and
-drivers together; older drivers do not enforce tick ownership.
+A failure in the composition step is persisted by what it means, so a claim
+is only retained when the outcome is genuinely unknown:
+
+- A transcript-staging failure happens before any paid call. The tick
+  restores the pre-claim status, keeps the scene progress it saved, and
+  returns the error; the next `advance` retries from the transcripts.
+- A persisted row that cannot be composed (a `done` scene with no clip, or a
+  caption plan whose store was removed) is terminal. The tick persists
+  `failed` with the reason in `RenderState::failure` and returns the error;
+  no provider effect ran.
+- A failure after the compose tool was dispatched, or a failed progress
+  write after the transcripts were staged, keeps `advancing`: the effect's
+  outcome is unknown and the host must reconcile it.
+
+`MediaPipelineDriver::release_claim(tenant_scope, render_id, reason)` is the
+host's reconciliation call for a claim it has decided to abandon: it
+compare-and-sets `advancing` to `failed`, records `reason` (non-empty, at
+most 1024 bytes) in `RenderState::failure`, and refuses any row that is not
+`advancing` or that changed between the read and the write. It is a host API,
+not an agent tool.
+
+Compatibility: readers must accept the `RenderStatus::Advancing` variant
+(`"advancing"` in JSON) and the optional render-level `failure` string, which
+is omitted when unset so unchanged rows keep their previous JSON shape.
+Existing rows remain readable. Upgrade all readers and drivers together;
+older drivers do not enforce tick ownership and reject rows carrying a
+render-level `failure`.
