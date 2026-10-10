@@ -190,47 +190,81 @@ pub fn parse(
         return Err(DocumentParseError::UnsupportedFormat);
     }
 
-    let (classification, page_count, requires_ocr) = if format == DocumentFormat::Pdf {
-        let (classification, pages) = classify_pdf(bytes)?;
-        if pages > limits.max_pages {
-            return Err(DocumentParseError::TooLarge {
-                len: bytes.len(),
-                max: u64::from(limits.max_pages),
-            });
-        }
-        let requires_ocr = matches!(
-            classification,
-            DocumentClassification::Scanned | DocumentClassification::Image
-        );
-        (Some(classification), Some(pages), requires_ocr)
-    } else {
-        (None, None, false)
+    if format == DocumentFormat::Pdf {
+        return parse_pdf(bytes, limits);
+    }
+    let Some(selected) = anydoc_format(format) else {
+        return Err(DocumentParseError::UnsupportedFormat);
     };
-
-    let markdown = match anydoc::to_markdown_bytes(bytes, anydoc_format(format)) {
-        Ok(text) => text,
-        // A scanned/image PDF yielding no extractable text is a success, not
-        // an error — but only that specific "nothing to extract" case; a
-        // genuinely broken, encrypted, or over-limit PDF must still surface
-        // as a failure even when we already know it needs OCR.
-        Err(anydoc::ConvertError::Unsupported(_))
-            if requires_ocr && format == DocumentFormat::Pdf =>
-        {
-            String::new()
+    let markdown = anydoc::to_markdown_bytes(bytes, selected).map_err(|error| {
+        DocumentParseError::ParseFailed {
+            message: bounded_message(&error.to_string()),
         }
-        Err(error) => {
-            return Err(DocumentParseError::ParseFailed {
-                message: bounded_message(&error.to_string()),
-            });
-        }
-    };
-
+    })?;
     let (markdown, truncated) = truncate_utf8(markdown, limits.max_output_bytes);
     Ok(ParsedDocument {
         markdown,
         format,
-        page_count,
+        page_count: None,
+        classification: None,
+        requires_ocr: false,
+        truncated,
+    })
+}
+
+/// Classify and extract a PDF with one document load.
+///
+/// `pdf_inspector::process_pdf_mem_with_options` parses the buffer once and
+/// shares the loaded document between detection and extraction; the earlier
+/// classify-then-`anydoc` sequence loaded and detected it twice. pdf-inspector
+/// exposes no public handle to a loaded document, so this is the only
+/// single-load path its API offers.
+///
+/// The `max_pages` ceiling is checked against the reported page count after
+/// that single pass: the pre-extraction resource bound is `max_input_bytes`
+/// (enforced by [`parse`] before any load), and the page ceiling remains a
+/// hard rejection rather than a truncation. A scanned or image-only PDF
+/// yielding no text is a success with `requires_ocr` set; any other PDF
+/// without extractable text is a parse failure.
+fn parse_pdf(bytes: &[u8], limits: &DocumentLimits) -> Result<ParsedDocument, DocumentParseError> {
+    let result =
+        pdf_inspector::process_pdf_mem_with_options(bytes, pdf_inspector::PdfOptions::new())
+            .map_err(|error| DocumentParseError::ParseFailed {
+                message: bounded_message(&error.to_string()),
+            })?;
+    if result.page_count > limits.max_pages {
+        return Err(DocumentParseError::TooLarge {
+            len: bytes.len(),
+            max: u64::from(limits.max_pages),
+        });
+    }
+    let classification = map_pdf_type(result.pdf_type);
+    let requires_ocr = matches!(
         classification,
+        DocumentClassification::Scanned | DocumentClassification::Image
+    );
+    let markdown = match result.markdown {
+        Some(mut markdown) if !markdown.trim().is_empty() => {
+            if !markdown.ends_with('\n') {
+                markdown.push('\n');
+            }
+            markdown
+        }
+        // Nothing to extract from a scanned/image PDF is a success; a
+        // text-bearing PDF with no extractable text is a genuine failure.
+        _ if requires_ocr => String::new(),
+        _ => {
+            return Err(DocumentParseError::ParseFailed {
+                message: bounded_message("PDF has no extractable text: OCR is required"),
+            });
+        }
+    };
+    let (markdown, truncated) = truncate_utf8(markdown, limits.max_output_bytes);
+    Ok(ParsedDocument {
+        markdown,
+        format: DocumentFormat::Pdf,
+        page_count: Some(result.page_count),
+        classification: Some(classification),
         requires_ocr,
         truncated,
     })
@@ -251,7 +285,10 @@ pub fn classify_pdf(bytes: &[u8]) -> Result<(DocumentClassification, u32), Docum
             message: bounded_message(&error.to_string()),
         }
     })?;
-    Ok((map_pdf_type(&classification), classification.page_count))
+    Ok((
+        map_pdf_type(classification.pdf_type),
+        classification.page_count,
+    ))
 }
 
 /// Parse a 1-based inclusive page range of a PDF to Markdown.
@@ -355,10 +392,11 @@ fn from_anydoc(format: anydoc::Format) -> DocumentFormat {
 }
 
 /// Map our public [`DocumentFormat`] to the `anydoc::Format` that selects its
-/// parser. Only ever called with a format `parse` has already confirmed is
-/// not [`DocumentFormat::Unknown`].
-fn anydoc_format(format: DocumentFormat) -> anydoc::Format {
-    match format {
+/// parser. `None` for [`DocumentFormat::Unknown`], which `parse` rejects
+/// before extraction; PDFs take the pdf-inspector path and never reach
+/// anydoc.
+fn anydoc_format(format: DocumentFormat) -> Option<anydoc::Format> {
+    Some(match format {
         DocumentFormat::Pdf => anydoc::Format::Pdf,
         DocumentFormat::Docx => anydoc::Format::Docx,
         DocumentFormat::Doc => anydoc::Format::Doc,
@@ -371,13 +409,13 @@ fn anydoc_format(format: DocumentFormat) -> anydoc::Format {
         DocumentFormat::Rtf => anydoc::Format::Rtf,
         DocumentFormat::Epub => anydoc::Format::Epub,
         DocumentFormat::Csv => anydoc::Format::Csv,
-        DocumentFormat::Unknown => unreachable!("parse() rejects Unknown before this is called"),
-    }
+        DocumentFormat::Unknown => return None,
+    })
 }
 
-/// Map pdf-inspector's classification kind to [`DocumentClassification`].
-fn map_pdf_type(classification: &pdf_inspector::PdfClassification) -> DocumentClassification {
-    match classification.pdf_type {
+/// Map pdf-inspector's detected kind to [`DocumentClassification`].
+fn map_pdf_type(pdf_type: pdf_inspector::PdfType) -> DocumentClassification {
+    match pdf_type {
         pdf_inspector::PdfType::TextBased => DocumentClassification::Text,
         pdf_inspector::PdfType::Scanned => DocumentClassification::Scanned,
         pdf_inspector::PdfType::ImageBased => DocumentClassification::Image,
@@ -385,8 +423,19 @@ fn map_pdf_type(classification: &pdf_inspector::PdfClassification) -> DocumentCl
     }
 }
 
-/// Truncate `text` to at most `max_bytes` at a UTF-8 char boundary.
+/// Truncate `text` in place to at most `max_bytes` at a UTF-8 char boundary.
 pub(crate) fn truncate_utf8(mut text: String, max_bytes: u64) -> (String, bool) {
+    let (kept, truncated) = truncate_str(&text, max_bytes);
+    let cut = kept.len();
+    text.truncate(cut);
+    (text, truncated)
+}
+
+/// Borrow the longest prefix of `text` that is at most `max_bytes` long and
+/// ends on a UTF-8 char boundary. Allocation-free, so callers that must
+/// re-measure several candidate budgets (the output-spill path) do not copy
+/// the full text per attempt.
+pub(crate) fn truncate_str(text: &str, max_bytes: u64) -> (&str, bool) {
     let max = usize::try_from(max_bytes).unwrap_or(usize::MAX);
     if text.len() <= max {
         return (text, false);
@@ -395,8 +444,7 @@ pub(crate) fn truncate_utf8(mut text: String, max_bytes: u64) -> (String, bool) 
     while cut > 0 && !text.is_char_boundary(cut) {
         cut -= 1;
     }
-    text.truncate(cut);
-    (text, true)
+    (text.get(..cut).unwrap_or_default(), true)
 }
 
 fn bounded_message(message: &str) -> String {

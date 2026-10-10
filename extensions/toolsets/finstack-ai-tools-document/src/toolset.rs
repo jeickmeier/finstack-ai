@@ -3,22 +3,25 @@
 use std::sync::Arc;
 
 use finstack_ai_kernel::{
-    ErrorCategory, Metadata, RawJson, RetrySafety, ToolExecutionMode, ToolId, ValidatedToolCall,
+    ArtifactRef, ErrorCategory, Metadata, RawJson, RetrySafety, ToolExecutionMode, ToolId,
+    ValidatedToolCall,
 };
 use finstack_ai_runtime::Bytes;
-use finstack_ai_runtime::artifact::{ArtifactMetadata, ArtifactStore, stage_required_artifact};
+use finstack_ai_runtime::artifact::{
+    ArtifactError, ArtifactMetadata, ArtifactStore, stage_required_artifact,
+};
 use finstack_ai_runtime::ports::PortFuture;
 use finstack_ai_runtime::ports::model::{
     ApprovalMetadata, ApprovalRequirement, SideEffectClass, ToolDeferralSupport, ToolSpec,
 };
 use finstack_ai_runtime::ports::tool::{
     PendingToolEffect, ToolCallContext, ToolError, ToolEventStream, ToolReconcileResult,
-    ToolResult, ToolStreamItem, Toolset, ToolsetDescriptor,
+    ToolResult, ToolStreamItem, Toolset, ToolsetDescriptor, verify_authority,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::parser::DocumentLimits;
+use crate::parser::{DocumentClassification, DocumentFormat, DocumentLimits, ParsedDocument};
 
 /// Distinct namespaced tool ids. [`ToolCatalog`](finstack_ai_runtime) requires
 /// every registered `ToolSpec::id` to be globally unique, so each tool gets
@@ -165,6 +168,8 @@ impl Toolset for DocumentToolset {
             )
             .await
             .map_err(|error| source_error(&error))?;
+            // `Bytes` is a shared immutable buffer straight off the store;
+            // it is moved (refcount bump, no copy) into the parser worker.
             let bytes = resolved.bytes;
             let media_type_hint = args.media_type_hint.unwrap_or(resolved.media_type_hint);
 
@@ -173,7 +178,7 @@ impl Toolset for DocumentToolset {
                     build_parse_result(
                         &toolset,
                         &ctx,
-                        &bytes,
+                        bytes,
                         &media_type_hint,
                         args.page_range,
                         args.max_output_bytes,
@@ -182,7 +187,7 @@ impl Toolset for DocumentToolset {
                     .await?
                 }
                 CLASSIFY_NAME => DocumentOutput {
-                    value: build_classify_result(bytes).await?,
+                    bytes: build_classify_result(bytes).await?,
                     artifact: None,
                 },
                 _ => return Err(invalid_arguments("unknown document tool name")),
@@ -226,24 +231,37 @@ fn validate_call_context(
     if call.tool_id != *expected_id {
         return Err(invalid_arguments("document call identity is invalid"));
     }
-    let locator_scope = ctx.run.locator.tenant_scope.as_ref();
-    if ctx
-        .run
-        .authorization
-        .principal
-        .tenant_scope()
-        .is_some_and(|scope| scope != locator_scope)
-    {
-        return Err(invalid_arguments(
-            "document principal scope does not match the committed effect",
-        ));
-    }
-    Ok(())
+    verify_authority(ctx)
 }
 
+/// One finished tool result: the output JSON serialized exactly once, plus
+/// the artifact the output spilled to when it exceeded `max_result_bytes`.
 struct DocumentOutput {
-    value: serde_json::Value,
-    artifact: Option<finstack_ai_kernel::ArtifactRef>,
+    bytes: Vec<u8>,
+    artifact: Option<ArtifactRef>,
+}
+
+/// Borrowing `document_parse` output shape. Serialized straight from the
+/// parsed document so the (possibly megabyte-scale) Markdown is never
+/// copied into an intermediate `serde_json::Value`.
+#[derive(Serialize)]
+struct ParseOutput<'a> {
+    markdown: &'a str,
+    format: DocumentFormat,
+    page_count: Option<u32>,
+    classification: Option<DocumentClassification>,
+    requires_ocr: bool,
+    truncated: bool,
+    spilled_artifact: Option<&'a ArtifactRef>,
+}
+
+/// `pdf_classify` output shape.
+#[derive(Serialize)]
+struct ClassifyOutput {
+    classification: DocumentClassification,
+    page_count: u32,
+    /// Reserved: the classifier does not expose per-page stats yet.
+    page_stats: Option<Vec<serde_json::Value>>,
 }
 
 /// Deserialize the per-tool argument shape; `pdf_classify` takes only the
@@ -271,7 +289,7 @@ fn parse_call_arguments(name: &str, arguments: &[u8]) -> Result<ParseArguments, 
 async fn build_parse_result(
     toolset: &DocumentToolset,
     ctx: &ToolCallContext,
-    bytes: &[u8],
+    bytes: Bytes,
     media_type_hint: &str,
     page_range: Option<(u32, u32)>,
     max_output_bytes: Option<u64>,
@@ -290,7 +308,7 @@ async fn build_parse_result(
     build_parse_output(parsed, ctx, &toolset.artifact_store, max_result_bytes).await
 }
 
-async fn build_classify_result(bytes: Bytes) -> Result<serde_json::Value, ToolError> {
+async fn build_classify_result(bytes: Bytes) -> Result<Vec<u8>, ToolError> {
     #[cfg(not(target_arch = "wasm32"))]
     let (classification, page_count) =
         tokio::task::spawn_blocking(move || crate::parser::classify_pdf(&bytes))
@@ -300,11 +318,11 @@ async fn build_classify_result(bytes: Bytes) -> Result<serde_json::Value, ToolEr
     #[cfg(target_arch = "wasm32")]
     let (classification, page_count) =
         crate::parser::classify_pdf(&bytes).map_err(|error| parse_error(&error))?;
-    Ok(serde_json::json!({
-        "classification": classification,
-        "page_count": page_count,
-        "page_stats": serde_json::Value::Null,
-    }))
+    serialize_result(&ClassifyOutput {
+        classification,
+        page_count,
+        page_stats: None,
+    })
 }
 
 fn invalid_arguments(message: &'static str) -> ToolError {
@@ -336,15 +354,16 @@ fn source_error(error: &crate::source::SourceError) -> ToolError {
     }
 }
 
+/// Run the parser off the async thread on native hosts (the shared `Bytes`
+/// handle moves into the worker without copying); inline on `wasm32`.
 async fn parse_document(
-    bytes: &[u8],
+    bytes: Bytes,
     media_type_hint: &str,
     page_range: Option<(u32, u32)>,
     limits: DocumentLimits,
-) -> Result<crate::parser::ParsedDocument, ToolError> {
+) -> Result<ParsedDocument, ToolError> {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let bytes = Bytes::copy_from_slice(bytes);
         let media_type_hint = media_type_hint.to_owned();
         tokio::task::spawn_blocking(move || match page_range {
             Some(range) => crate::parser::parse_pages(&bytes, range, &limits),
@@ -356,8 +375,8 @@ async fn parse_document(
     }
     #[cfg(target_arch = "wasm32")]
     match page_range {
-        Some(range) => crate::parser::parse_pages(bytes, range, &limits),
-        None => crate::parser::parse(bytes, Some(media_type_hint), &limits),
+        Some(range) => crate::parser::parse_pages(&bytes, range, &limits),
+        None => crate::parser::parse(&bytes, Some(media_type_hint), &limits),
     }
     .map_err(|error| parse_error(&error))
 }
@@ -393,27 +412,60 @@ fn tool_error(code: &'static str, category: ErrorCategory, message: &'static str
     ToolError::try_new(code, category, false, message, Metadata::empty()).unwrap_or_else(Into::into)
 }
 
+/// Map an output-spill staging failure. An artifact-store size rejection is
+/// a limit the caller can act on (shrink `max_output_bytes`); every other
+/// store failure means the artifact store is unavailable for this call.
+fn staging_error(error: &ArtifactError) -> ToolError {
+    match error {
+        ArtifactError::TooLarge { .. } => tool_error(
+            crate::DOCUMENT_TOO_LARGE,
+            ErrorCategory::Limit,
+            "document output exceeds the artifact store ceiling",
+        ),
+        _ => tool_error(
+            crate::DOCUMENT_SOURCE_UNAVAILABLE,
+            ErrorCategory::Tool,
+            "document artifact staging failed",
+        ),
+    }
+}
+
+/// Serialize one output shape exactly once.
+fn serialize_result<T: Serialize>(output: &T) -> Result<Vec<u8>, ToolError> {
+    serde_json::to_vec(output).map_err(|_| {
+        tool_error(
+            crate::DOCUMENT_PARSE_FAILED,
+            ErrorCategory::Internal,
+            "document result serialization failed",
+        )
+    })
+}
+
+fn byte_len(bytes: &[u8]) -> u64 {
+    u64::try_from(bytes.len()).unwrap_or(u64::MAX)
+}
+
 /// Build the `document_parse` output, spilling to an artifact when the
-/// serialized result exceeds `max_result_bytes`.
+/// serialized result exceeds `max_result_bytes`. The inline result is
+/// serialized once here and handed to the stream as-is.
 async fn build_parse_output(
-    parsed: crate::parser::ParsedDocument,
+    parsed: ParsedDocument,
     ctx: &ToolCallContext,
     store: &Arc<dyn ArtifactStore>,
     max_result_bytes: u64,
 ) -> Result<DocumentOutput, ToolError> {
-    let base = serde_json::json!({
-        "markdown": parsed.markdown,
-        "format": parsed.format,
-        "page_count": parsed.page_count,
-        "classification": parsed.classification,
-        "requires_ocr": parsed.requires_ocr,
-        "truncated": parsed.truncated,
-        "spilled_artifact": serde_json::Value::Null,
-    });
-    let size = serde_json::to_vec(&base).map_or(u64::MAX, |bytes| bytes.len() as u64);
-    if size <= max_result_bytes {
+    let bytes = serialize_result(&ParseOutput {
+        markdown: &parsed.markdown,
+        format: parsed.format,
+        page_count: parsed.page_count,
+        classification: parsed.classification,
+        requires_ocr: parsed.requires_ocr,
+        truncated: parsed.truncated,
+        spilled_artifact: None,
+    })?;
+    if byte_len(&bytes) <= max_result_bytes {
         return Ok(DocumentOutput {
-            value: base,
+            bytes,
             artifact: None,
         });
     }
@@ -430,22 +482,10 @@ async fn build_parse_output(
         },
     )
     .await
-    .map_err(|_| {
-        tool_error(
-            crate::DOCUMENT_TOO_LARGE,
-            ErrorCategory::Tool,
-            "document artifact staging failed",
-        )
-    })?;
-    let spilled_artifact = serde_json::to_value(&artifact).map_err(|_| {
-        tool_error(
-            crate::DOCUMENT_PARSE_FAILED,
-            ErrorCategory::Internal,
-            "spilled artifact reference serialization failed",
-        )
-    })?;
+    .map_err(|error| staging_error(&error))?;
+    let bytes = spilled_parse_output(&parsed, &artifact, max_result_bytes)?;
     Ok(DocumentOutput {
-        value: spilled_parse_output(&parsed, &spilled_artifact, max_result_bytes),
+        bytes,
         artifact: Some(artifact),
     })
 }
@@ -462,36 +502,40 @@ async fn build_parse_output(
 /// already carries the real `spilled_artifact`, then shrink the markdown
 /// budget and re-measure until the actual serialized size fits (JSON string
 /// escaping can also inflate a byte-accurate `str` truncation, so a single
-/// pass is not guaranteed to converge on the first try).
+/// pass is not guaranteed to converge on the first try). Each attempt
+/// borrows a prefix of the Markdown; nothing is cloned per attempt.
 const SPILL_TRUNCATION_ATTEMPTS: u8 = 16;
 
-fn spilled_parse_output(
-    parsed: &crate::parser::ParsedDocument,
-    spilled_artifact: &serde_json::Value,
+/// # Errors
+///
+/// Returns an internal error only when the output shape cannot be
+/// serialized.
+pub(crate) fn spilled_parse_output(
+    parsed: &ParsedDocument,
+    spilled_artifact: &ArtifactRef,
     max_result_bytes: u64,
-) -> serde_json::Value {
+) -> Result<Vec<u8>, ToolError> {
     let build = |markdown: &str| {
-        serde_json::json!({
-            "markdown": markdown,
-            "format": parsed.format,
-            "page_count": parsed.page_count,
-            "classification": parsed.classification,
-            "requires_ocr": parsed.requires_ocr,
-            "truncated": true,
-            "spilled_artifact": spilled_artifact,
+        serialize_result(&ParseOutput {
+            markdown,
+            format: parsed.format,
+            page_count: parsed.page_count,
+            classification: parsed.classification,
+            requires_ocr: parsed.requires_ocr,
+            truncated: true,
+            spilled_artifact: Some(spilled_artifact),
         })
     };
-    let overhead = serde_json::to_vec(&build("")).map_or(u64::MAX, |bytes| bytes.len() as u64);
+    let overhead = byte_len(&build("")?);
     let mut budget = max_result_bytes.saturating_sub(overhead);
     for _ in 0..SPILL_TRUNCATION_ATTEMPTS {
-        let (candidate_markdown, _) = crate::parser::truncate_utf8(parsed.markdown.clone(), budget);
-        let candidate = build(&candidate_markdown);
-        let candidate_size =
-            serde_json::to_vec(&candidate).map_or(u64::MAX, |bytes| bytes.len() as u64);
+        let (candidate_markdown, _) = crate::parser::truncate_str(&parsed.markdown, budget);
+        let candidate = build(candidate_markdown)?;
+        let candidate_size = byte_len(&candidate);
         if candidate_size <= max_result_bytes || budget == 0 {
-            return candidate;
+            return Ok(candidate);
         }
-        // JSON escaping (or the char-boundary rounding in truncate_utf8)
+        // JSON escaping (or the char-boundary rounding in truncate_str)
         // left the candidate over budget; shrink by the exact overshoot
         // (or at least one byte) and re-measure.
         let overshoot = candidate_size - max_result_bytes;
@@ -501,15 +545,8 @@ fn spilled_parse_output(
 }
 
 fn completed_stream(output: DocumentOutput) -> Result<ToolEventStream, ToolError> {
-    let bytes = serde_json::to_vec(&output.value).map_err(|_| {
-        tool_error(
-            crate::DOCUMENT_PARSE_FAILED,
-            ErrorCategory::Internal,
-            "document result serialization failed",
-        )
-    })?;
     let result = ToolResult {
-        output: RawJson::parse(bytes).map_err(|_| {
+        output: RawJson::parse(output.bytes).map_err(|_| {
             tool_error(
                 crate::DOCUMENT_PARSE_FAILED,
                 ErrorCategory::Internal,

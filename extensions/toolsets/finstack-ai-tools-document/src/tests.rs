@@ -158,7 +158,9 @@ use finstack_ai_runtime::ports::PortFuture;
 use finstack_ai_runtime::ports::model::{
     AuthorizationContext, CancellationSignal, RunCallContext, ToolSpec,
 };
-use finstack_ai_runtime::ports::tool::{ToolCallContext, ToolError, ToolStreamItem};
+use finstack_ai_runtime::ports::tool::{
+    TOOL_POLICY_DENIED, ToolCallContext, ToolError, ToolStreamItem,
+};
 use futures_util::StreamExt;
 
 fn block_on<T>(future: impl Future<Output = T>) -> T {
@@ -178,6 +180,13 @@ fn test_scope() -> ArtifactScope {
 }
 
 fn call_context() -> ToolCallContext {
+    call_context_with_principal_scope("tenant-a")
+}
+
+/// A call context whose committed locator is `tenant-a` while the principal
+/// carries `principal_scope`; mismatching the two exercises the shared
+/// `verify_authority` check.
+fn call_context_with_principal_scope(principal_scope: &str) -> ToolCallContext {
     ToolCallContext {
         run: RunCallContext {
             locator: OperationLocator::try_new(
@@ -188,7 +197,7 @@ fn call_context() -> ToolCallContext {
             )
             .expect("locator"),
             authorization: AuthorizationContext {
-                principal: PrincipalRef::try_new("issuer", "subject", Some("tenant-a"))
+                principal: PrincipalRef::try_new("issuer", "subject", Some(principal_scope))
                     .expect("principal"),
                 authentication_method: Arc::from("test"),
                 assurance_level: Arc::from("test"),
@@ -560,4 +569,177 @@ fn media_type_for_extension_round_trips_supported_formats() {
         Some("text/markdown")
     );
     assert_eq!(DocumentFormat::media_type_for_extension("exe"), None);
+}
+
+/// Which `ArtifactError` a [`FailingSpillStore`] raises from `stage_put`.
+#[derive(Clone, Copy)]
+enum SpillFailure {
+    TooLarge,
+    Unavailable,
+}
+
+/// Store that serves `get` from a pre-staged capture store but refuses
+/// every `stage_put`, so the output-spill branch can be driven into each
+/// staging failure mode.
+struct FailingSpillStore {
+    inner: CaptureArtifactStore,
+    failure: SpillFailure,
+}
+
+impl ArtifactStore for FailingSpillStore {
+    fn stage_put(
+        &self,
+        _scope: ArtifactScope,
+        content: Bytes,
+        _metadata: ArtifactMetadata,
+    ) -> PortFuture<Result<ArtifactRef, ArtifactError>> {
+        let failure = self.failure;
+        Box::pin(async move {
+            Err(match failure {
+                SpillFailure::TooLarge => ArtifactError::TooLarge {
+                    len: content.len(),
+                    max: 1,
+                },
+                SpillFailure::Unavailable => ArtifactError::Unavailable {
+                    message: Arc::from("capture store offline"),
+                },
+            })
+        })
+    }
+
+    fn get(
+        &self,
+        scope: ArtifactScope,
+        artifact: ArtifactRef,
+    ) -> PortFuture<Result<Bytes, ArtifactError>> {
+        self.inner.get(scope, artifact)
+    }
+}
+
+/// A CSV whose full Markdown output comfortably exceeds
+/// [`SPILL_TEST_MAX_RESULT_BYTES`], forcing the spill branch.
+fn big_csv() -> Vec<u8> {
+    use std::fmt::Write as _;
+    let mut big_csv = String::from("quarter,revenue\n");
+    for i in 0..200 {
+        let _ = writeln!(big_csv, "Q{i},{}", i * 1000);
+    }
+    big_csv.into_bytes()
+}
+
+fn spill_error_with(failure: SpillFailure) -> ToolError {
+    let inner = CaptureArtifactStore::default();
+    let artifact = stage(&inner, &big_csv(), "text/csv", "big.csv");
+    let store: Arc<dyn ArtifactStore> = Arc::new(FailingSpillStore { inner, failure });
+    let toolset = DocumentToolset::try_new(store).expect("toolset");
+    let toolset = with_max_result_bytes(toolset, "document_parse", SPILL_TEST_MAX_RESULT_BYTES);
+    let arguments = serde_json::json!({"artifact": serde_json::to_value(&artifact).expect("json")});
+    call_tool_err(&toolset, "document_parse", &arguments)
+}
+
+#[test]
+fn scope_mismatch_is_policy_denied() {
+    let store = Arc::new(CaptureArtifactStore::default());
+    let artifact = stage(store.as_ref(), SAMPLE_CSV, "text/csv", "sample.csv");
+    let toolset = DocumentToolset::try_new(store).expect("toolset");
+    let arguments = serde_json::json!({"artifact": serde_json::to_value(&artifact).expect("json")});
+    for name in ["document_parse", "pdf_classify"] {
+        let error = block_on(toolset.call(
+            call_context_with_principal_scope("tenant-b"),
+            validated_call(&toolset, name, &arguments),
+        ))
+        .err()
+        .expect("mismatched principal scope must be refused");
+        assert_eq!(error.code().as_str(), TOOL_POLICY_DENIED, "{name}");
+        assert_ne!(
+            error.code().as_str(),
+            crate::DOCUMENT_INVALID_ARGUMENTS,
+            "authority failures are policy denials, not argument errors"
+        );
+    }
+}
+
+#[test]
+fn store_unavailable_is_not_too_large() {
+    let error = spill_error_with(SpillFailure::Unavailable);
+    assert_eq!(error.code().as_str(), crate::DOCUMENT_SOURCE_UNAVAILABLE);
+    assert_eq!(error.category(), finstack_ai_kernel::ErrorCategory::Tool);
+}
+
+#[test]
+fn oversized_spill_maps_to_limit_code() {
+    let error = spill_error_with(SpillFailure::TooLarge);
+    assert_eq!(error.code().as_str(), crate::DOCUMENT_TOO_LARGE);
+    assert_eq!(error.category(), finstack_ai_kernel::ErrorCategory::Limit);
+}
+
+#[test]
+fn spill_truncation_stays_within_budget() {
+    // Multi-byte text plus characters JSON must escape, so both the
+    // char-boundary rounding and the escaping overshoot paths are exercised.
+    let markdown: String = "héllo \"wörld\"\n".repeat(200);
+    let parsed = parser::ParsedDocument {
+        markdown: markdown.clone(),
+        format: DocumentFormat::Csv,
+        page_count: None,
+        classification: None,
+        requires_ocr: false,
+        truncated: false,
+    };
+    let store = CaptureArtifactStore::default();
+    let artifact = stage(&store, markdown.as_bytes(), "text/markdown", "document.md");
+    let overhead = crate::toolset::spilled_parse_output(&parsed, &artifact, 0)
+        .expect("overhead probe")
+        .len();
+    for max_result_bytes in [
+        overhead + 1,
+        overhead + 7,
+        overhead + 64,
+        overhead + 500,
+        4096,
+    ] {
+        let bytes =
+            crate::toolset::spilled_parse_output(&parsed, &artifact, max_result_bytes as u64)
+                .expect("serialized spill output");
+        assert!(
+            bytes.len() <= max_result_bytes,
+            "budget {max_result_bytes} produced {} bytes",
+            bytes.len()
+        );
+        let output: serde_json::Value = serde_json::from_slice(&bytes).expect("json");
+        assert_eq!(output["truncated"], true);
+        assert!(!output["spilled_artifact"].is_null());
+        let inline = output["markdown"].as_str().expect("markdown");
+        assert!(
+            markdown.starts_with(inline),
+            "inline markdown must be a prefix of the full text"
+        );
+    }
+}
+
+#[test]
+fn pdf_parse_reports_the_single_pass_classification() {
+    // pdf-inspector offers no load counter or hook, so the single-load
+    // refactor cannot be asserted structurally; instead pin that the one
+    // `process_pdf_mem_with_options` pass reports exactly what the separate
+    // classifier reports, for both a text and a scanned fixture.
+    for fixture in [TEXT_PDF, SCANNED_PDF] {
+        let (classification, pages) = parser::classify_pdf(fixture).expect("classifies");
+        let parsed = parser::parse(fixture, Some("application/pdf"), &DocumentLimits::default())
+            .expect("parses");
+        assert_eq!(parsed.classification, Some(classification));
+        assert_eq!(parsed.page_count, Some(pages));
+    }
+}
+
+#[test]
+fn pdf_over_page_limit_is_too_large() {
+    let limits = DocumentLimits {
+        max_pages: 0,
+        ..DocumentLimits::default()
+    };
+    assert!(matches!(
+        parser::parse(TEXT_PDF, Some("application/pdf"), &limits),
+        Err(DocumentParseError::TooLarge { max: 0, .. })
+    ));
 }
