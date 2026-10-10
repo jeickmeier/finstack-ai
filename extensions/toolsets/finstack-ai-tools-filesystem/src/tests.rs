@@ -689,8 +689,179 @@ async fn search_enforces_the_aggregate_scan_byte_limit() {
 
 #[test]
 fn persisted_deadline_that_has_elapsed_is_a_stable_timeout() {
-    let elapsed = finstack_ai_kernel::Timestamp::from_unix_ms(0).expect("timestamp");
-    let error = operation_deadline(Some(elapsed), Some(Duration::from_secs(10)))
-        .expect_err("elapsed deadline");
+    let mut run = context().run;
+    run.deadline = Some(finstack_ai_kernel::Timestamp::from_unix_ms(0).expect("timestamp"));
+    let error =
+        operation_deadline(&run, Some(Duration::from_secs(10))).expect_err("elapsed deadline");
     assert_eq!(error.code(), FILESYSTEM_TIMEOUT);
+
+    let run = context().run;
+    let open_ended = operation_deadline(&run, None).expect("no deadline");
+    assert!(open_ended.is_none());
+    let bounded =
+        operation_deadline(&run, Some(Duration::from_secs(10))).expect("operation timeout only");
+    assert!(bounded.is_some());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn list_skips_unix_socket_entries() {
+    use std::os::unix::net::UnixListener;
+
+    // `sun_path` is short; fall back to /tmp when the default temp root is
+    // too long to bind.
+    let root = TempDir::new().expect("root");
+    let (root, _listener) = if let Ok(listener) = UnixListener::bind(root.path().join("sock")) {
+        (root, listener)
+    } else {
+        let short = tempfile::tempdir_in("/tmp").expect("short root");
+        let listener = UnixListener::bind(short.path().join("sock")).expect("bind socket");
+        (short, listener)
+    };
+    std::fs::write(root.path().join("visible.txt"), "ok").expect("visible");
+    let toolset = FileSystemToolset::try_new(root.path()).expect("filesystem");
+
+    let list = invoke(&toolset, 3, serde_json::json!({"path": ""}))
+        .await
+        .expect("list succeeds with a socket in the directory");
+    let listed: serde_json::Value = serde_json::from_str(list.output.as_str()).expect("json");
+    let entries = listed["entries"].as_array().expect("entries");
+    assert!(
+        entries
+            .iter()
+            .any(|entry| entry["name"] == "visible.txt" && entry["kind"] == "file")
+    );
+    assert!(
+        entries
+            .iter()
+            .all(|entry| entry["name"] != "sock" || entry["kind"] == "other"),
+        "a socket must never be reported as a regular file: {entries:?}"
+    );
+
+    let glob = invoke(&toolset, 4, serde_json::json!({"pattern": "**/*"}))
+        .await
+        .expect("walk succeeds with a socket in the tree");
+    assert!(glob.output.as_str().contains("visible.txt"));
+    let search = invoke(&toolset, 5, serde_json::json!({"query": "ok"}))
+        .await
+        .expect("search never opens the socket");
+    assert!(search.output.as_str().contains("visible.txt"));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn search_counts_oversize_file_and_continues() {
+    let root = TempDir::new().expect("root");
+    std::fs::write(root.path().join("small.txt"), "needle\n").expect("small");
+    std::fs::write(root.path().join("big.txt"), "needle ".repeat(8)).expect("big");
+    let toolset = FileSystemToolset::try_new(root.path())
+        .expect("filesystem")
+        .try_with_limits(FileSystemLimits {
+            file_bytes: 16,
+            ..FileSystemLimits::default()
+        })
+        .expect("limits");
+
+    let search = invoke(&toolset, 5, serde_json::json!({"query": "needle"}))
+        .await
+        .expect("oversize file is skipped, not fatal");
+    let output: serde_json::Value = serde_json::from_str(search.output.as_str()).expect("json");
+    assert_eq!(output["skipped_oversize"], 1);
+    let matches = output["matches"].as_array().expect("matches");
+    assert_eq!(matches.len(), 1);
+    assert_eq!(matches[0]["path"], "small.txt");
+
+    // The aggregate scan ceiling still fails closed for files that are read.
+    let strict = FileSystemToolset::try_new(root.path())
+        .expect("filesystem")
+        .try_with_limits(FileSystemLimits {
+            file_bytes: 16,
+            scan_bytes: 4,
+            ..FileSystemLimits::default()
+        })
+        .expect("limits");
+    let error = invoke(&strict, 5, serde_json::json!({"query": "needle"}))
+        .await
+        .expect_err("aggregate limit");
+    assert_eq!(error.code(), FILESYSTEM_LIMIT_EXCEEDED);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn walk_wide_directory_keeps_fd_use_bounded() {
+    const WIDTH: usize = 4_096;
+
+    let root = TempDir::new().expect("root");
+    for index in 0..WIDTH {
+        let directory = root.path().join(format!("d{index:04}"));
+        std::fs::create_dir(&directory).expect("subdir");
+        std::fs::write(directory.join("f.txt"), "x").expect("leaf");
+    }
+    let toolset = FileSystemToolset::try_new(root.path()).expect("filesystem");
+
+    let glob = invoke(&toolset, 4, serde_json::json!({"pattern": "*/f.txt"}))
+        .await
+        .expect("wide walk must not exhaust descriptors");
+    let output: serde_json::Value = serde_json::from_str(glob.output.as_str()).expect("json");
+    assert_eq!(output["paths"].as_array().expect("paths").len(), WIDTH);
+    // Depth 1 below the base: the base handle plus the one child being read.
+    assert!(
+        toolset.root.walk_gauge().peak() <= 2,
+        "open directory handles must be bounded by depth, got {}",
+        toolset.root.walk_gauge().peak()
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn glob_walks_only_literal_prefix() {
+    let root = TempDir::new().expect("root");
+    std::fs::create_dir(root.path().join("noise")).expect("noise");
+    for index in 0..20 {
+        std::fs::write(root.path().join(format!("noise/n{index}.txt")), "x").expect("noise file");
+    }
+    std::fs::create_dir(root.path().join("src")).expect("src");
+    std::fs::write(root.path().join("src/a.rs"), "fn a() {}").expect("a.rs");
+    let toolset = FileSystemToolset::try_new(root.path())
+        .expect("filesystem")
+        .try_with_limits(FileSystemLimits {
+            visited_entries: 8,
+            search_matches: 8,
+            ..FileSystemLimits::default()
+        })
+        .expect("limits");
+
+    // Walking the whole root would trip the entry limit on `noise/`.
+    let full = invoke(&toolset, 4, serde_json::json!({"pattern": "**/*.rs"}))
+        .await
+        .expect_err("full walk exceeds the entry limit");
+    assert_eq!(full.code(), FILESYSTEM_LIMIT_EXCEEDED);
+
+    let scoped = invoke(&toolset, 4, serde_json::json!({"pattern": "src/*.rs"}))
+        .await
+        .expect("prefix-scoped walk stays under the entry limit");
+    let output: serde_json::Value = serde_json::from_str(scoped.output.as_str()).expect("json");
+    assert_eq!(output["paths"], serde_json::json!(["src/a.rs"]));
+
+    let literal = invoke(&toolset, 4, serde_json::json!({"pattern": "src/a.rs"}))
+        .await
+        .expect("literal pattern");
+    assert!(literal.output.as_str().contains("src/a.rs"));
+
+    let missing = invoke(
+        &toolset,
+        4,
+        serde_json::json!({"pattern": "absent/**/*.rs"}),
+    )
+    .await
+    .expect("missing prefix matches nothing");
+    assert!(missing.output.as_str().contains("\"paths\":[]"));
+    let not_dir = invoke(&toolset, 4, serde_json::json!({"pattern": "src/a.rs/*"}))
+        .await
+        .expect("file prefix matches nothing");
+    assert!(not_dir.output.as_str().contains("\"paths\":[]"));
+    let protected = invoke(&toolset, 4, serde_json::json!({"pattern": ".git/**"}))
+        .await
+        .expect("protected prefix matches nothing");
+    assert!(protected.output.as_str().contains("\"paths\":[]"));
 }

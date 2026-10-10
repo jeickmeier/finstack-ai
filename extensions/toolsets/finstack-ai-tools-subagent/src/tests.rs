@@ -650,6 +650,38 @@ async fn terminal_status_reports_and_evicts_the_child() {
     assert!(!restarted.is_error);
 }
 
+#[tokio::test]
+async fn start_reclaims_slots_from_terminal_children() {
+    let invoker = Arc::new(RecordingInvoker {
+        starts: AtomicUsize::new(0),
+        cancels: AtomicUsize::new(0),
+        statuses: AtomicUsize::new(0),
+        error: None,
+        status: ChildRunStatus::Completed,
+    });
+    let toolset = SubagentToolset::try_with_max_tracked_children(
+        seeded_starter(Arc::clone(&invoker) as Arc<dyn AgentInvoker>).await,
+        allow_list(),
+        1,
+    )
+    .expect("toolset");
+    let first = invoke(&toolset, START_NAME, start_args("finstack.agent.child"))
+        .await
+        .expect("first start");
+    assert!(!first.is_error);
+    assert_eq!(invoker.statuses.load(Ordering::SeqCst), 0);
+
+    // No status call evicted the first child; the second start must sweep
+    // the terminal child itself and reuse its slot.
+    let second = invoke(&toolset, START_NAME, start_args("finstack.agent.child"))
+        .await
+        .expect("second start");
+    assert!(!second.is_error, "{:?}", result_payload(&second));
+    assert_eq!(invoker.statuses.load(Ordering::SeqCst), 1);
+    assert_eq!(invoker.starts.load(Ordering::SeqCst), 2);
+    assert_eq!(toolset.children.lock().expect("table").len(), 1);
+}
+
 #[test]
 fn explicit_tracking_limit_is_bounded() {
     let invoker = Arc::new(RecordingInvoker {

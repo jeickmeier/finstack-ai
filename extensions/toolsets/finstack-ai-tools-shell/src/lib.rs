@@ -36,11 +36,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender};
 use std::thread::JoinHandle;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use finstack_ai_kernel::{
-    ErrorCategory, Metadata, RawJson, RetrySafety, Sensitivity, Timestamp, ToolExecutionMode,
-    ToolId, ValidatedToolCall,
+    ErrorCategory, Metadata, RawJson, RetrySafety, Sensitivity, ToolExecutionMode, ToolId,
+    ValidatedToolCall,
 };
 use finstack_ai_runtime::Bytes;
 use finstack_ai_runtime::artifact::{
@@ -50,9 +50,11 @@ use finstack_ai_runtime::confinement::{
     ConfinedChild, ConfinementError, ConfinementProfile, ProcessConfinement,
     configure_process_tree, terminate_process_tree,
 };
+use finstack_ai_runtime::ids::{Clock, SystemClock};
 use finstack_ai_runtime::ports::PortFuture;
 use finstack_ai_runtime::ports::model::{
-    ApprovalMetadata, ApprovalRequirement, SideEffectClass, ToolDeferralSupport, ToolSpec,
+    ApprovalMetadata, ApprovalRequirement, RunCallContext, SideEffectClass, ToolDeferralSupport,
+    ToolSpec,
 };
 #[cfg(unix)]
 use finstack_ai_runtime::ports::tool::ToolStreamItem;
@@ -239,43 +241,32 @@ impl ShellPolicy {
     }
 }
 
-/// Authorized command presented to a [`CommandSandbox`].
+/// Authorized command presented to the [`ProcessCommandSandbox`].
 #[derive(Debug, Clone)]
-pub struct SandboxedCommand {
+pub(crate) struct SandboxedCommand {
     /// Resolved executable path.
-    pub program: PathBuf,
+    pub(crate) program: PathBuf,
     /// Argument vector including `argv[0]`.
-    pub argv: Arc<[Arc<str>]>,
+    pub(crate) argv: Arc<[Arc<str>]>,
     /// Explicit environment; never a host dump.
-    pub env: BTreeMap<String, String>,
+    pub(crate) env: BTreeMap<String, String>,
     /// Optional authorized working-directory path.
-    pub cwd: Option<PathBuf>,
+    pub(crate) cwd: Option<PathBuf>,
     /// Relative timeout.
-    pub timeout: Duration,
+    pub(crate) timeout: Duration,
     /// Combined output ceiling.
-    pub max_output_bytes: usize,
+    pub(crate) max_output_bytes: usize,
 }
 
-/// Captured sandbox output.
+/// Captured process output.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SandboxedOutput {
+pub(crate) struct SandboxedOutput {
     /// Standard output bytes.
-    pub stdout: Vec<u8>,
+    pub(crate) stdout: Vec<u8>,
     /// Standard error bytes.
-    pub stderr: Vec<u8>,
+    pub(crate) stderr: Vec<u8>,
     /// Process exit code.
-    pub exit_code: i32,
-}
-
-/// Optional host-injected execution adapter. The default is in-process.
-pub trait CommandSandbox: Send + Sync {
-    /// Execute one authorized command.
-    fn run(
-        &self,
-        request: SandboxedCommand,
-        cancellation: finstack_ai_runtime::ports::model::CancellationSignal,
-        deadline: Option<Timestamp>,
-    ) -> PortFuture<Result<SandboxedOutput, ToolError>>;
+    pub(crate) exit_code: i32,
 }
 
 /// How [`ProcessCommandSandbox`] starts a child.
@@ -349,36 +340,45 @@ impl ProcessCommandSandbox {
     }
 }
 
-impl CommandSandbox for ProcessCommandSandbox {
-    fn run(
+impl ProcessCommandSandbox {
+    /// Execute one authorized command on the blocking pool.
+    ///
+    /// The relative `request.timeout` is clamped to the time left on the
+    /// call deadline before the child is spawned; an already-elapsed deadline
+    /// or an unreadable clock fails closed with [`SHELL_TIMEOUT`].
+    pub(crate) async fn run(
         &self,
-        request: SandboxedCommand,
-        cancellation: finstack_ai_runtime::ports::model::CancellationSignal,
-        deadline: Option<Timestamp>,
-    ) -> PortFuture<Result<SandboxedOutput, ToolError>> {
+        mut request: SandboxedCommand,
+        run: &RunCallContext,
+    ) -> Result<SandboxedOutput, ToolError> {
+        let now = SystemClock.now().map_err(|_| timeout_error())?;
+        if let Some(remaining) = run.deadline_remaining(now) {
+            if remaining.is_zero() {
+                return Err(timeout_error());
+            }
+            request.timeout = request.timeout.min(remaining);
+        }
+        let cancellation = run.cancellation.clone();
         let confinement = self.confinement.clone();
         #[cfg(unix)]
         let root = self.root.clone();
-        Box::pin(async move {
-            tokio::task::spawn_blocking(move || {
-                run_process(
-                    &request,
-                    &cancellation,
-                    deadline,
-                    confinement.as_ref(),
-                    #[cfg(unix)]
-                    root.as_deref(),
-                )
-            })
-            .await
-            .map_err(|_| {
-                tool_error(
-                    SHELL_IO_ERROR,
-                    ErrorCategory::Internal,
-                    "shell worker failed",
-                )
-            })?
+        tokio::task::spawn_blocking(move || {
+            run_process(
+                &request,
+                &cancellation,
+                confinement.as_ref(),
+                #[cfg(unix)]
+                root.as_deref(),
+            )
         })
+        .await
+        .map_err(|_| {
+            tool_error(
+                SHELL_IO_ERROR,
+                ErrorCategory::Internal,
+                "shell worker failed",
+            )
+        })?
     }
 }
 
@@ -406,7 +406,7 @@ pub struct ShellToolset {
     tool_id: ToolId,
     policy: ShellPolicy,
     limits: ShellLimits,
-    sandbox: Arc<dyn CommandSandbox>,
+    sandbox: ProcessCommandSandbox,
     artifact_store: Option<Arc<dyn ArtifactStore>>,
     sensitivity: Sensitivity,
     #[cfg(unix)]
@@ -449,7 +449,7 @@ impl ShellToolset {
             tool_id,
             policy,
             limits: ShellLimits::default(),
-            sandbox: Arc::new(sandbox),
+            sandbox,
             artifact_store: None,
             sensitivity: Sensitivity::Internal,
             root,
@@ -486,13 +486,6 @@ impl ShellToolset {
         Ok(self)
     }
 
-    /// Inject a host sandbox adapter.
-    #[must_use]
-    pub fn with_sandbox(mut self, sandbox: Arc<dyn CommandSandbox>) -> Self {
-        self.sandbox = sandbox;
-        self
-    }
-
     /// Request runtime process confinement using the authorized cwd root.
     ///
     /// # Errors
@@ -519,7 +512,7 @@ impl ShellToolset {
             let mut sandbox =
                 ProcessCommandSandbox::confined(profile).map_err(|_| ShellError::Unsupported)?;
             sandbox.set_root(root.fd());
-            self.sandbox = Arc::new(sandbox);
+            self.sandbox = sandbox;
             Ok(self)
         }
     }
@@ -567,7 +560,7 @@ impl Toolset for ShellToolset {
         {
             let policy = self.policy.clone();
             let limits = self.limits;
-            let sandbox = Arc::clone(&self.sandbox);
+            let sandbox = self.sandbox.clone();
             let artifact_store = self.artifact_store.clone();
             let sensitivity = self.sensitivity;
             let root = self.root.clone();
@@ -581,9 +574,7 @@ impl Toolset for ShellToolset {
                     serde_json::from_slice(call.call.arguments().as_bytes())
                         .map_err(|_| invalid_error("shell arguments are invalid"))?;
                 let request = authorize_command(&policy, &arguments, limits, root.as_ref())?;
-                let output = sandbox
-                    .run(request, ctx.run.cancellation.clone(), ctx.run.deadline)
-                    .await?;
+                let output = sandbox.run(request, &ctx.run).await?;
                 let (result, artifact) =
                     normalize_output(output, &ctx, limits, artifact_store, sensitivity).await?;
                 let mut items = Vec::with_capacity(2);
@@ -646,11 +637,10 @@ fn authorize_command(
 fn run_process(
     request: &SandboxedCommand,
     cancellation: &finstack_ai_runtime::ports::model::CancellationSignal,
-    deadline: Option<Timestamp>,
     confinement: Option<&(ProcessConfinement, ConfinementProfile)>,
     #[cfg(unix)] root: Option<&rustix::fd::OwnedFd>,
 ) -> Result<SandboxedOutput, ToolError> {
-    if cancellation.is_cancelled() || deadline_elapsed(deadline) {
+    if cancellation.is_cancelled() {
         return Err(timeout_error());
     }
     let mut child = spawn_running_child(
@@ -671,10 +661,7 @@ fn run_process(
             pumps.abort();
             return Err(limit_error());
         }
-        if cancellation.is_cancelled()
-            || deadline_elapsed(deadline)
-            || started.elapsed() >= request.timeout
-        {
+        if cancellation.is_cancelled() || started.elapsed() >= request.timeout {
             let _ = child.kill();
             let _ = child.wait();
             pumps.abort();
@@ -935,18 +922,6 @@ fn apply_authorized_cwd(command: &mut Command, fd: rustix::fd::OwnedFd) {
             Ok(())
         });
     }
-}
-
-fn deadline_elapsed(deadline: Option<Timestamp>) -> bool {
-    let Some(deadline) = deadline else {
-        return false;
-    };
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |duration| {
-            i64::try_from(duration.as_millis()).unwrap_or(i64::MAX)
-        });
-    now >= deadline.as_unix_ms()
 }
 
 async fn normalize_output(

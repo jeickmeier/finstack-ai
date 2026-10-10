@@ -177,17 +177,23 @@ impl Toolset for SkillsToolset {
                         )))
                     });
                 }
-                let current = match (self.host.active)(run_id) {
-                    Ok(active) => active,
-                    Err(error) => {
-                        return Box::pin(async move { Ok(completed_error(&host_error(&error))) });
+                let active = Arc::clone(&self.host.active);
+                let activate = Arc::clone(&self.host.activate);
+                Box::pin(async move {
+                    // Host callbacks are opaque and may block; keep them off
+                    // the async executor and inside the returned future so
+                    // nothing runs before the caller polls.
+                    let current = match host_call(move || active(run_id)).await {
+                        Ok(active) => active,
+                        Err(error) => return Ok(completed_error(&error)),
+                    };
+                    let complete = union_named(current, named);
+                    let submitted = complete.clone();
+                    if let Err(error) = host_call(move || activate(run_id, submitted)).await {
+                        return Ok(completed_error(&error));
                     }
-                };
-                let complete = union_named(current, named);
-                if let Err(error) = (self.host.activate)(run_id, complete.clone()) {
-                    return Box::pin(async move { Ok(completed_error(&host_error(&error))) });
-                }
-                Box::pin(async move { Ok(completed(activate_output(&complete), false)) })
+                    Ok(completed(activate_output(&complete), false))
+                })
             }
             _ => Box::pin(async move {
                 Ok(completed_error(&tool_error(
@@ -282,6 +288,25 @@ fn completed_error(error: &ToolError) -> ToolEventStream {
         })),
         true,
     )
+}
+
+/// Run one host callback on the blocking pool and map its failure to a
+/// stable tool error. A panicked or cancelled worker is reported as
+/// [`SKILLS_ACTIVATION_FAILED`].
+async fn host_call<T, F>(callback: F) -> Result<T, ToolError>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, SkillsHostError> + Send + 'static,
+{
+    match tokio::task::spawn_blocking(callback).await {
+        Ok(Ok(value)) => Ok(value),
+        Ok(Err(error)) => Err(host_error(&error)),
+        Err(_) => Err(tool_error(
+            SKILLS_ACTIVATION_FAILED,
+            ErrorCategory::Internal,
+            "capability activation host worker failed",
+        )),
+    }
 }
 
 fn host_error(error: &SkillsHostError) -> ToolError {

@@ -7,7 +7,7 @@ use finstack_ai_kernel::{
 use finstack_ai_runtime::ports::model::{
     ApprovalRequirement, AuthorizationContext, CancellationSignal, RunCallContext,
 };
-use finstack_ai_runtime::ports::tool::ToolCallContext;
+use finstack_ai_runtime::ports::tool::{TOOL_POLICY_DENIED, ToolCallContext};
 use futures_util::StreamExt;
 use std::sync::Arc;
 
@@ -367,7 +367,7 @@ async fn call_rejects_mismatched_principal_scope() {
         .await
         .err()
         .expect("must fail");
-    assert_eq!(error.code(), ELICITATION_INVALID_ARGUMENTS);
+    assert_eq!(error.code(), TOOL_POLICY_DENIED);
 }
 
 fn typed_toolset() -> ElicitationToolset {

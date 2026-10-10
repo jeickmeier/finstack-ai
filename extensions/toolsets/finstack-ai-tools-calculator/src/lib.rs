@@ -32,7 +32,7 @@ use finstack_ai_runtime::ports::model::{
 };
 use finstack_ai_runtime::ports::tool::{
     ToolCallContext, ToolError, ToolEventStream, ToolResult, ToolStreamItem, Toolset,
-    ToolsetDescriptor,
+    ToolsetDescriptor, verify_authority,
 };
 use futures_util::stream;
 use serde::{Deserialize, Serialize};
@@ -278,21 +278,7 @@ fn validate_call_context(
             "calculator call identity is invalid",
         ));
     }
-    let locator_scope = ctx.run.locator.tenant_scope.as_ref();
-    if ctx
-        .run
-        .authorization
-        .principal
-        .tenant_scope()
-        .is_some_and(|scope| scope != locator_scope)
-    {
-        return Err(tool_error(
-            CALCULATOR_INVALID_ARGUMENTS,
-            ErrorCategory::Validation,
-            "calculator principal scope does not match the committed effect",
-        ));
-    }
-    Ok(())
+    verify_authority(ctx)
 }
 
 fn tool_error(code: &'static str, category: ErrorCategory, message: &'static str) -> ToolError {

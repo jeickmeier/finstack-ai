@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use finstack_ai_kernel::{
@@ -200,4 +201,48 @@ async fn capability_activate_bound_fails_the_tool_call() {
     assert!(result.is_error);
     let text = String::from_utf8_lossy(result.output.as_bytes());
     assert!(text.contains(SKILLS_ACTIVATION_BOUND));
+}
+
+#[tokio::test]
+async fn activate_host_callbacks_run_inside_the_future() {
+    let active_called = Arc::new(AtomicBool::new(false));
+    let activate_called = Arc::new(AtomicBool::new(false));
+    let host = SkillsHost {
+        catalog: catalog(),
+        active: Arc::new({
+            let active_called = Arc::clone(&active_called);
+            move |_run| {
+                active_called.store(true, Ordering::SeqCst);
+                Ok(Vec::new())
+            }
+        }),
+        activate: Arc::new({
+            let activate_called = Arc::clone(&activate_called);
+            move |_run, _complete| {
+                activate_called.store(true, Ordering::SeqCst);
+                Ok(())
+            }
+        }),
+    };
+    let toolset = SkillsToolset::try_new(host).expect("toolset");
+    let future = toolset.call(
+        context(),
+        call(
+            &toolset,
+            "capability_activate",
+            &serde_json::json!({ "id": "demo.capability.beta" }),
+        ),
+    );
+    assert!(
+        !active_called.load(Ordering::SeqCst) && !activate_called.load(Ordering::SeqCst),
+        "host callbacks must not run before the future is polled"
+    );
+    let mut stream = future.await.expect("call");
+    let ToolStreamItem::Completed(result) = stream.next().await.expect("item").expect("stream")
+    else {
+        panic!("expected completion");
+    };
+    assert!(!result.is_error);
+    assert!(active_called.load(Ordering::SeqCst));
+    assert!(activate_called.load(Ordering::SeqCst));
 }

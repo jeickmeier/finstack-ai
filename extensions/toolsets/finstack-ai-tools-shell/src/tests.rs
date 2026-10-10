@@ -207,6 +207,26 @@ async fn timeout_kills_sleep_without_fabricating_success() {
 
 #[cfg(unix)]
 #[tokio::test]
+async fn elapsed_call_deadline_is_a_stable_timeout_before_spawn() {
+    let toolset = ShellToolset::try_new(echo_policy(), None).expect("shell");
+    let mut ctx = context();
+    ctx.run.deadline = Some(finstack_ai_kernel::Timestamp::from_unix_ms(1).expect("deadline"));
+    let started = std::time::Instant::now();
+    let Err(error) = toolset
+        .call(
+            ctx,
+            call(&toolset, &serde_json::json!({"argv":["/bin/sleep","2"]})),
+        )
+        .await
+    else {
+        panic!("elapsed deadline must fail before spawn");
+    };
+    assert_eq!(error.code(), SHELL_TIMEOUT);
+    assert!(started.elapsed() < Duration::from_secs(1));
+}
+
+#[cfg(unix)]
+#[tokio::test]
 async fn successful_leader_does_not_leave_descendant_owned_pipes_open() {
     let policy = ShellPolicy::try_new(["/bin/sh"]).expect("policy");
     let toolset = ShellToolset::try_new(policy, None)

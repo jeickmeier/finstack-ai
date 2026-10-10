@@ -9,14 +9,14 @@ use finstack_ai_kernel::ErrorCategory;
 use finstack_ai_runtime::ports::model::CancellationSignal;
 use finstack_ai_runtime::ports::tool::{TOOL_CANCELLED, ToolError};
 use rustix::fd::OwnedFd;
-use rustix::fs::{Dir, FileType, Mode, OFlags, fstat, open, openat};
+use rustix::fs::{AtFlags, Dir, FileType, Mode, OFlags, fstat, open, openat, statat};
 use serde::Serialize;
 
 use crate::operation::{FileOperation, FileSystemCeilings, OperationOutput};
-use crate::policy::{ProtectedPaths, ValidatedPath, glob_matches};
+use crate::policy::{GlobMatcher, ProtectedPaths, ValidatedPath, literal_prefix_directory};
 use crate::{
-    FILESYSTEM_NOT_FOUND, FILESYSTEM_POLICY_DENIED, FileSystemError, FileSystemLimits,
-    fs_tool_error, invalid_error, io_error, limit_error, policy_error,
+    FILESYSTEM_LIMIT_EXCEEDED, FILESYSTEM_NOT_FOUND, FILESYSTEM_POLICY_DENIED, FileSystemError,
+    FileSystemLimits, fs_tool_error, invalid_error, io_error, limit_error, policy_error,
 };
 
 const DIRECTORY_FLAGS: OFlags = OFlags::RDONLY
@@ -27,6 +27,8 @@ const READ_FLAGS: OFlags = OFlags::RDONLY
     .union(OFlags::NOFOLLOW)
     .union(OFlags::CLOEXEC)
     .union(OFlags::NONBLOCK);
+/// Entries inspected between interruption checks in the glob filter loop.
+const GLOB_CHECK_STRIDE: usize = 256;
 
 #[derive(Clone, Copy)]
 struct SearchControl<'a> {
@@ -40,6 +42,8 @@ pub(crate) struct Root {
     fd: Arc<OwnedFd>,
     #[cfg(test)]
     hooks: Arc<std::sync::Mutex<TestHooks>>,
+    #[cfg(test)]
+    walk_gauge: Arc<WalkGauge>,
 }
 
 #[cfg(test)]
@@ -47,6 +51,60 @@ pub(crate) struct Root {
 pub(crate) struct TestHooks {
     pub(crate) before_final_open: Option<Arc<dyn Fn() + Send + Sync>>,
     pub(crate) after_final_open: Option<Arc<dyn Fn() + Send + Sync>>,
+}
+
+/// Test-only gauge of directory handles a walk holds open at once.
+#[cfg(test)]
+#[derive(Default)]
+pub(crate) struct WalkGauge {
+    open: std::sync::atomic::AtomicUsize,
+    peak: std::sync::atomic::AtomicUsize,
+}
+
+#[cfg(test)]
+impl WalkGauge {
+    fn opened(&self) {
+        use std::sync::atomic::Ordering;
+        let open = self.open.fetch_add(1, Ordering::SeqCst) + 1;
+        self.peak.fetch_max(open, Ordering::SeqCst);
+    }
+
+    fn closed(&self) {
+        self.open.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Most directory handles any walk on this root held open simultaneously.
+    pub(crate) fn peak(&self) -> usize {
+        self.peak.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+/// One directory handle owned by a walk; releases its gauge slot on drop.
+struct WalkDir {
+    fd: OwnedFd,
+    #[cfg(test)]
+    gauge: Arc<WalkGauge>,
+}
+
+#[cfg(test)]
+impl Drop for WalkDir {
+    fn drop(&mut self) {
+        self.gauge.closed();
+    }
+}
+
+/// A directory the walk has yet to read: either already open (the base) or a
+/// `(parent, name)` pair opened only when popped, so open handles are bounded
+/// by depth rather than by fan-out.
+enum PendingDir {
+    Open(WalkDir),
+    Child { parent: Arc<WalkDir>, name: String },
+}
+
+struct WalkFrame {
+    dir: PendingDir,
+    path: String,
+    depth: usize,
 }
 
 impl Root {
@@ -57,7 +115,25 @@ impl Root {
             fd: Arc::new(fd),
             #[cfg(test)]
             hooks: Arc::new(std::sync::Mutex::new(TestHooks::default())),
+            #[cfg(test)]
+            walk_gauge: Arc::new(WalkGauge::default()),
         })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn walk_gauge(&self) -> &WalkGauge {
+        &self.walk_gauge
+    }
+
+    fn walk_dir(&self, fd: OwnedFd) -> WalkDir {
+        let _ = &self.fd;
+        #[cfg(test)]
+        self.walk_gauge.opened();
+        WalkDir {
+            fd,
+            #[cfg(test)]
+            gauge: Arc::clone(&self.walk_gauge),
+        }
     }
 
     pub(crate) fn execute(
@@ -228,12 +304,9 @@ impl Root {
                     "filesystem list exceeds the configured entry limit",
                 ));
             }
-            let opened = match openat(&fd, name, READ_FLAGS, Mode::empty()) {
-                Ok(opened) => opened,
-                Err(error) if skippable_child_open(error) => continue,
-                Err(error) => return Err(map_open_error(error)),
+            let Some(kind) = classify_child(&fd, name)? else {
+                continue;
             };
-            let kind = opened_kind(&opened)?;
             entries.push(ListEntry {
                 name: name.to_owned(),
                 kind,
@@ -258,13 +331,42 @@ impl Root {
         cancellation: &CancellationSignal,
         deadline: Option<Instant>,
     ) -> Result<OperationOutput, ToolError> {
-        let base = ValidatedPath::try_directory("", protected)?;
-        let entries = self.walk(&base, ceilings.limits, protected, cancellation, deadline)?;
-        let paths = entries
-            .into_iter()
-            .filter(|entry| glob_matches(pattern, &entry.path))
-            .map(|entry| entry.path)
-            .collect::<Vec<_>>();
+        // Only the subtree under the literal prefix can match, so the walk
+        // starts there. A prefix that is protected, missing, or not a
+        // directory matches nothing, exactly as the full walk would have.
+        let prefix = literal_prefix_directory(pattern);
+        let mut paths = Vec::new();
+        if let Ok(base) = ValidatedPath::try_directory(prefix, protected) {
+            let base_fd = match self.open_directory(&base) {
+                Ok(fd) => Some(fd),
+                Err(error)
+                    if error.code() == FILESYSTEM_NOT_FOUND
+                        || error.code() == FILESYSTEM_POLICY_DENIED =>
+                {
+                    None
+                }
+                Err(error) => return Err(error),
+            };
+            if let Some(base_fd) = base_fd {
+                let entries = self.walk_from(
+                    base_fd,
+                    &base,
+                    ceilings.limits,
+                    protected,
+                    cancellation,
+                    deadline,
+                )?;
+                let mut matcher = GlobMatcher::new(pattern);
+                for (index, entry) in entries.into_iter().enumerate() {
+                    if index % GLOB_CHECK_STRIDE == 0 {
+                        check_interrupted(cancellation, deadline)?;
+                    }
+                    if matcher.matches(&entry.path) {
+                        paths.push(entry.path);
+                    }
+                }
+            }
+        }
         OperationOutput::try_new(
             &GlobOutput { pattern, paths },
             "filesystem-glob.json",
@@ -289,10 +391,14 @@ impl Root {
         )?;
         let mut matches = Vec::new();
         let mut scanned_bytes = 0_usize;
+        let mut skipped_oversize = 0_usize;
+        let mut glob = glob.map(GlobMatcher::new);
         for entry in entries {
             check_interrupted(control.cancellation, control.deadline)?;
             if entry.kind != EntryKind::File
-                || glob.is_some_and(|pattern| !glob_matches(pattern, &entry.path))
+                || glob
+                    .as_mut()
+                    .is_some_and(|matcher| !matcher.matches(&entry.path))
             {
                 continue;
             }
@@ -303,22 +409,31 @@ impl Root {
             if ensure_regular(&fd).is_err() {
                 continue;
             }
-            let remaining = ceilings.limits.scan_bytes.saturating_sub(scanned_bytes);
-            if remaining == 0 {
-                return Err(limit_error(
-                    "filesystem search exceeds the aggregate scan byte limit",
-                ));
-            }
             let file_size = fstat(&fd)
                 .ok()
                 .and_then(|stat| usize::try_from(stat.st_size).ok())
                 .unwrap_or(usize::MAX);
-            if file_size > remaining {
+            // A file over the per-file ceiling is never read, so it neither
+            // fails the search nor consumes the aggregate scan budget.
+            if file_size > ceilings.limits.file_bytes {
+                skipped_oversize = skipped_oversize.saturating_add(1);
+                continue;
+            }
+            let remaining = ceilings.limits.scan_bytes.saturating_sub(scanned_bytes);
+            if remaining == 0 || file_size > remaining {
                 return Err(limit_error(
                     "filesystem search exceeds the aggregate scan byte limit",
                 ));
             }
-            let bytes = read_bounded(fd, ceilings.limits.file_bytes, control.cancellation)?;
+            let bytes = match read_bounded(fd, ceilings.limits.file_bytes, control.cancellation) {
+                Ok(bytes) => bytes,
+                // The file grew past the ceiling between `fstat` and the read.
+                Err(error) if error.code() == FILESYSTEM_LIMIT_EXCEEDED => {
+                    skipped_oversize = skipped_oversize.saturating_add(1);
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
             scanned_bytes = scanned_bytes.saturating_add(bytes.len());
             let Ok(content) = String::from_utf8(bytes) else {
                 continue;
@@ -341,7 +456,11 @@ impl Root {
             }
         }
         OperationOutput::try_new(
-            &SearchOutput { query, matches },
+            &SearchOutput {
+                query,
+                matches,
+                skipped_oversize,
+            },
             "filesystem-search.json",
             ceilings.max_artifact_bytes,
         )
@@ -356,11 +475,46 @@ impl Root {
         deadline: Option<Instant>,
     ) -> Result<Vec<TreeEntry>, ToolError> {
         let base_fd = self.open_directory(base)?;
-        let mut stack = vec![(base_fd, base.normalized().to_owned(), 0_usize)];
+        self.walk_from(base_fd, base, limits, protected, cancellation, deadline)
+    }
+
+    /// Depth-first walk below an already-opened `base_fd`.
+    ///
+    /// Children are classified with `statat(SYMLINK_NOFOLLOW)` and only
+    /// directories are opened, when their frame is popped. Symbolic links are
+    /// never followed and never reported; sockets, FIFOs, and devices are
+    /// reported as [`EntryKind::Other`]. Entries that vanish or are
+    /// unreadable between classification and open are skipped.
+    fn walk_from(
+        &self,
+        base_fd: OwnedFd,
+        base: &ValidatedPath,
+        limits: FileSystemLimits,
+        protected: &ProtectedPaths,
+        cancellation: &CancellationSignal,
+        deadline: Option<Instant>,
+    ) -> Result<Vec<TreeEntry>, ToolError> {
+        let mut stack = vec![WalkFrame {
+            dir: PendingDir::Open(self.walk_dir(base_fd)),
+            path: base.normalized().to_owned(),
+            depth: 0,
+        }];
         let mut output = Vec::new();
-        while let Some((fd, relative, depth)) = stack.pop() {
+        while let Some(frame) = stack.pop() {
             check_interrupted(cancellation, deadline)?;
-            let mut directory = Dir::read_from(&fd)
+            let current = match frame.dir {
+                PendingDir::Open(dir) => dir,
+                PendingDir::Child { parent, name } => {
+                    let opened = openat(&parent.fd, name.as_str(), DIRECTORY_FLAGS, Mode::empty());
+                    drop(parent);
+                    match opened {
+                        Ok(fd) => self.walk_dir(fd),
+                        Err(error) if skippable_directory_open(error) => continue,
+                        Err(_) => return Err(io_error("filesystem entry open failed")),
+                    }
+                }
+            };
+            let mut directory = Dir::read_from(&current.fd)
                 .map_err(|_| io_error("filesystem directory could not be read"))?;
             let mut children = Vec::new();
             for entry in &mut directory {
@@ -370,7 +524,7 @@ impl Root {
                 if name == "." || name == ".." {
                     continue;
                 }
-                let child_path = join_relative(&relative, name);
+                let child_path = join_relative(&frame.path, name);
                 if protected.denies(&child_path) {
                     continue;
                 }
@@ -379,25 +533,33 @@ impl Root {
                         "filesystem walk exceeds the configured entry limit",
                     ));
                 }
-                let opened = match openat(&fd, name, READ_FLAGS, Mode::empty()) {
-                    Ok(opened) => opened,
-                    Err(error) if skippable_child_open(error) => continue,
-                    Err(_) => return Err(io_error("filesystem entry open failed")),
+                let Some(kind) = classify_child(&current.fd, name)? else {
+                    continue;
                 };
-                let kind = opened_kind(&opened)?;
                 output.push(TreeEntry {
                     path: child_path.clone(),
                     kind,
                 });
                 if kind == EntryKind::Directory {
-                    if depth >= limits.recursion_depth {
+                    if frame.depth >= limits.recursion_depth {
                         return Err(limit_error("filesystem walk exceeds the configured depth"));
                     }
-                    children.push((opened, child_path, depth + 1));
+                    children.push((name.to_owned(), child_path));
                 }
             }
-            children.sort_by(|left, right| right.1.cmp(&left.1));
-            stack.extend(children);
+            drop(directory);
+            if !children.is_empty() {
+                children.sort_by(|left, right| right.1.cmp(&left.1));
+                let parent = Arc::new(current);
+                stack.extend(children.into_iter().map(|(name, path)| WalkFrame {
+                    dir: PendingDir::Child {
+                        parent: Arc::clone(&parent),
+                        name,
+                    },
+                    path,
+                    depth: frame.depth + 1,
+                }));
+            }
         }
         output.sort_by(|left, right| left.path.cmp(&right.path));
         Ok(output)
@@ -455,10 +617,40 @@ impl Root {
     }
 }
 
-fn skippable_child_open(error: rustix::io::Errno) -> bool {
+/// Classify one directory child without opening or following it.
+///
+/// Returns `None` for entries that should be skipped: symbolic links (which
+/// the toolset never follows or reports) and entries whose metadata is
+/// unreadable or that vanished under the walk.
+fn classify_child(directory: &OwnedFd, name: &str) -> Result<Option<EntryKind>, ToolError> {
+    let stat = match statat(directory, name, AtFlags::SYMLINK_NOFOLLOW) {
+        Ok(stat) => stat,
+        Err(error) if skippable_child_stat(error) => return Ok(None),
+        Err(_) => return Err(io_error("filesystem entry metadata failed")),
+    };
+    let file_type = FileType::from_raw_mode(stat.st_mode);
+    Ok(if file_type.is_symlink() {
+        None
+    } else if file_type.is_file() {
+        Some(EntryKind::File)
+    } else if file_type.is_dir() {
+        Some(EntryKind::Directory)
+    } else {
+        Some(EntryKind::Other)
+    })
+}
+
+fn skippable_child_stat(error: rustix::io::Errno) -> bool {
     error == rustix::io::Errno::LOOP
         || error == rustix::io::Errno::ACCESS
         || error == rustix::io::Errno::PERM
+        || error == rustix::io::Errno::NOENT
+}
+
+/// A child classified as a directory may be unreadable, gone, or replaced by
+/// a non-directory before its frame is popped; all of those are skipped.
+fn skippable_directory_open(error: rustix::io::Errno) -> bool {
+    skippable_child_stat(error) || error == rustix::io::Errno::NOTDIR
 }
 
 fn map_open_error(error: rustix::io::Errno) -> ToolError {
@@ -491,21 +683,6 @@ fn ensure_regular(fd: &OwnedFd) -> Result<(), ToolError> {
     } else {
         Err(policy_error("filesystem object is not a regular file"))
     }
-}
-
-fn opened_kind(fd: &OwnedFd) -> Result<EntryKind, ToolError> {
-    let file_type = FileType::from_raw_mode(
-        fstat(fd)
-            .map_err(|_| io_error("filesystem object metadata failed"))?
-            .st_mode,
-    );
-    Ok(if file_type.is_file() {
-        EntryKind::File
-    } else if file_type.is_dir() {
-        EntryKind::Directory
-    } else {
-        EntryKind::Other
-    })
 }
 
 fn read_bounded(
@@ -651,4 +828,6 @@ struct SearchMatch {
 struct SearchOutput<'a> {
     query: &'a str,
     matches: Vec<SearchMatch>,
+    /// Regular files skipped because they exceed the per-file byte ceiling.
+    skipped_oversize: usize,
 }

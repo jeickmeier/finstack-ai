@@ -40,6 +40,7 @@ use finstack_ai_runtime::ports::model::{
 use finstack_ai_runtime::ports::tool::{
     JsonSchemaToolValidatorCompiler, TOOL_INTERACTION_REQUIRED, ToolCallContext, ToolError,
     ToolEventStream, ToolResult, ToolStreamItem, ToolValidatorCompiler, Toolset, ToolsetDescriptor,
+    verify_authority,
 };
 use futures_util::stream;
 use serde::Deserialize;
@@ -543,19 +544,7 @@ fn validate_call_context(ctx: &ToolCallContext, call: &ValidatedToolCall) -> Res
     {
         return Err(invalid_arguments("elicitation call identity is invalid"));
     }
-    let locator_scope = ctx.run.locator.tenant_scope.as_ref();
-    if ctx
-        .run
-        .authorization
-        .principal
-        .tenant_scope()
-        .is_some_and(|scope| scope != locator_scope)
-    {
-        return Err(invalid_arguments(
-            "elicitation principal scope does not match the committed effect",
-        ));
-    }
-    Ok(())
+    verify_authority(ctx)
 }
 
 fn park_request_metadata(request: &InteractionRequest) -> Result<Metadata, ToolError> {

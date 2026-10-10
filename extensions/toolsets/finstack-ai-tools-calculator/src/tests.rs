@@ -7,7 +7,9 @@ use finstack_ai_kernel::{
 use finstack_ai_runtime::ports::model::{
     AuthorizationContext, CancellationSignal, ReconcileContext, RunCallContext, SideEffectClass,
 };
-use finstack_ai_runtime::ports::tool::{PendingToolEffect, ToolReconcileResult, Toolset};
+use finstack_ai_runtime::ports::tool::{
+    PendingToolEffect, TOOL_POLICY_DENIED, ToolReconcileResult, Toolset,
+};
 use futures_util::StreamExt;
 
 #[test]
@@ -106,7 +108,7 @@ async fn public_call_uses_committed_authority_context() {
     else {
         panic!("mismatched principal must fail");
     };
-    assert_eq!(error.code(), CALCULATOR_INVALID_ARGUMENTS);
+    assert_eq!(error.code(), TOOL_POLICY_DENIED);
 }
 
 #[tokio::test]

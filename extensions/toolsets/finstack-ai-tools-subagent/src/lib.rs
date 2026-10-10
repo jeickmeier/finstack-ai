@@ -217,7 +217,10 @@ impl Toolset for SubagentToolset {
             verify_authority(&ctx)?;
             let result = match call.call.tool_name() {
                 START_NAME => {
-                    if !reserve_child_slot(&tracked_slots, max_tracked_children) {
+                    let reserved = reserve_child_slot(&tracked_slots, max_tracked_children)
+                        || (sweep_terminal_children(&starter, &table, &tracked_slots).await
+                            && reserve_child_slot(&tracked_slots, max_tracked_children));
+                    if !reserved {
                         return Ok(completed(
                             error_result(
                                 SUBAGENT_LIMIT_EXCEEDED,
@@ -470,6 +473,42 @@ fn error_result(code: &'static str, message: &'static str) -> CallOutcome {
         started: None,
         remove: None,
     }
+}
+
+/// Most tracked children whose status is polled by one sweep.
+const SWEEP_BATCH: usize = 64;
+
+/// Evict tracked children the host already reports as terminal and release
+/// their slots.
+///
+/// Copies at most [`SWEEP_BATCH`] `(key, locator)` pairs out of the table so
+/// the lock is never held across the host status calls. Returns `true` when
+/// at least one slot was released, so the caller can retry its reservation.
+async fn sweep_terminal_children(
+    starter: &ChildRunStarter,
+    children: &Mutex<BTreeMap<ChildKey, StartedChild>>,
+    slots: &AtomicUsize,
+) -> bool {
+    let candidates = match children.lock() {
+        Ok(table) => table
+            .iter()
+            .take(SWEEP_BATCH)
+            .map(|(key, child)| (key.clone(), child.handle.locator.clone()))
+            .collect::<Vec<_>>(),
+        Err(_) => return false,
+    };
+    let mut released = false;
+    for (key, locator) in candidates {
+        let terminal = matches!(starter.status(&locator).await, Ok(status) if status.is_terminal());
+        if terminal
+            && let Ok(mut table) = children.lock()
+            && table.remove(&key).is_some()
+        {
+            release_child_slot(slots);
+            released = true;
+        }
+    }
+    released
 }
 
 fn reserve_child_slot(slots: &AtomicUsize, max: usize) -> bool {
