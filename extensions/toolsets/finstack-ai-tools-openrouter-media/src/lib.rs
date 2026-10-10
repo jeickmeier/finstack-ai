@@ -231,11 +231,9 @@ impl OpenRouterMediaToolset {
                 }
             }
         })?;
-        let mut authorization =
-            HeaderValue::from_str(&format!("Bearer {}", secret.expose())).map_err(|_| {
-                OpenRouterMediaError::EndpointInvalid {
-                    reason: "api_key is invalid",
-                }
+        let mut authorization = HeaderValue::from_str(&format!("Bearer {}", secret.expose()))
+            .map_err(|_| OpenRouterMediaError::EndpointInvalid {
+                reason: "api_key is invalid",
             })?;
         authorization.set_sensitive(true);
         if config.max_result_bytes == 0 || config.max_result_bytes > MAX_RESULT_BYTES_CEILING {

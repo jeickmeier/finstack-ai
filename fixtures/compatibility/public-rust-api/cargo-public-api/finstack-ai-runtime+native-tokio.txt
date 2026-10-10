@@ -2867,6 +2867,13 @@ pub finstack_ai_runtime::ports::model::RunCallContext::deadline: core::option::O
 pub finstack_ai_runtime::ports::model::RunCallContext::effect_id: finstack_ai_kernel::primitives::ids::EffectId
 pub finstack_ai_runtime::ports::model::RunCallContext::locator: finstack_ai_kernel::records::run::external::OperationLocator
 pub finstack_ai_runtime::ports::model::RunCallContext::relation_depth: u16
+impl finstack_ai_runtime::ports::model::RunCallContext
+pub fn finstack_ai_runtime::ports::model::RunCallContext::deadline_elapsed(&self, finstack_ai_kernel::primitives::time::Timestamp) -> bool
+pub fn finstack_ai_runtime::ports::model::RunCallContext::deadline_remaining(&self, finstack_ai_kernel::primitives::time::Timestamp) -> core::option::Option<core::time::Duration>
+pub fn finstack_ai_runtime::ports::model::RunCallContext::is_interrupted(&self, finstack_ai_kernel::primitives::time::Timestamp) -> bool
+impl finstack_ai_runtime::ports::model::RunCallContext
+pub async fn finstack_ai_runtime::ports::model::RunCallContext::interrupted(&self)
+pub async fn finstack_ai_runtime::ports::model::RunCallContext::wait_deadline(&self)
 impl core::clone::Clone for finstack_ai_runtime::ports::model::RunCallContext
 pub fn finstack_ai_runtime::ports::model::RunCallContext::clone(&self) -> finstack_ai_runtime::ports::model::RunCallContext
 impl core::fmt::Debug for finstack_ai_runtime::ports::model::RunCallContext

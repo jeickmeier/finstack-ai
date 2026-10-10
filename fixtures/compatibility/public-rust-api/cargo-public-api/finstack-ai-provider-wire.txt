@@ -1,4 +1,29 @@
 pub mod finstack_ai_provider_wire
+pub enum finstack_ai_provider_wire::BaseUrlError
+pub finstack_ai_provider_wire::BaseUrlError::ForbiddenComponents
+pub finstack_ai_provider_wire::BaseUrlError::Invalid
+pub finstack_ai_provider_wire::BaseUrlError::NonRootPath
+pub finstack_ai_provider_wire::BaseUrlError::PlaintextNotLoopback
+impl core::clone::Clone for finstack_ai_provider_wire::BaseUrlError
+pub fn finstack_ai_provider_wire::BaseUrlError::clone(&self) -> finstack_ai_provider_wire::BaseUrlError
+impl core::cmp::Eq for finstack_ai_provider_wire::BaseUrlError
+impl core::cmp::PartialEq for finstack_ai_provider_wire::BaseUrlError
+pub fn finstack_ai_provider_wire::BaseUrlError::eq(&self, &finstack_ai_provider_wire::BaseUrlError) -> bool
+impl core::fmt::Debug for finstack_ai_provider_wire::BaseUrlError
+pub fn finstack_ai_provider_wire::BaseUrlError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_provider_wire::BaseUrlError
+impl core::marker::StructuralPartialEq for finstack_ai_provider_wire::BaseUrlError
+pub enum finstack_ai_provider_wire::ContextProfileError
+pub finstack_ai_provider_wire::ContextProfileError::Invalid
+impl core::clone::Clone for finstack_ai_provider_wire::ContextProfileError
+pub fn finstack_ai_provider_wire::ContextProfileError::clone(&self) -> finstack_ai_provider_wire::ContextProfileError
+impl core::cmp::Eq for finstack_ai_provider_wire::ContextProfileError
+impl core::cmp::PartialEq for finstack_ai_provider_wire::ContextProfileError
+pub fn finstack_ai_provider_wire::ContextProfileError::eq(&self, &finstack_ai_provider_wire::ContextProfileError) -> bool
+impl core::fmt::Debug for finstack_ai_provider_wire::ContextProfileError
+pub fn finstack_ai_provider_wire::ContextProfileError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_provider_wire::ContextProfileError
+impl core::marker::StructuralPartialEq for finstack_ai_provider_wire::ContextProfileError
 pub enum finstack_ai_provider_wire::NdjsonError
 pub finstack_ai_provider_wire::NdjsonError::InvalidUtf8
 pub finstack_ai_provider_wire::NdjsonError::Limit
@@ -22,6 +47,8 @@ pub fn finstack_ai_provider_wire::SseParseError::clone(&self) -> finstack_ai_pro
 impl core::cmp::Eq for finstack_ai_provider_wire::SseParseError
 impl core::cmp::PartialEq for finstack_ai_provider_wire::SseParseError
 pub fn finstack_ai_provider_wire::SseParseError::eq(&self, &finstack_ai_provider_wire::SseParseError) -> bool
+impl core::convert::From<finstack_ai_provider_wire::SseParseError> for finstack_ai_provider_wire::StreamNormError
+pub fn finstack_ai_provider_wire::StreamNormError::from(finstack_ai_provider_wire::SseParseError) -> Self
 impl core::fmt::Debug for finstack_ai_provider_wire::SseParseError
 pub fn finstack_ai_provider_wire::SseParseError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Copy for finstack_ai_provider_wire::SseParseError
@@ -44,23 +71,72 @@ pub struct finstack_ai_provider_wire::AnthropicMessagesAssembly
 impl finstack_ai_provider_wire::AnthropicMessagesAssembly
 pub fn finstack_ai_provider_wire::AnthropicMessagesAssembly::consume(&mut self, &str, &str) -> core::result::Result<alloc::vec::Vec<finstack_ai_runtime::ports::model::stream::ModelStreamItem>, finstack_ai_provider_wire::StreamNormError>
 pub fn finstack_ai_provider_wire::AnthropicMessagesAssembly::new(alloc::string::String, bool) -> Self
+impl finstack_ai_provider_wire::StreamAssembler for finstack_ai_provider_wire::AnthropicMessagesAssembly
+pub type finstack_ai_provider_wire::AnthropicMessagesAssembly::Frame = finstack_ai_provider_wire::NamedSseEvent
+pub fn finstack_ai_provider_wire::AnthropicMessagesAssembly::consume(&mut self, &finstack_ai_provider_wire::NamedSseEvent) -> core::result::Result<alloc::vec::Vec<finstack_ai_runtime::ports::model::stream::ModelStreamItem>, finstack_ai_provider_wire::StreamNormError>
+pub fn finstack_ai_provider_wire::AnthropicMessagesAssembly::finish(self) -> core::result::Result<core::option::Option<finstack_ai_runtime::ports::model::stream::ModelStreamItem>, finstack_ai_provider_wire::StreamNormError>
+pub fn finstack_ai_provider_wire::AnthropicMessagesAssembly::is_done(&self) -> bool
+pub struct finstack_ai_provider_wire::DataSseParser
+impl finstack_ai_provider_wire::DataSseParser
+pub const fn finstack_ai_provider_wire::DataSseParser::new(usize, usize) -> Self
+pub const fn finstack_ai_provider_wire::DataSseParser::rejecting_named_events(self) -> Self
+impl core::fmt::Debug for finstack_ai_provider_wire::DataSseParser
+pub fn finstack_ai_provider_wire::DataSseParser::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl finstack_ai_provider_wire::StreamProtocol for finstack_ai_provider_wire::DataSseParser
+pub type finstack_ai_provider_wire::DataSseParser::Frame = alloc::string::String
+pub fn finstack_ai_provider_wire::DataSseParser::finish(self) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, finstack_ai_provider_wire::StreamNormError>
+pub fn finstack_ai_provider_wire::DataSseParser::push(&mut self, &[u8]) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, finstack_ai_provider_wire::StreamNormError>
 pub struct finstack_ai_provider_wire::GeminiGenerateContentAssembly
 impl finstack_ai_provider_wire::GeminiGenerateContentAssembly
 pub const fn finstack_ai_provider_wire::GeminiGenerateContentAssembly::completed(&self) -> bool
 pub fn finstack_ai_provider_wire::GeminiGenerateContentAssembly::consume(&mut self, &str) -> core::result::Result<alloc::vec::Vec<finstack_ai_runtime::ports::model::stream::ModelStreamItem>, finstack_ai_provider_wire::StreamNormError>
 pub fn finstack_ai_provider_wire::GeminiGenerateContentAssembly::finish(&mut self) -> core::result::Result<(), finstack_ai_provider_wire::StreamNormError>
 pub fn finstack_ai_provider_wire::GeminiGenerateContentAssembly::new(alloc::string::String, bool) -> Self
+impl finstack_ai_provider_wire::StreamAssembler for finstack_ai_provider_wire::GeminiGenerateContentAssembly
+pub type finstack_ai_provider_wire::GeminiGenerateContentAssembly::Frame = alloc::string::String
+pub fn finstack_ai_provider_wire::GeminiGenerateContentAssembly::consume(&mut self, &alloc::string::String) -> core::result::Result<alloc::vec::Vec<finstack_ai_runtime::ports::model::stream::ModelStreamItem>, finstack_ai_provider_wire::StreamNormError>
+pub fn finstack_ai_provider_wire::GeminiGenerateContentAssembly::finish(self) -> core::result::Result<core::option::Option<finstack_ai_runtime::ports::model::stream::ModelStreamItem>, finstack_ai_provider_wire::StreamNormError>
+pub fn finstack_ai_provider_wire::GeminiGenerateContentAssembly::is_done(&self) -> bool
+pub struct finstack_ai_provider_wire::NamedSseEvent
+pub finstack_ai_provider_wire::NamedSseEvent::data: alloc::string::String
+pub finstack_ai_provider_wire::NamedSseEvent::name: alloc::string::String
+impl core::clone::Clone for finstack_ai_provider_wire::NamedSseEvent
+pub fn finstack_ai_provider_wire::NamedSseEvent::clone(&self) -> finstack_ai_provider_wire::NamedSseEvent
+impl core::cmp::Eq for finstack_ai_provider_wire::NamedSseEvent
+impl core::cmp::PartialEq for finstack_ai_provider_wire::NamedSseEvent
+pub fn finstack_ai_provider_wire::NamedSseEvent::eq(&self, &finstack_ai_provider_wire::NamedSseEvent) -> bool
+impl core::fmt::Debug for finstack_ai_provider_wire::NamedSseEvent
+pub fn finstack_ai_provider_wire::NamedSseEvent::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for finstack_ai_provider_wire::NamedSseEvent
+pub struct finstack_ai_provider_wire::NamedSseParser
+impl finstack_ai_provider_wire::NamedSseParser
+pub const fn finstack_ai_provider_wire::NamedSseParser::new(usize, usize) -> Self
+impl core::fmt::Debug for finstack_ai_provider_wire::NamedSseParser
+pub fn finstack_ai_provider_wire::NamedSseParser::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl finstack_ai_provider_wire::StreamProtocol for finstack_ai_provider_wire::NamedSseParser
+pub type finstack_ai_provider_wire::NamedSseParser::Frame = finstack_ai_provider_wire::NamedSseEvent
+pub fn finstack_ai_provider_wire::NamedSseParser::finish(self) -> core::result::Result<alloc::vec::Vec<finstack_ai_provider_wire::NamedSseEvent>, finstack_ai_provider_wire::StreamNormError>
+pub fn finstack_ai_provider_wire::NamedSseParser::push(&mut self, &[u8]) -> core::result::Result<alloc::vec::Vec<finstack_ai_provider_wire::NamedSseEvent>, finstack_ai_provider_wire::StreamNormError>
 pub struct finstack_ai_provider_wire::NdjsonParser
 impl finstack_ai_provider_wire::NdjsonParser
 pub fn finstack_ai_provider_wire::NdjsonParser::finish(self) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, finstack_ai_provider_wire::NdjsonError>
 pub const fn finstack_ai_provider_wire::NdjsonParser::new(usize, usize) -> Self
 pub fn finstack_ai_provider_wire::NdjsonParser::push(&mut self, &[u8]) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, finstack_ai_provider_wire::NdjsonError>
+impl finstack_ai_provider_wire::StreamProtocol for finstack_ai_provider_wire::NdjsonParser
+pub type finstack_ai_provider_wire::NdjsonParser::Frame = alloc::string::String
+pub fn finstack_ai_provider_wire::NdjsonParser::finish(self) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, finstack_ai_provider_wire::StreamNormError>
+pub fn finstack_ai_provider_wire::NdjsonParser::push(&mut self, &[u8]) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, finstack_ai_provider_wire::StreamNormError>
 pub struct finstack_ai_provider_wire::OllamaChatAssembly
 pub finstack_ai_provider_wire::OllamaChatAssembly::done: bool
 impl finstack_ai_provider_wire::OllamaChatAssembly
 pub fn finstack_ai_provider_wire::OllamaChatAssembly::consume(&mut self, &str) -> core::result::Result<alloc::vec::Vec<finstack_ai_runtime::ports::model::stream::ModelStreamItem>, finstack_ai_provider_wire::StreamNormError>
 pub fn finstack_ai_provider_wire::OllamaChatAssembly::finish(self) -> core::result::Result<finstack_ai_runtime::ports::model::request::ModelResponse, finstack_ai_provider_wire::StreamNormError>
 pub fn finstack_ai_provider_wire::OllamaChatAssembly::new(alloc::string::String, bool, core::option::Option<alloc::vec::Vec<finstack_ai_provider_wire::OllamaReplayEntry>>) -> Self
+impl finstack_ai_provider_wire::StreamAssembler for finstack_ai_provider_wire::OllamaChatAssembly
+pub type finstack_ai_provider_wire::OllamaChatAssembly::Frame = alloc::string::String
+pub fn finstack_ai_provider_wire::OllamaChatAssembly::consume(&mut self, &alloc::string::String) -> core::result::Result<alloc::vec::Vec<finstack_ai_runtime::ports::model::stream::ModelStreamItem>, finstack_ai_provider_wire::StreamNormError>
+pub fn finstack_ai_provider_wire::OllamaChatAssembly::finish(self) -> core::result::Result<core::option::Option<finstack_ai_runtime::ports::model::stream::ModelStreamItem>, finstack_ai_provider_wire::StreamNormError>
+pub fn finstack_ai_provider_wire::OllamaChatAssembly::is_done(&self) -> bool
 pub struct finstack_ai_provider_wire::OllamaReplayEntry
 pub finstack_ai_provider_wire::OllamaReplayEntry::digest: core::option::Option<alloc::string::String>
 pub finstack_ai_provider_wire::OllamaReplayEntry::thinking: alloc::string::String
@@ -74,10 +150,36 @@ pub fn finstack_ai_provider_wire::OllamaReplayEntry::default() -> finstack_ai_pr
 impl core::fmt::Debug for finstack_ai_provider_wire::OllamaReplayEntry
 pub fn finstack_ai_provider_wire::OllamaReplayEntry::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for finstack_ai_provider_wire::OllamaReplayEntry
+impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_provider_wire::OllamaReplayEntry
+pub fn finstack_ai_provider_wire::OllamaReplayEntry::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 pub struct finstack_ai_provider_wire::OpenAiResponsesAssembly
 impl finstack_ai_provider_wire::OpenAiResponsesAssembly
 pub fn finstack_ai_provider_wire::OpenAiResponsesAssembly::consume(&mut self, &str) -> core::result::Result<alloc::vec::Vec<finstack_ai_runtime::ports::model::stream::ModelStreamItem>, finstack_ai_provider_wire::StreamNormError>
 pub fn finstack_ai_provider_wire::OpenAiResponsesAssembly::new(alloc::string::String, bool) -> Self
+impl finstack_ai_provider_wire::StreamAssembler for finstack_ai_provider_wire::OpenAiResponsesAssembly
+pub type finstack_ai_provider_wire::OpenAiResponsesAssembly::Frame = alloc::string::String
+pub fn finstack_ai_provider_wire::OpenAiResponsesAssembly::consume(&mut self, &alloc::string::String) -> core::result::Result<alloc::vec::Vec<finstack_ai_runtime::ports::model::stream::ModelStreamItem>, finstack_ai_provider_wire::StreamNormError>
+pub fn finstack_ai_provider_wire::OpenAiResponsesAssembly::finish(self) -> core::result::Result<core::option::Option<finstack_ai_runtime::ports::model::stream::ModelStreamItem>, finstack_ai_provider_wire::StreamNormError>
+pub fn finstack_ai_provider_wire::OpenAiResponsesAssembly::is_done(&self) -> bool
+pub struct finstack_ai_provider_wire::ProviderErrorCodes
+pub finstack_ai_provider_wire::ProviderErrorCodes::cancelled: &'static str
+pub finstack_ai_provider_wire::ProviderErrorCodes::config_invalid: &'static str
+pub finstack_ai_provider_wire::ProviderErrorCodes::http_error: &'static str
+pub finstack_ai_provider_wire::ProviderErrorCodes::request_invalid: &'static str
+pub finstack_ai_provider_wire::ProviderErrorCodes::response_invalid: &'static str
+pub finstack_ai_provider_wire::ProviderErrorCodes::stream_invalid: &'static str
+pub finstack_ai_provider_wire::ProviderErrorCodes::stream_limit_exceeded: &'static str
+pub finstack_ai_provider_wire::ProviderErrorCodes::timeout: &'static str
+pub finstack_ai_provider_wire::ProviderErrorCodes::transport_error: &'static str
+impl core::clone::Clone for finstack_ai_provider_wire::ProviderErrorCodes
+pub fn finstack_ai_provider_wire::ProviderErrorCodes::clone(&self) -> finstack_ai_provider_wire::ProviderErrorCodes
+impl core::cmp::Eq for finstack_ai_provider_wire::ProviderErrorCodes
+impl core::cmp::PartialEq for finstack_ai_provider_wire::ProviderErrorCodes
+pub fn finstack_ai_provider_wire::ProviderErrorCodes::eq(&self, &finstack_ai_provider_wire::ProviderErrorCodes) -> bool
+impl core::fmt::Debug for finstack_ai_provider_wire::ProviderErrorCodes
+pub fn finstack_ai_provider_wire::ProviderErrorCodes::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for finstack_ai_provider_wire::ProviderErrorCodes
+impl core::marker::StructuralPartialEq for finstack_ai_provider_wire::ProviderErrorCodes
 pub struct finstack_ai_provider_wire::SseEvent
 pub finstack_ai_provider_wire::SseEvent::data: alloc::string::String
 pub finstack_ai_provider_wire::SseEvent::name: core::option::Option<alloc::string::String>
@@ -99,6 +201,10 @@ pub fn finstack_ai_provider_wire::SseEventParser::fmt(&self, &mut core::fmt::For
 pub struct finstack_ai_provider_wire::StreamNormError
 pub finstack_ai_provider_wire::StreamNormError::kind: finstack_ai_provider_wire::StreamNormKind
 pub finstack_ai_provider_wire::StreamNormError::message: &'static str
+pub finstack_ai_provider_wire::StreamNormError::retryable: bool
+impl finstack_ai_provider_wire::StreamNormError
+pub const fn finstack_ai_provider_wire::StreamNormError::incomplete(&'static str) -> Self
+pub const fn finstack_ai_provider_wire::StreamNormError::upstream(&'static str, bool) -> Self
 impl core::clone::Clone for finstack_ai_provider_wire::StreamNormError
 pub fn finstack_ai_provider_wire::StreamNormError::clone(&self) -> finstack_ai_provider_wire::StreamNormError
 impl core::cmp::Eq for finstack_ai_provider_wire::StreamNormError
@@ -106,6 +212,8 @@ impl core::cmp::PartialEq for finstack_ai_provider_wire::StreamNormError
 pub fn finstack_ai_provider_wire::StreamNormError::eq(&self, &finstack_ai_provider_wire::StreamNormError) -> bool
 impl core::convert::From<finstack_ai_provider_wire::NdjsonError> for finstack_ai_provider_wire::StreamNormError
 pub fn finstack_ai_provider_wire::StreamNormError::from(finstack_ai_provider_wire::NdjsonError) -> Self
+impl core::convert::From<finstack_ai_provider_wire::SseParseError> for finstack_ai_provider_wire::StreamNormError
+pub fn finstack_ai_provider_wire::StreamNormError::from(finstack_ai_provider_wire::SseParseError) -> Self
 impl core::fmt::Debug for finstack_ai_provider_wire::StreamNormError
 pub fn finstack_ai_provider_wire::StreamNormError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for finstack_ai_provider_wire::StreamNormError
@@ -115,3 +223,67 @@ pub const finstack_ai_provider_wire::GEMINI_CONTINUATION_PROVIDER: &str
 pub const finstack_ai_provider_wire::GEMINI_EXECUTABLE_CODE_MEDIA_TYPE: &str
 pub const finstack_ai_provider_wire::GEMINI_GROUNDING_MEDIA_TYPE: &str
 pub const finstack_ai_provider_wire::GEMINI_THOUGHTS_TOKENS_KEY: &str
+pub trait finstack_ai_provider_wire::StreamAssembler
+pub type finstack_ai_provider_wire::StreamAssembler::Frame
+pub fn finstack_ai_provider_wire::StreamAssembler::consume(&mut self, &Self::Frame) -> core::result::Result<alloc::vec::Vec<finstack_ai_runtime::ports::model::stream::ModelStreamItem>, finstack_ai_provider_wire::StreamNormError>
+pub fn finstack_ai_provider_wire::StreamAssembler::finish(self) -> core::result::Result<core::option::Option<finstack_ai_runtime::ports::model::stream::ModelStreamItem>, finstack_ai_provider_wire::StreamNormError>
+pub fn finstack_ai_provider_wire::StreamAssembler::is_done(&self) -> bool
+impl finstack_ai_provider_wire::StreamAssembler for finstack_ai_provider_wire::AnthropicMessagesAssembly
+pub type finstack_ai_provider_wire::AnthropicMessagesAssembly::Frame = finstack_ai_provider_wire::NamedSseEvent
+pub fn finstack_ai_provider_wire::AnthropicMessagesAssembly::consume(&mut self, &finstack_ai_provider_wire::NamedSseEvent) -> core::result::Result<alloc::vec::Vec<finstack_ai_runtime::ports::model::stream::ModelStreamItem>, finstack_ai_provider_wire::StreamNormError>
+pub fn finstack_ai_provider_wire::AnthropicMessagesAssembly::finish(self) -> core::result::Result<core::option::Option<finstack_ai_runtime::ports::model::stream::ModelStreamItem>, finstack_ai_provider_wire::StreamNormError>
+pub fn finstack_ai_provider_wire::AnthropicMessagesAssembly::is_done(&self) -> bool
+impl finstack_ai_provider_wire::StreamAssembler for finstack_ai_provider_wire::GeminiGenerateContentAssembly
+pub type finstack_ai_provider_wire::GeminiGenerateContentAssembly::Frame = alloc::string::String
+pub fn finstack_ai_provider_wire::GeminiGenerateContentAssembly::consume(&mut self, &alloc::string::String) -> core::result::Result<alloc::vec::Vec<finstack_ai_runtime::ports::model::stream::ModelStreamItem>, finstack_ai_provider_wire::StreamNormError>
+pub fn finstack_ai_provider_wire::GeminiGenerateContentAssembly::finish(self) -> core::result::Result<core::option::Option<finstack_ai_runtime::ports::model::stream::ModelStreamItem>, finstack_ai_provider_wire::StreamNormError>
+pub fn finstack_ai_provider_wire::GeminiGenerateContentAssembly::is_done(&self) -> bool
+impl finstack_ai_provider_wire::StreamAssembler for finstack_ai_provider_wire::OllamaChatAssembly
+pub type finstack_ai_provider_wire::OllamaChatAssembly::Frame = alloc::string::String
+pub fn finstack_ai_provider_wire::OllamaChatAssembly::consume(&mut self, &alloc::string::String) -> core::result::Result<alloc::vec::Vec<finstack_ai_runtime::ports::model::stream::ModelStreamItem>, finstack_ai_provider_wire::StreamNormError>
+pub fn finstack_ai_provider_wire::OllamaChatAssembly::finish(self) -> core::result::Result<core::option::Option<finstack_ai_runtime::ports::model::stream::ModelStreamItem>, finstack_ai_provider_wire::StreamNormError>
+pub fn finstack_ai_provider_wire::OllamaChatAssembly::is_done(&self) -> bool
+impl finstack_ai_provider_wire::StreamAssembler for finstack_ai_provider_wire::OpenAiResponsesAssembly
+pub type finstack_ai_provider_wire::OpenAiResponsesAssembly::Frame = alloc::string::String
+pub fn finstack_ai_provider_wire::OpenAiResponsesAssembly::consume(&mut self, &alloc::string::String) -> core::result::Result<alloc::vec::Vec<finstack_ai_runtime::ports::model::stream::ModelStreamItem>, finstack_ai_provider_wire::StreamNormError>
+pub fn finstack_ai_provider_wire::OpenAiResponsesAssembly::finish(self) -> core::result::Result<core::option::Option<finstack_ai_runtime::ports::model::stream::ModelStreamItem>, finstack_ai_provider_wire::StreamNormError>
+pub fn finstack_ai_provider_wire::OpenAiResponsesAssembly::is_done(&self) -> bool
+pub trait finstack_ai_provider_wire::StreamProtocol
+pub type finstack_ai_provider_wire::StreamProtocol::Frame
+pub fn finstack_ai_provider_wire::StreamProtocol::finish(self) -> core::result::Result<alloc::vec::Vec<Self::Frame>, finstack_ai_provider_wire::StreamNormError>
+pub fn finstack_ai_provider_wire::StreamProtocol::push(&mut self, &[u8]) -> core::result::Result<alloc::vec::Vec<Self::Frame>, finstack_ai_provider_wire::StreamNormError>
+impl finstack_ai_provider_wire::StreamProtocol for finstack_ai_provider_wire::DataSseParser
+pub type finstack_ai_provider_wire::DataSseParser::Frame = alloc::string::String
+pub fn finstack_ai_provider_wire::DataSseParser::finish(self) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, finstack_ai_provider_wire::StreamNormError>
+pub fn finstack_ai_provider_wire::DataSseParser::push(&mut self, &[u8]) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, finstack_ai_provider_wire::StreamNormError>
+impl finstack_ai_provider_wire::StreamProtocol for finstack_ai_provider_wire::NamedSseParser
+pub type finstack_ai_provider_wire::NamedSseParser::Frame = finstack_ai_provider_wire::NamedSseEvent
+pub fn finstack_ai_provider_wire::NamedSseParser::finish(self) -> core::result::Result<alloc::vec::Vec<finstack_ai_provider_wire::NamedSseEvent>, finstack_ai_provider_wire::StreamNormError>
+pub fn finstack_ai_provider_wire::NamedSseParser::push(&mut self, &[u8]) -> core::result::Result<alloc::vec::Vec<finstack_ai_provider_wire::NamedSseEvent>, finstack_ai_provider_wire::StreamNormError>
+impl finstack_ai_provider_wire::StreamProtocol for finstack_ai_provider_wire::NdjsonParser
+pub type finstack_ai_provider_wire::NdjsonParser::Frame = alloc::string::String
+pub fn finstack_ai_provider_wire::NdjsonParser::finish(self) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, finstack_ai_provider_wire::StreamNormError>
+pub fn finstack_ai_provider_wire::NdjsonParser::push(&mut self, &[u8]) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, finstack_ai_provider_wire::StreamNormError>
+pub fn finstack_ai_provider_wire::adapter_error(&'static str, finstack_ai_kernel::primitives::error::ErrorCategory, bool, impl core::convert::AsRef<str>) -> finstack_ai_runtime::ports::model::error::ModelError
+pub fn finstack_ai_provider_wire::cancelled_error(&finstack_ai_provider_wire::ProviderErrorCodes, &'static str) -> finstack_ai_runtime::ports::model::error::ModelError
+pub fn finstack_ai_provider_wire::catalog_from_models<M>(&finstack_ai_provider_wire::ProviderErrorCodes, &'static str, alloc::vec::Vec<M>, impl core::ops::function::Fn(&M) -> &finstack_ai_runtime::ports::model::identity::ModelName, impl core::ops::function::Fn(&M) -> core::result::Result<(), finstack_ai_runtime::ports::model::error::ModelError>) -> core::result::Result<alloc::collections::btree::map::BTreeMap<finstack_ai_runtime::ports::model::identity::ModelName, M>, finstack_ai_runtime::ports::model::error::ModelError>
+pub fn finstack_ai_provider_wire::config_error(&finstack_ai_provider_wire::ProviderErrorCodes, impl core::convert::AsRef<str>) -> finstack_ai_runtime::ports::model::error::ModelError
+pub fn finstack_ai_provider_wire::draft_media_error(&finstack_ai_provider_wire::ProviderErrorCodes, &'static str, finstack_ai_runtime::ports::model::support::media::ResolveDraftMediaError) -> finstack_ai_runtime::ports::model::error::ModelError
+pub fn finstack_ai_provider_wire::http_error(&finstack_ai_provider_wire::ProviderErrorCodes, &'static str, &'static str, u16) -> finstack_ai_runtime::ports::model::error::ModelError
+pub fn finstack_ai_provider_wire::incomplete_error(&finstack_ai_provider_wire::ProviderErrorCodes, &'static str) -> finstack_ai_runtime::ports::model::error::ModelError
+pub fn finstack_ai_provider_wire::ollama_content_digest(&str, &[(alloc::string::String, alloc::string::String)]) -> core::result::Result<alloc::string::String, finstack_ai_provider_wire::StreamNormError>
+pub fn finstack_ai_provider_wire::parse_ollama_continuation(&finstack_ai_kernel::primitives::raw_json::RawJson) -> core::option::Option<alloc::vec::Vec<finstack_ai_provider_wire::OllamaReplayEntry>>
+pub fn finstack_ai_provider_wire::parse_settings(&finstack_ai_provider_wire::ProviderErrorCodes, &finstack_ai_kernel::primitives::raw_json::RawJson) -> core::result::Result<alloc::collections::btree::map::BTreeMap<alloc::string::String, serde_json::value::Value>, finstack_ai_runtime::ports::model::error::ModelError>
+pub fn finstack_ai_provider_wire::raw_value(&finstack_ai_provider_wire::ProviderErrorCodes, &finstack_ai_kernel::primitives::raw_json::RawJson) -> core::result::Result<serde_json::value::Value, finstack_ai_runtime::ports::model::error::ModelError>
+pub fn finstack_ai_provider_wire::render_text(&finstack_ai_provider_wire::ProviderErrorCodes, &[finstack_ai_kernel::content::content_block::ContentBlock]) -> core::result::Result<alloc::string::String, finstack_ai_runtime::ports::model::error::ModelError>
+pub fn finstack_ai_provider_wire::request_error(&finstack_ai_provider_wire::ProviderErrorCodes, impl core::convert::AsRef<str>) -> finstack_ai_runtime::ports::model::error::ModelError
+pub fn finstack_ai_provider_wire::request_limit_error(&finstack_ai_provider_wire::ProviderErrorCodes, &'static str) -> finstack_ai_runtime::ports::model::error::ModelError
+pub fn finstack_ai_provider_wire::stream_limit_error(&finstack_ai_provider_wire::ProviderErrorCodes, &'static str) -> finstack_ai_runtime::ports::model::error::ModelError
+pub fn finstack_ai_provider_wire::stream_norm_error(&finstack_ai_provider_wire::ProviderErrorCodes, &'static str, &finstack_ai_provider_wire::StreamNormError) -> finstack_ai_runtime::ports::model::error::ModelError
+pub fn finstack_ai_provider_wire::system_prefix_len(&finstack_ai_provider_wire::ProviderErrorCodes, &[finstack_ai_kernel::conversation::message::Message]) -> core::result::Result<usize, finstack_ai_runtime::ports::model::error::ModelError>
+pub fn finstack_ai_provider_wire::timeout_error(&finstack_ai_provider_wire::ProviderErrorCodes, &'static str) -> finstack_ai_runtime::ports::model::error::ModelError
+pub fn finstack_ai_provider_wire::unknown_model_capabilities(&'static str, &finstack_ai_runtime::ports::model::identity::ModelName, finstack_ai_runtime::ports::model::profile::StructuredOutputCapability, finstack_ai_runtime::ports::model::profile::TokenEstimatorRef) -> finstack_ai_runtime::ports::model::profile::ModelCapabilities
+pub fn finstack_ai_provider_wire::validate_base_url(&str) -> core::result::Result<(), finstack_ai_provider_wire::BaseUrlError>
+pub fn finstack_ai_provider_wire::validate_context_profile(u64, u64, u64, u64, u64) -> core::result::Result<(), finstack_ai_provider_wire::ContextProfileError>
+pub fn finstack_ai_provider_wire::validate_request_timeout(core::time::Duration) -> bool
+pub const fn finstack_ai_provider_wire::validate_stream_limits(usize, usize) -> bool
