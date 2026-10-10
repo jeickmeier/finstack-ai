@@ -27,6 +27,8 @@ struct WireChunk {
     prompt_eval_count: Option<u64>,
     #[serde(default)]
     eval_count: Option<u64>,
+    #[serde(default)]
+    done_reason: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -46,6 +48,10 @@ struct WireToolCall {
 
 #[derive(Deserialize)]
 struct WireFunctionCall {
+    /// Ollama's explicit tool-call slot; absent on older servers and on
+    /// single-shot chunks, where the slot is derived from emission order.
+    #[serde(default)]
+    index: Option<u32>,
     name: Option<String>,
     arguments: Option<Value>,
 }
@@ -118,6 +124,13 @@ pub struct OllamaChatAssembly {
     structured: bool,
     /// Whether `done: true` has been observed.
     pub done: bool,
+    /// The `done_reason` reported alongside the terminal chunk, when any.
+    done_reason: Option<String>,
+    /// Next implicit tool-call slot for chunks whose calls omit `index`.
+    ///
+    /// Ollama emits each tool call at most once, so calls without an explicit
+    /// `index` on a later chunk must not collapse onto slot zero again.
+    next_tool_index: u32,
     matched_replay: Option<Vec<OllamaReplayEntry>>,
 }
 
@@ -137,6 +150,8 @@ impl OllamaChatAssembly {
             usage: Usage::empty(),
             structured,
             done: false,
+            done_reason: None,
+            next_tool_index: 0,
             matched_replay,
         }
     }
@@ -165,12 +180,33 @@ impl OllamaChatAssembly {
                     text: Arc::from(thinking.as_str()),
                 }));
             }
-            for (index, tool) in (0_u32..).zip(message.tool_calls) {
-                items.extend(self.consume_tool(index, tool)?);
+            let base = self.next_tool_index;
+            let mut highest_index = None;
+            for (offset, tool) in (0_u32..).zip(message.tool_calls) {
+                let function = tool
+                    .function
+                    .ok_or_else(|| StreamNormError::response("tool call omitted its function"))?;
+                let index = match function.index {
+                    Some(index) => index,
+                    None => base
+                        .checked_add(offset)
+                        .ok_or_else(|| StreamNormError::response("tool-call index overflowed"))?,
+                };
+                highest_index = Some(highest_index.map_or(index, |seen: u32| seen.max(index)));
+                items.extend(self.consume_tool(index, function)?);
+            }
+            if let Some(highest) = highest_index {
+                let next = highest
+                    .checked_add(1)
+                    .ok_or_else(|| StreamNormError::response("tool-call index overflowed"))?;
+                self.next_tool_index = self.next_tool_index.max(next);
             }
         }
         if chunk.prompt_eval_count.is_some() || chunk.eval_count.is_some() {
             items.extend(self.apply_usage(chunk.prompt_eval_count, chunk.eval_count)?);
+        }
+        if let Some(reason) = chunk.done_reason {
+            self.done_reason = Some(reason);
         }
         if chunk.done {
             self.done = true;
@@ -182,11 +218,19 @@ impl OllamaChatAssembly {
     ///
     /// # Errors
     ///
-    /// Returns [`StreamNormError`] when the stream never completed or the payload is invalid.
+    /// Returns [`StreamNormError`] when the stream never completed or the
+    /// payload is invalid, and a [`StreamNormKind::Incomplete`](crate::StreamNormKind::Incomplete)
+    /// failure when Ollama reported `done_reason: "length"` (the generation
+    /// hit its output-token ceiling before finishing).
     pub fn finish(self) -> Result<ModelResponse, StreamNormError> {
         if !self.done {
             return Err(StreamNormError::stream(
                 "NDJSON stream ended before done:true",
+            ));
+        }
+        if self.done_reason.as_deref() == Some("length") {
+            return Err(StreamNormError::incomplete(
+                "generation stopped at the output-token ceiling",
             ));
         }
         let assistant_content: Arc<[ContentBlock]> = if self.structured && !self.text.is_empty() {
@@ -246,11 +290,8 @@ impl OllamaChatAssembly {
     fn consume_tool(
         &mut self,
         index: u32,
-        tool: WireToolCall,
+        function: WireFunctionCall,
     ) -> Result<Vec<ModelStreamItem>, StreamNormError> {
-        let function = tool
-            .function
-            .ok_or_else(|| StreamNormError::response("tool call omitted its function"))?;
         let name = function
             .name
             .filter(|value| !value.is_empty())
@@ -457,6 +498,96 @@ mod tests {
             ollama_content_digest("hi", &[("lookup".to_owned(), r#"{"q":"x"}"#.to_owned())])
                 .unwrap();
         assert_eq!(entries[0].digest.as_deref(), Some(expected.as_str()));
+    }
+
+    fn tool_delta_index(item: &ModelStreamItem) -> u32 {
+        match item {
+            ModelStreamItem::ToolCallDelta(delta) => delta.index,
+            other => panic!("expected tool-call delta, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tool_calls_across_chunks_get_distinct_indices() {
+        let mut assembly = OllamaChatAssembly::new("request-1".to_owned(), false, None);
+        let items = assembly
+            .consume(r#"{"message":{"content":"","tool_calls":[{"function":{"name":"a","arguments":{}}}]},"done":false}"#)
+            .unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(tool_delta_index(&items[0]), 0);
+        let items = assembly
+            .consume(r#"{"message":{"content":"","tool_calls":[{"function":{"name":"b","arguments":{"k":1}}}]},"done":false}"#)
+            .unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(tool_delta_index(&items[0]), 1);
+        assembly
+            .consume(r#"{"message":{"content":""},"done":true}"#)
+            .unwrap();
+        let response = assembly.finish().unwrap();
+        assert_eq!(response.tool_calls.len(), 2);
+        assert_eq!(response.tool_calls[0].name.as_ref(), "a");
+        assert_eq!(response.tool_calls[0].arguments.as_str(), "{}");
+        assert_eq!(response.tool_calls[1].name.as_ref(), "b");
+        assert_eq!(response.tool_calls[1].arguments.as_str(), r#"{"k":1}"#);
+    }
+
+    #[test]
+    fn explicit_function_index_is_honored() {
+        let mut assembly = OllamaChatAssembly::new("request-1".to_owned(), false, None);
+        let items = assembly
+            .consume(r#"{"message":{"content":"","tool_calls":[{"function":{"index":1,"name":"b","arguments":{}}}]},"done":false}"#)
+            .unwrap();
+        assert_eq!(tool_delta_index(&items[0]), 1);
+        let items = assembly
+            .consume(r#"{"message":{"content":"","tool_calls":[{"function":{"index":0,"name":"a","arguments":{}}}]},"done":true}"#)
+            .unwrap();
+        assert_eq!(tool_delta_index(&items[0]), 0);
+        let response = assembly.finish().unwrap();
+        assert_eq!(response.tool_calls.len(), 2);
+        assert_eq!(response.tool_calls[0].name.as_ref(), "a");
+        assert_eq!(response.tool_calls[1].name.as_ref(), "b");
+
+        // A repeated explicit slot with identical content is the same call,
+        // and an implicit call after explicit slots lands on the next free slot.
+        let mut assembly = OllamaChatAssembly::new("request-2".to_owned(), false, None);
+        assembly
+            .consume(r#"{"message":{"content":"","tool_calls":[{"function":{"index":3,"name":"c","arguments":{}}}]},"done":false}"#)
+            .unwrap();
+        let items = assembly
+            .consume(r#"{"message":{"content":"","tool_calls":[{"function":{"index":3,"name":"c","arguments":{}}}]},"done":false}"#)
+            .unwrap();
+        assert!(items.is_empty());
+        let items = assembly
+            .consume(r#"{"message":{"content":"","tool_calls":[{"function":{"name":"d","arguments":{}}}]},"done":false}"#)
+            .unwrap();
+        assert_eq!(tool_delta_index(&items[0]), 4);
+    }
+
+    #[test]
+    fn done_reason_length_is_incomplete() {
+        let mut assembly = OllamaChatAssembly::new("request-1".to_owned(), false, None);
+        assembly
+            .consume(r#"{"message":{"content":"partial"},"done":true,"done_reason":"length"}"#)
+            .unwrap();
+        let error = assembly.finish().expect_err("truncated generation");
+        assert_eq!(error.kind, crate::StreamNormKind::Incomplete);
+        assert!(!error.retryable);
+
+        // Structured output is reported as truncated rather than as invalid JSON.
+        let mut assembly = OllamaChatAssembly::new("request-2".to_owned(), true, None);
+        assembly
+            .consume(r#"{"message":{"content":"{\"answer\":"},"done":true,"done_reason":"length"}"#)
+            .unwrap();
+        assert_eq!(
+            assembly.finish().expect_err("truncated structured").kind,
+            crate::StreamNormKind::Incomplete
+        );
+
+        let mut assembly = OllamaChatAssembly::new("request-3".to_owned(), false, None);
+        assembly
+            .consume(r#"{"message":{"content":"full"},"done":true,"done_reason":"stop"}"#)
+            .unwrap();
+        assert!(assembly.finish().is_ok());
     }
 
     #[test]

@@ -4,9 +4,9 @@
 use std::sync::Arc;
 
 use finstack_ai_kernel::{
-    ContentBlock, EffectId, LaneId, Message, MessageId, MessageRole, Metadata, ModelRequestId,
-    OperationLocator, OutputSpec, PrincipalRef, ProviderIds, RawJson, RunId, SessionId, TextBlock,
-    Timestamp,
+    ContentBlock, EffectId, ErrorCategory, LaneId, Message, MessageId, MessageRole, Metadata,
+    ModelRequestId, OperationLocator, OutputSpec, PrincipalRef, ProviderIds, RawJson, RunId,
+    SessionId, TextBlock, Timestamp,
 };
 use finstack_ai_provider_ollama::{OllamaConfig, OllamaModelConfig, OllamaProvider};
 use finstack_ai_provider_wire::OllamaChatAssembly;
@@ -108,6 +108,14 @@ fn expected_ollama() -> ModelTerminal {
 }
 
 async fn serve_body(content_type: &str, body: &str) -> (String, tokio::task::JoinHandle<String>) {
+    serve_response(200, content_type, body).await
+}
+
+async fn serve_response(
+    status: u16,
+    content_type: &str,
+    body: &str,
+) -> (String, tokio::task::JoinHandle<String>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("listener");
     let address = listener.local_addr().expect("address");
     let content_type = content_type.to_owned();
@@ -139,7 +147,7 @@ async fn serve_body(content_type: &str, body: &str) -> (String, tokio::task::Joi
             request.extend_from_slice(&buffer[..count]);
         }
         let response_headers = format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            "HTTP/1.1 {status} Status\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
             body.len()
         );
         socket
@@ -173,4 +181,34 @@ async fn assert_protocol(content_type: &str, body: &str, expected: ModelTerminal
 #[tokio::test(flavor = "multi_thread")]
 async fn ollama_chat_conformance() {
     assert_protocol("application/x-ndjson", OLLAMA_NDJSON, expected_ollama()).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn http_error_carries_status_metadata() {
+    let (base, server) =
+        serve_response(503, "application/json", r#"{"error":"secret-canary-503"}"#).await;
+    let model = provider(&base);
+    let Err(error) = model.request(request()).await else {
+        panic!("non-success status must fail before streaming");
+    };
+    assert_eq!(error.code().as_str(), "ollama_http_error");
+    assert_eq!(error.category(), ErrorCategory::Model);
+    assert!(error.retryable());
+    assert_eq!(error.message(), "Ollama chat endpoint returned HTTP 503");
+    assert_eq!(
+        error.metadata().as_raw_json().as_str(),
+        r#"{"http_status":503}"#
+    );
+    assert!(!error.message().contains("secret-canary"));
+    server.abort();
+
+    let (base, server) = serve_response(404, "application/json", "{}").await;
+    let model = provider(&base);
+    let Err(error) = model.request(request()).await else {
+        panic!("404 must fail");
+    };
+    assert_eq!(error.code().as_str(), "ollama_http_error");
+    assert!(!error.retryable());
+    assert_eq!(error.message(), "Ollama chat endpoint returned HTTP 404");
+    server.abort();
 }

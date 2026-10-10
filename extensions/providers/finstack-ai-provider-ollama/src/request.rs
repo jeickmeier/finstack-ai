@@ -7,9 +7,12 @@ use base64::Engine as _;
 use finstack_ai_kernel::{
     ContentBlock, Message, MessageRole, OutputSpec, RawJson, SUBMIT_FINAL_OUTPUT_TOOL,
 };
+use finstack_ai_provider_wire::{
+    OllamaReplayEntry, ollama_content_digest, parse_ollama_continuation,
+};
 use finstack_ai_runtime::ports::model::{ModelError, ModelRequestDraft, ResolvedMedia};
-use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde::Serialize;
+use serde_json::Value;
 
 use crate::OllamaModelConfig;
 use crate::error::request_error;
@@ -17,8 +20,6 @@ use crate::error::request_error;
 const RESERVED_SETTINGS: &[&str] = &[
     "model", "messages", "tools", "stream", "format", "think", "options",
 ];
-const CONTINUATION_PROVIDER: &str = "ollama.api_chat";
-const CONTINUATION_VERSION: u32 = 1;
 
 #[derive(Debug, Serialize)]
 pub(crate) struct ChatRequest {
@@ -39,7 +40,7 @@ pub(crate) struct ChatRequest {
 #[derive(Debug)]
 pub(crate) struct PreparedChat {
     pub(crate) request: ChatRequest,
-    pub(crate) matched_replay: Option<Vec<ReplayEntry>>,
+    pub(crate) matched_replay: Option<Vec<OllamaReplayEntry>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -85,21 +86,6 @@ struct WireFunction {
     name: String,
     description: String,
     parameters: Value,
-}
-
-#[derive(Deserialize)]
-struct ContinuationEnvelope {
-    provider: String,
-    version: u32,
-    assistant_replay: Vec<ReplayEntry>,
-}
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct ReplayEntry {
-    #[serde(default)]
-    pub(crate) thinking: String,
-    #[serde(default)]
-    pub(crate) digest: Option<String>,
 }
 
 impl ChatRequest {
@@ -182,23 +168,24 @@ fn raw_value(value: &RawJson) -> Result<Value, ModelError> {
         .map_err(|_| request_error("canonical provider JSON could not be decoded"))
 }
 
+/// Match a prior continuation envelope against the outgoing assistant turns.
+///
+/// Returns `None` (a fresh conversation) when the envelope is foreign, when
+/// the assistant turn count differs (compaction), or when any recorded digest
+/// no longer matches its turn's visible content.
 fn resolve_replay(
     messages: &[Message],
     continuation: Option<&RawJson>,
-) -> Option<Vec<ReplayEntry>> {
-    let continuation = continuation?;
-    let envelope: ContinuationEnvelope = serde_json::from_slice(continuation.as_bytes()).ok()?;
-    if envelope.provider != CONTINUATION_PROVIDER || envelope.version != CONTINUATION_VERSION {
-        return None;
-    }
+) -> Option<Vec<OllamaReplayEntry>> {
+    let entries = parse_ollama_continuation(continuation?)?;
     let assistants = messages
         .iter()
         .filter(|message| message.role() == MessageRole::Assistant)
         .collect::<Vec<_>>();
-    if envelope.assistant_replay.len() != assistants.len() {
+    if entries.len() != assistants.len() {
         return None;
     }
-    for (entry, message) in envelope.assistant_replay.iter().zip(assistants) {
+    for (entry, message) in entries.iter().zip(assistants) {
         let digest = assistant_message_digest(message).ok()?;
         if entry
             .digest
@@ -208,12 +195,12 @@ fn resolve_replay(
             return None;
         }
     }
-    Some(envelope.assistant_replay)
+    Some(entries)
 }
 
 fn map_messages(
     messages: &[Message],
-    replay: Option<&[ReplayEntry]>,
+    replay: Option<&[OllamaReplayEntry]>,
     resolved: &BTreeMap<Arc<str>, ResolvedMedia>,
     model: &OllamaModelConfig,
 ) -> Result<Vec<WireMessage>, ModelError> {
@@ -386,26 +373,15 @@ fn assistant_message_digest(message: &Message) -> Result<String, ModelError> {
         match block {
             ContentBlock::Text(value) => text.push_str(value.text()),
             ContentBlock::Json(value) => text.push_str(value.value().as_str()),
-            ContentBlock::ToolCall(call) => tool_calls.push(json!({
-                "name": call.tool_name(),
-                "arguments": call.arguments().as_str(),
-            })),
+            ContentBlock::ToolCall(call) => tool_calls.push((
+                call.tool_name().to_owned(),
+                call.arguments().as_str().to_owned(),
+            )),
             _ => {}
         }
     }
-    content_digest(&text, &tool_calls)
-}
-
-fn content_digest(text: &str, tool_calls: &[Value]) -> Result<String, ModelError> {
-    let value = json!({
-        "text": text,
-        "tool_calls": tool_calls,
-    });
-    let bytes = serde_json::to_vec(&value)
-        .map_err(|_| request_error("assistant content digest could not be encoded"))?;
-    let raw = RawJson::parse(&bytes)
-        .map_err(|_| request_error("assistant content digest is not canonical JSON"))?;
-    Ok(raw.digest().to_hex())
+    ollama_content_digest(&text, &tool_calls)
+        .map_err(|_| request_error("assistant content digest could not be encoded"))
 }
 
 pub(crate) fn serialize_request(request: &ChatRequest) -> Result<Vec<u8>, ModelError> {
@@ -422,6 +398,10 @@ mod tests {
         ToolCallBlock, ToolCallId, ToolResultBlock,
     };
     use finstack_ai_runtime::ports::model::{ModelName, ModelRequestLimits, ModelSettings};
+    use serde_json::json;
+
+    const CONTINUATION_PROVIDER: &str = "ollama.api_chat";
+    const CONTINUATION_VERSION: u32 = 1;
 
     #[test]
     fn maps_native_messages_tools_limits_and_reasoning() {

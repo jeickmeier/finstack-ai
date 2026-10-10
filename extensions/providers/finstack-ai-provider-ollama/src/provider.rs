@@ -8,7 +8,7 @@ use std::sync::{Arc, PoisonError, RwLock};
 
 use finstack_ai_kernel::{ErrorCategory, Metadata, OutputSpec};
 use finstack_ai_provider_wire::{
-    OllamaChatAssembly, OllamaReplayEntry, StreamNormError, StreamNormKind,
+    OllamaChatAssembly, OllamaReplayEntry, StreamNormError, http_error, stream_norm_error,
 };
 use finstack_ai_runtime::ports::model::{
     MediaResolveKind, Model, ModelCapabilities, ModelDescriptor, ModelError, ModelEventStream,
@@ -21,11 +21,11 @@ use tokio::sync::mpsc;
 
 use crate::config::estimator_ref;
 use crate::error::{
-    CANCELLED, HTTP_ERROR, RESPONSE_INVALID, STREAM_LIMIT_EXCEEDED, TIMEOUT, TRANSPORT_ERROR,
-    config_error, error, request_error, response_error, stream_error, stream_limit_error,
+    CANCELLED, CODES, RESPONSE_INVALID, STREAM_LIMIT_EXCEEDED, TIMEOUT, TRANSPORT_ERROR,
+    config_error, error, request_error, stream_error, stream_limit_error,
 };
 use crate::ndjson::NdjsonParser;
-use crate::request::{ChatRequest, ReplayEntry, serialize_request};
+use crate::request::{ChatRequest, serialize_request};
 use crate::{OllamaConfig, OllamaModelConfig};
 
 const STREAM_CHANNEL_CAPACITY: usize = 32;
@@ -295,12 +295,11 @@ impl Model for OllamaProvider {
                 response = send => response.map_err(|source| transport_error(&source))?,
             };
             if !response.status().is_success() {
-                let retryable = matches!(response.status().as_u16(), 408 | 409 | 429 | 500..=599);
-                return Err(error(
-                    HTTP_ERROR,
-                    ErrorCategory::Model,
-                    retryable,
-                    "Ollama endpoint returned an unsuccessful status",
+                return Err(http_error(
+                    &CODES,
+                    "Ollama",
+                    "chat endpoint",
+                    response.status().as_u16(),
                 ));
             }
             let (sender, receiver) = mpsc::channel(STREAM_CHANNEL_CAPACITY);
@@ -350,26 +349,14 @@ async fn drive_response(
     cancellation: finstack_ai_runtime::ports::model::CancellationSignal,
     request_id: String,
     structured: bool,
-    matched_replay: Option<Vec<ReplayEntry>>,
+    matched_replay: Option<Vec<OllamaReplayEntry>>,
     max_event_bytes: usize,
     max_stream_bytes: usize,
     deadline: tokio::time::Instant,
 ) {
     let mut body = response.bytes_stream();
     let mut parser = NdjsonParser::new(max_event_bytes, max_stream_bytes);
-    let mut assembly = OllamaChatAssembly::new(
-        request_id,
-        structured,
-        matched_replay.map(|entries| {
-            entries
-                .into_iter()
-                .map(|entry| OllamaReplayEntry {
-                    thinking: entry.thinking,
-                    digest: entry.digest,
-                })
-                .collect()
-        }),
-    );
+    let mut assembly = OllamaChatAssembly::new(request_id, structured, matched_replay);
     // Lines left after EOF (a final line without its newline), or empty once
     // `done: true` has been observed mid-stream.
     let leftover = loop {
@@ -448,11 +435,7 @@ async fn consume_lines(
     reason = "map_err passes the normalization error by value"
 )]
 fn map_norm(error: StreamNormError) -> ModelError {
-    match error.kind {
-        StreamNormKind::Limit => stream_limit_error(),
-        StreamNormKind::Stream => stream_error(error.message),
-        StreamNormKind::Response | StreamNormKind::Incomplete => response_error(error.message),
-    }
+    stream_norm_error(&CODES, "Ollama", &error)
 }
 
 fn cancelled_error() -> ModelError {
@@ -498,6 +481,7 @@ fn transport_error(source: &reqwest::Error) -> ModelError {
 #[cfg(test)]
 mod tests {
     use finstack_ai_kernel::ContentBlock;
+    use finstack_ai_provider_wire::StreamNormKind;
     use finstack_ai_runtime::ports::model::{MediaResolver, ResolvedMedia};
 
     use super::*;
