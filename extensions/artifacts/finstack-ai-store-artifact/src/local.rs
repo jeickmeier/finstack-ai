@@ -33,6 +33,7 @@ const MAX_MEDIA_TYPE_BYTES: usize = 1024;
 pub struct LocalObjectStore {
     root: PathBuf,
     limits: ObjectStoreLimits,
+    list_page_size: usize,
 }
 
 impl LocalObjectStore {
@@ -46,7 +47,16 @@ impl LocalObjectStore {
         Ok(Self {
             root: root_dir,
             limits: ObjectStoreLimits::default(),
+            list_page_size: LIST_PAGE_SIZE,
         })
+    }
+
+    /// Shrink the listing page so tests exercise pagination without
+    /// thousands of files.
+    #[cfg(test)]
+    pub(crate) fn with_list_page_size(mut self, list_page_size: usize) -> Self {
+        self.list_page_size = list_page_size.max(1);
+        self
     }
 }
 
@@ -136,6 +146,19 @@ impl ObjectDriver for LocalObjectStore {
         Box::pin(async move { get_impl(&root, scope, key).await })
     }
 
+    fn head(
+        &self,
+        scope: ObjectScope,
+        key: ObjectKey,
+    ) -> PortFuture<Result<ObjectRef, ObjectError>> {
+        let root = self.root.clone();
+        Box::pin(async move {
+            // Validates the header and file length; the payload stays unread.
+            let opened = open_envelope(&root, &scope, &key).await?;
+            Ok(object_ref(opened.header))
+        })
+    }
+
     fn delete(&self, scope: ObjectScope, key: ObjectKey) -> PortFuture<Result<(), ObjectError>> {
         let root = self.root.clone();
         Box::pin(async move {
@@ -216,7 +239,8 @@ impl ObjectDriver for LocalObjectStore {
         page: PageToken,
     ) -> PortFuture<Result<ObjectPage, ObjectError>> {
         let root = self.root.clone();
-        Box::pin(async move { list_impl(&root, scope, prefix, page).await })
+        let page_size = self.list_page_size;
+        Box::pin(async move { list_impl(&root, scope, prefix, page, page_size).await })
     }
 
     fn limits(&self) -> ObjectStoreLimits {
@@ -293,7 +317,7 @@ async fn sync_directory(path: &Path, context: &str) -> Result<(), ObjectError> {
     .map_err(|error| io_error(&error, &context))
 }
 
-async fn acquire_mutation_lock(
+pub(crate) async fn acquire_mutation_lock(
     root: &Path,
     scope: &ObjectScope,
     key: &ObjectKey,
@@ -326,7 +350,10 @@ async fn acquire_mutation_lock(
         .await;
     match file.try_lock() {
         Ok(()) => Ok(file),
-        Err(std::fs::TryLockError::WouldBlock) => Err(ObjectError::Conflict),
+        // A held lock says nothing about the stored object, so it is not a
+        // precondition failure: report it as busy so callers retry instead
+        // of treating the object as already present.
+        Err(std::fs::TryLockError::WouldBlock) => Err(ObjectError::Busy),
         Err(std::fs::TryLockError::Error(error)) => Err(io_error(&error, key.as_str())),
     }
 }
@@ -634,15 +661,24 @@ async fn delete_impl(root: &Path, scope: ObjectScope, key: ObjectKey) -> Result<
     }
 }
 
+/// List one page of envelopes in sorted physical-filename order.
+///
+/// Filenames are key hashes, so this order differs from logical key order;
+/// the page token is the filename of the last returned entry. Only the
+/// files from the cursor up to the end of the returned page are opened:
+/// their headers are validated, non-matching prefixes are skipped, and
+/// nothing beyond the page is touched, so a corrupt envelope only fails the
+/// page that would have returned it.
 async fn list_impl(
     root: &Path,
     scope: ObjectScope,
     prefix: Option<ObjectKey>,
     page: PageToken,
+    page_size: usize,
 ) -> Result<ObjectPage, ObjectError> {
     let scope_digest = scope.digest()?;
     let directory = scope_dir(root, &scope_digest);
-    let mut matching = Vec::new();
+    let mut names = Vec::new();
     let mut entries = match tokio::fs::read_dir(&directory).await {
         Ok(entries) => entries,
         Err(error) if is_not_found(&error) => {
@@ -663,17 +699,35 @@ async fn list_impl(
             .await
             .map_err(|error| io_error(&error, "list"))?;
         let file_name = entry.file_name().to_string_lossy().into_owned();
-        if !file_type.is_file() || !file_name.ends_with(ENVELOPE_SUFFIX) {
-            continue;
+        if file_type.is_file() && file_name.ends_with(ENVELOPE_SUFFIX) {
+            names.push(file_name);
         }
-        let mut file = tokio::fs::File::open(entry.path())
-            .await
-            .map_err(|error| io_error(&error, "list"))?;
+    }
+    names.sort_unstable();
+    let start_index = match page.value() {
+        Some(cursor) => names
+            .iter()
+            .position(|name| name == cursor)
+            .map_or(0, |index| index + 1),
+        None => 0,
+    };
+    let mut page_entries = Vec::new();
+    let mut last_name: Option<&str> = None;
+    let mut consumed = start_index;
+    for file_name in names.iter().skip(start_index) {
+        consumed += 1;
+        last_name = Some(file_name);
+        let mut file = match tokio::fs::File::open(directory.join(file_name)).await {
+            Ok(file) => file,
+            // Deleted between the directory read and the open.
+            Err(error) if is_not_found(&error) => continue,
+            Err(error) => return Err(io_error(&error, "list")),
+        };
         let (header, payload_offset) = read_header(&mut file, "list").await?;
         if header.scope_digest != scope_digest {
             return Err(corrupt("envelope_scope_mismatch"));
         }
-        if envelope_name(&header.key) != file_name {
+        if envelope_name(&header.key) != *file_name {
             return Err(corrupt("object_key_collision"));
         }
         validate_file_length(&file, payload_offset, header.length, "list").await?;
@@ -681,30 +735,17 @@ async fn list_impl(
             .as_ref()
             .is_none_or(|prefix| header.key.as_str().starts_with(prefix.as_str()))
         {
-            matching.push((header.key, header.length));
+            page_entries.push(ObjectEntry {
+                key: header.key,
+                length: header.length,
+            });
+            if page_entries.len() >= page_size {
+                break;
+            }
         }
     }
-    matching.sort_by(|left, right| left.0.as_str().cmp(right.0.as_str()));
-    let start_index = match page.value() {
-        Some(cursor) => matching
-            .iter()
-            .position(|(key, _)| key.as_str() == cursor)
-            .map_or(0, |index| index + 1),
-        None => 0,
-    };
-    let remaining = matching.get(start_index..).unwrap_or(&[]);
-    let mut page_entries = Vec::new();
-    let mut last_key = None;
-    for (key, length) in remaining.iter().take(LIST_PAGE_SIZE) {
-        page_entries.push(ObjectEntry {
-            key: key.clone(),
-            length: *length,
-        });
-        last_key = Some(key.as_str().to_owned());
-    }
-    let consumed = start_index + page_entries.len();
-    let next = if consumed < matching.len() {
-        last_key.map(PageToken::opaque)
+    let next = if consumed < names.len() {
+        last_name.map(PageToken::opaque)
     } else {
         None
     };
@@ -747,7 +788,7 @@ mod tests {
             .unwrap();
         assert!(matches!(
             acquire_mutation_lock(dir.path(), &scope, &key).await,
-            Err(ObjectError::Conflict)
+            Err(ObjectError::Busy)
         ));
         drop(first);
         let second = acquire_mutation_lock(dir.path(), &scope, &key)
@@ -817,7 +858,7 @@ mod tests {
         let key = ObjectKey::try_new("locked").unwrap();
         assert!(matches!(
             acquire_mutation_lock(dir.path(), &scope, &key).await,
-            Err(ObjectError::Conflict)
+            Err(ObjectError::Busy)
         ));
         child.0.kill().unwrap();
         child.0.wait().unwrap();
@@ -835,6 +876,87 @@ mod tests {
             reopened.get(scope, key).await.unwrap(),
             Bytes::from_static(b"after kill")
         );
+    }
+
+    #[tokio::test]
+    async fn list_reads_headers_only_for_returned_page() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = LocalObjectStore::try_new(dir.path().to_path_buf())
+            .expect("store")
+            .with_list_page_size(2);
+        let scope = scope("tenant-a");
+        for key in ["a", "b", "c"] {
+            store
+                .put(
+                    scope.clone(),
+                    ObjectKey::try_new(key).expect("key"),
+                    Bytes::from_static(b"payload"),
+                    test_metadata(),
+                )
+                .await
+                .expect("put");
+        }
+        // Sorts after every real (hex) filename, so it belongs to the
+        // second page only.
+        let corrupt = scope_dir(dir.path(), &scope.digest().expect("digest"))
+            .join(format!("{}{ENVELOPE_SUFFIX}", "f".repeat(64)));
+        std::fs::write(&corrupt, b"garbage").expect("corrupt file");
+
+        let first = store
+            .list(scope.clone(), None, PageToken::first())
+            .await
+            .expect("first page must not open files beyond it");
+        assert_eq!(first.entries.len(), 2);
+        let next = first.next.expect("more pages");
+        let error = store
+            .list(scope, None, next)
+            .await
+            .expect_err("the page holding the corrupt file fails");
+        assert_eq!(error.code(), crate::driver::OBJECT_INTEGRITY_FAILURE);
+    }
+
+    #[tokio::test]
+    async fn list_pages_in_filename_order_and_filters_by_prefix() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = LocalObjectStore::try_new(dir.path().to_path_buf())
+            .expect("store")
+            .with_list_page_size(1);
+        let scope = scope("tenant-a");
+        for key in ["x/1", "y/1", "x/2", "y/2", "x/3"] {
+            store
+                .put(
+                    scope.clone(),
+                    ObjectKey::try_new(key).expect("key"),
+                    Bytes::from_static(b"payload"),
+                    test_metadata(),
+                )
+                .await
+                .expect("put");
+        }
+        let prefix = ObjectKey::try_new("x").expect("prefix");
+        let mut seen = Vec::new();
+        let mut page = PageToken::first();
+        loop {
+            let listed = store
+                .list(scope.clone(), Some(prefix.clone()), page)
+                .await
+                .expect("list");
+            assert!(listed.entries.len() <= 1);
+            seen.extend(listed.entries.into_iter().map(|entry| entry.key));
+            let Some(next) = listed.next else { break };
+            page = next;
+        }
+        let mut names: Vec<_> = seen.iter().map(envelope_name).collect();
+        let sorted = {
+            let mut copy = names.clone();
+            copy.sort_unstable();
+            copy
+        };
+        assert_eq!(names, sorted, "pages follow physical filename order");
+        names.clear();
+        let mut keys: Vec<_> = seen.iter().map(|key| key.as_str().to_owned()).collect();
+        keys.sort_unstable();
+        assert_eq!(keys, ["x/1", "x/2", "x/3"]);
     }
 
     #[tokio::test]

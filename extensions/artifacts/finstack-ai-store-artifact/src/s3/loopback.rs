@@ -12,8 +12,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
 use crate::driver::{
-    OBJECT_INTEGRITY_FAILURE, OBJECT_NOT_FOUND, OBJECT_SCOPE_MISMATCH, ObjectDriver, ObjectKey,
-    ObjectMetadata, ObjectScope,
+    OBJECT_CONFLICT, OBJECT_INTEGRITY_FAILURE, OBJECT_NOT_FOUND, OBJECT_SCOPE_MISMATCH,
+    ObjectDriver, ObjectError, ObjectKey, ObjectMetadata, ObjectScope,
 };
 
 use super::request::payload_sha256_hex;
@@ -272,4 +272,151 @@ async fn delete_treats_404_as_success() {
         .await
         .expect("delete of a missing object must be Ok");
     server.await.expect("server task");
+}
+
+/// `HEAD` answer describing a stored object with `body`'s digest and the
+/// given etag, as the conditional mutations read it before writing.
+fn head_response(body: &[u8], etag: &str) -> CannedResponse {
+    CannedResponse::ok(
+        vec![
+            ("content-type", "application/octet-stream".to_owned()),
+            (
+                "x-amz-meta-fsai-digest",
+                Digest::blob_content(body).to_hex(),
+            ),
+            ("x-amz-meta-fsai-scope", scope_hex()),
+            ("etag", etag.to_owned()),
+        ],
+        Vec::new(),
+    )
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn replace_if_digest_mismatch_is_conflict() {
+    let (base_url, server) = serve(vec![
+        head_response(b"current", "\"etag-1\""),
+        CannedResponse::status("412 Precondition Failed"),
+    ])
+    .await;
+    let store = store(&base_url);
+    let key = ObjectKey::try_new("docs/a.pdf").expect("key");
+
+    let error = store
+        .replace_if_digest(
+            scope(),
+            key,
+            Digest::blob_content(b"current"),
+            Bytes::from_static(b"replacement"),
+            metadata("application/pdf"),
+        )
+        .await
+        .expect_err("412 must map to conflict");
+    assert_eq!(error, ObjectError::Conflict);
+    assert_eq!(error.code(), OBJECT_CONFLICT);
+    let captured = server.await.expect("server task");
+    assert!(captured[0].starts_with("HEAD "), "{}", captured[0]);
+    assert!(captured[1].starts_with("PUT "), "{}", captured[1]);
+    assert!(
+        captured[1].contains("if-match: \"etag-1\""),
+        "replacement must carry the observed etag: {}",
+        captured[1]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn replace_if_digest_detects_stale_expectation_before_writing() {
+    let (base_url, server) = serve(vec![head_response(b"current", "\"etag-1\"")]).await;
+    let store = store(&base_url);
+    let key = ObjectKey::try_new("docs/a.pdf").expect("key");
+
+    let error = store
+        .replace_if_digest(
+            scope(),
+            key,
+            Digest::blob_content(b"what the caller last saw"),
+            Bytes::from_static(b"replacement"),
+            metadata("application/pdf"),
+        )
+        .await
+        .expect_err("digest mismatch must conflict");
+    assert_eq!(error, ObjectError::Conflict);
+    let captured = server.await.expect("server task");
+    assert_eq!(captured.len(), 1, "no PUT is sent after a stale read");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn delete_if_digest_mismatch_is_conflict() {
+    let (base_url, server) = serve(vec![
+        head_response(b"current", "\"etag-7\""),
+        CannedResponse::status("412 Precondition Failed"),
+    ])
+    .await;
+    let store = store(&base_url);
+    let key = ObjectKey::try_new("docs/a.pdf").expect("key");
+
+    let error = store
+        .delete_if_digest(scope(), key, Digest::blob_content(b"current"))
+        .await
+        .expect_err("412 must map to conflict");
+    assert_eq!(error, ObjectError::Conflict);
+    let captured = server.await.expect("server task");
+    assert!(captured[1].starts_with("DELETE "), "{}", captured[1]);
+    assert!(
+        captured[1].contains("if-match: \"etag-7\""),
+        "conditional delete must carry the observed etag: {}",
+        captured[1]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn put_if_absent_existing_is_conflict() {
+    let (base_url, server) = serve(vec![CannedResponse::status("412 Precondition Failed")]).await;
+    let store = store(&base_url);
+    let key = ObjectKey::try_new("docs/a.pdf").expect("key");
+
+    let error = store
+        .put_if_absent(
+            scope(),
+            key,
+            Bytes::from_static(b"first"),
+            metadata("application/pdf"),
+        )
+        .await
+        .expect_err("412 must map to conflict");
+    assert_eq!(error, ObjectError::Conflict);
+    let captured = server.await.expect("server task");
+    assert!(
+        captured[0].contains("if-none-match: *"),
+        "absent-only put must send If-None-Match: {}",
+        captured[0]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn head_describes_the_object_without_a_body() {
+    let (base_url, server) = serve(vec![CannedResponse::ok(
+        vec![
+            ("content-type", "application/pdf".to_owned()),
+            (
+                "x-amz-meta-fsai-digest",
+                Digest::blob_content(b"twelve bytes").to_hex(),
+            ),
+            ("x-amz-meta-fsai-scope", scope_hex()),
+            ("etag", "\"etag-3\"".to_owned()),
+        ],
+        Vec::new(),
+    )])
+    .await;
+    let store = store(&base_url);
+    let key = ObjectKey::try_new("docs/a.pdf").expect("key");
+
+    let described = store.head(scope(), key.clone()).await.expect("head");
+    assert_eq!(described.key, key);
+    assert_eq!(
+        described.content_digest,
+        Digest::blob_content(b"twelve bytes")
+    );
+    assert_eq!(described.media_type.as_ref(), "application/pdf");
+    let captured = server.await.expect("server task");
+    assert!(captured[0].starts_with("HEAD "), "{}", captured[0]);
 }

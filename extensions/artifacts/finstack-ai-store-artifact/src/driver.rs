@@ -34,6 +34,8 @@ pub(crate) const OBJECT_UNSUPPORTED: &str = "object_unsupported";
 pub(crate) const OBJECT_IO_FAILURE: &str = "object_io_failure";
 /// Stable code for a failed conditional object mutation.
 pub(crate) const OBJECT_CONFLICT: &str = "object_conflict";
+/// Stable code for an object whose mutation lock is held by another caller.
+pub(crate) const OBJECT_BUSY: &str = "object_busy";
 
 /// Maximum logical key length in bytes.
 pub(crate) const MAX_OBJECT_KEY_BYTES: usize = 512;
@@ -248,6 +250,13 @@ pub(crate) trait ObjectDriver: PortObject {
     /// Read exact bytes; verifies content digest before returning.
     fn get(&self, scope: ObjectScope, key: ObjectKey) -> PortFuture<Result<Bytes, ObjectError>>;
 
+    /// Describe one object without reading its content.
+    fn head(
+        &self,
+        scope: ObjectScope,
+        key: ObjectKey,
+    ) -> PortFuture<Result<ObjectRef, ObjectError>>;
+
     /// Delete one object; deleting a missing object is not an error.
     #[allow(
         dead_code,
@@ -371,6 +380,17 @@ pub(crate) enum ObjectError {
     /// A conditional mutation observed a different current object.
     #[error("{}: conditional mutation precondition failed", OBJECT_CONFLICT)]
     Conflict,
+    /// Another caller holds the object's mutation lock right now.
+    ///
+    /// Distinct from [`Self::Conflict`]: nothing is known about the stored
+    /// object, so callers must retry rather than treat the object as
+    /// present or absent.
+    #[error("{}: object mutation lock is held", OBJECT_BUSY)]
+    #[cfg_attr(
+        not(feature = "local"),
+        allow(dead_code, reason = "the local driver's advisory lock constructs this")
+    )]
+    Busy,
     /// Requested scope differs from the object's frozen binding.
     #[error(
         "{}: expected scope {expected}, actual scope {actual}",
@@ -431,6 +451,7 @@ impl ObjectError {
             Self::Unavailable { .. } => OBJECT_UNAVAILABLE,
             Self::NotFound => OBJECT_NOT_FOUND,
             Self::Conflict => OBJECT_CONFLICT,
+            Self::Busy => OBJECT_BUSY,
             Self::ScopeMismatch { .. } => OBJECT_SCOPE_MISMATCH,
             Self::Integrity { .. } => OBJECT_INTEGRITY_FAILURE,
             Self::TooLarge { .. } => OBJECT_TOO_LARGE,
