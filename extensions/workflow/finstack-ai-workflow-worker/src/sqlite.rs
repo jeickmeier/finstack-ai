@@ -27,6 +27,9 @@ const WORKER_SCHEMA_VERSION: i64 = 3;
 /// `PRAGMA user_version`, which belongs to the journal in shared files. This
 /// release intentionally requires a fresh adapter schema: opening an
 /// unversioned historical worker table fails with a reset-required error.
+///
+/// Every statement is idempotent, so a version-3 database created before an
+/// index was added gains it on the next open without a version bump.
 const WORKER_DDL: &str = "
 CREATE TABLE IF NOT EXISTS finstack_workflow_worker_schema (
   singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -82,6 +85,8 @@ CREATE TABLE IF NOT EXISTS finstack_workflow_worker_dead_letters (
 );
 CREATE INDEX IF NOT EXISTS finstack_workflow_worker_dead_letters_age
 ON finstack_workflow_worker_dead_letters (rejected_unix_ms, id);
+CREATE INDEX IF NOT EXISTS finstack_workflow_worker_wake_pending
+ON finstack_workflow_worker_wake (tenant_scope, pending_id);
 ";
 
 /// Sqlite tables backing the workflow worker's adapter state.
@@ -94,6 +99,7 @@ pub struct SqliteWorkerStore {
     path: PathBuf,
     conn: Mutex<Connection>,
     wake_cursor: Mutex<Option<(String, String)>>,
+    fire_cursor: Mutex<Option<(String, String, i64)>>,
 }
 
 impl SqliteWorkerStore {
@@ -163,6 +169,7 @@ impl SqliteWorkerStore {
             path,
             conn: Mutex::new(conn),
             wake_cursor: Mutex::new(None),
+            fire_cursor: Mutex::new(None),
         })
     }
 
@@ -333,7 +340,28 @@ fn query_wake_rows(
 const WAKE_SELECT: &str = "SELECT tenant_scope, session_id, lane_id, run_id, workflow_kind, reason,
        wake_at_unix_ms, expires_at_unix_ms, pending_id, leased_by, lease_expires_unix_ms,
        attempts, lease_id
-FROM finstack_workflow_worker_wake";
+FROM finstack_workflow_worker_wake AS w";
+
+/// Dueness predicate shared by every `load_due*` query; `?1` is `now`.
+///
+/// Mirrors [`crate::wake::wake_due`] clause for clause: timer and runnable
+/// rows wait for `wake_at`; inbox-driven rows wait out a backoff `wake_at`
+/// and then need a buffered response (the `EXISTS` over the inbox, served by
+/// the `finstack_workflow_worker_wake_pending` index) or, for interactions,
+/// a passed deadline.
+const WAKE_DUE: &str =
+    "(leased_by IS NULL OR lease_expires_unix_ms IS NULL OR lease_expires_unix_ms <= ?1)
+   AND (CASE WHEN reason IN ('timer', 'runnable')
+             THEN wake_at_unix_ms IS NOT NULL AND wake_at_unix_ms <= ?1
+             ELSE (wake_at_unix_ms IS NULL OR wake_at_unix_ms <= ?1)
+                  AND (EXISTS (SELECT 1 FROM finstack_workflow_worker_inbox i
+                               WHERE i.tenant_scope = w.tenant_scope
+                                 AND i.session_id = w.session_id
+                                 AND i.pending_id = w.pending_id)
+                       OR (reason = 'interaction'
+                           AND expires_at_unix_ms IS NOT NULL
+                           AND expires_at_unix_ms <= ?1))
+        END)";
 
 fn check_sqlite_lease(
     conn: &Connection,
@@ -365,8 +393,8 @@ impl WakeIndexStore for SqliteWorkerStore {
                 "INSERT OR REPLACE INTO finstack_workflow_worker_wake (
                     tenant_scope, session_id, lane_id, run_id, workflow_kind, reason,
                     wake_at_unix_ms, expires_at_unix_ms, pending_id, leased_by,
-                    lease_expires_unix_ms, attempts
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                    lease_id, lease_expires_unix_ms, attempts
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, NULL, ?11, ?12)",
                 params![
                     row.tenant_scope.as_ref(),
                     row.session_id.to_canonical_string(),
@@ -421,34 +449,63 @@ impl WakeIndexStore for SqliteWorkerStore {
     }
 
     fn load_due(&self, now: Timestamp, limit: usize) -> Result<Vec<WakeRow>, WorkerError> {
+        self.load_due_scoped(None, now, limit)
+    }
+
+    fn load_due_scoped(
+        &self,
+        tenant_scope: Option<&str>,
+        now: Timestamp,
+        limit: usize,
+    ) -> Result<Vec<WakeRow>, WorkerError> {
         self.with_conn(|conn| {
-            let mut cursor = self.wake_cursor.lock().map_err(|_| WorkerError::StoreUnavailable {
-                code: "sqlite_wake_cursor",
-            })?;
+            let mut cursor =
+                self.wake_cursor
+                    .lock()
+                    .map_err(|_| WorkerError::StoreUnavailable {
+                        code: "sqlite_wake_cursor",
+                    })?;
+            // `?2` is the tenant restriction; a NULL means every tenant.
             let due = format!(
                 "{WAKE_SELECT}
-                 WHERE (leased_by IS NULL OR lease_expires_unix_ms IS NULL OR lease_expires_unix_ms <= ?1)
-                   AND (CASE WHEN reason = 'timer'
-                             THEN wake_at_unix_ms IS NOT NULL AND wake_at_unix_ms <= ?1
-                             ELSE wake_at_unix_ms IS NULL OR wake_at_unix_ms <= ?1 END)"
+                 WHERE {WAKE_DUE}
+                   AND (?2 IS NULL OR tenant_scope = ?2)"
             );
             let bounded = i64::try_from(limit).unwrap_or(i64::MAX);
+            let now_ms = now.as_unix_ms();
             let mut rows = if let Some((tenant, session)) = cursor.as_ref() {
-                let sql = format!("{due} AND (tenant_scope, session_id) > (?2, ?3)
-                                   ORDER BY tenant_scope, session_id LIMIT ?4");
-                query_wake_rows(conn, &sql, params![now.as_unix_ms(), tenant, session, bounded])?
+                let sql = format!(
+                    "{due} AND (tenant_scope, session_id) > (?3, ?4)
+                                   ORDER BY tenant_scope, session_id LIMIT ?5"
+                );
+                query_wake_rows(
+                    conn,
+                    &sql,
+                    params![now_ms, tenant_scope, tenant, session, bounded],
+                )?
             } else {
-                let sql = format!("{due} ORDER BY tenant_scope, session_id LIMIT ?2");
-                query_wake_rows(conn, &sql, params![now.as_unix_ms(), bounded])?
+                let sql = format!("{due} ORDER BY tenant_scope, session_id LIMIT ?3");
+                query_wake_rows(conn, &sql, params![now_ms, tenant_scope, bounded])?
             };
-            if rows.len() < limit && let Some((tenant, session)) = cursor.as_ref() {
+            if rows.len() < limit
+                && let Some((tenant, session)) = cursor.as_ref()
+            {
                 let remaining = i64::try_from(limit - rows.len()).unwrap_or(i64::MAX);
-                let sql = format!("{due} AND (tenant_scope, session_id) <= (?2, ?3)
-                                   ORDER BY tenant_scope, session_id LIMIT ?4");
-                rows.extend(query_wake_rows(conn, &sql, params![now.as_unix_ms(), tenant, session, remaining])?);
+                let sql = format!(
+                    "{due} AND (tenant_scope, session_id) <= (?3, ?4)
+                                   ORDER BY tenant_scope, session_id LIMIT ?5"
+                );
+                rows.extend(query_wake_rows(
+                    conn,
+                    &sql,
+                    params![now_ms, tenant_scope, tenant, session, remaining],
+                )?);
             }
             if let Some(last) = rows.last() {
-                *cursor = Some((last.tenant_scope.to_string(), last.session_id.to_canonical_string()));
+                *cursor = Some((
+                    last.tenant_scope.to_string(),
+                    last.session_id.to_canonical_string(),
+                ));
             }
             Ok(rows)
         })
@@ -600,6 +657,49 @@ fn decode_fire_row(
     })
 }
 
+/// Query rows matching `sql`/`args`, decoding each into a [`FireRow`].
+fn query_fire_rows(
+    conn: &Connection,
+    sql: &str,
+    args: &[&dyn rusqlite::ToSql],
+) -> Result<Vec<FireRow>, WorkerError> {
+    let mut stmt = conn
+        .prepare(sql)
+        .map_err(|_| WorkerError::StoreUnavailable {
+            code: "sqlite_fire_row",
+        })?;
+    let rows = stmt
+        .query_map(args, |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, Option<String>>(5)?,
+            ))
+        })
+        .map_err(|_| WorkerError::StoreUnavailable {
+            code: "sqlite_fire_row",
+        })?;
+    let mut out = Vec::new();
+    for row in rows {
+        let (tenant_scope, schedule_id, fire_count, fired_unix_ms, status, started_session) =
+            row.map_err(|_| WorkerError::StoreIntegrity {
+                code: "sqlite_fire_row",
+            })?;
+        out.push(decode_fire_row(
+            tenant_scope,
+            schedule_id,
+            fire_count,
+            fired_unix_ms,
+            &status,
+            started_session,
+        )?);
+    }
+    Ok(out)
+}
+
 impl FireStore for SqliteWorkerStore {
     fn record_claimed(&self, row: &FireRow) -> Result<(), WorkerError> {
         self.with_conn(|conn| {
@@ -700,45 +800,56 @@ impl FireStore for SqliteWorkerStore {
 
     fn load_unstarted(&self, limit: usize) -> Result<Vec<FireRow>, WorkerError> {
         self.with_conn(|conn| {
-            let sql = format!(
-                "{FIRE_SELECT}
-                 WHERE status = 'claimed'
-                 ORDER BY tenant_scope, schedule_id, fire_count
-                 LIMIT ?1"
-            );
-            let mut stmt = conn.prepare(&sql).map_err(|_| WorkerError::StoreUnavailable {
-                code: "sqlite_fire_row",
-            })?;
-            let rows = stmt
-                .query_map(params![i64::try_from(limit).unwrap_or(i64::MAX)], |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, i64>(2)?,
-                        row.get::<_, i64>(3)?,
-                        row.get::<_, String>(4)?,
-                        row.get::<_, Option<String>>(5)?,
-                    ))
-                })
-                .map_err(|_| WorkerError::StoreUnavailable {
-                    code: "sqlite_fire_row",
-                })?;
-            let mut out = Vec::new();
-            for row in rows {
-                let (tenant_scope, schedule_id, fire_count, fired_unix_ms, status, started_session) =
-                    row.map_err(|_| WorkerError::StoreIntegrity {
-                        code: "sqlite_fire_row",
+            let mut cursor =
+                self.fire_cursor
+                    .lock()
+                    .map_err(|_| WorkerError::StoreUnavailable {
+                        code: "sqlite_fire_cursor",
                     })?;
-                out.push(decode_fire_row(
-                    tenant_scope,
-                    schedule_id,
-                    fire_count,
-                    fired_unix_ms,
-                    &status,
-                    started_session,
+            let bounded = i64::try_from(limit).unwrap_or(i64::MAX);
+            let mut rows = if let Some((tenant, schedule, count)) = cursor.as_ref() {
+                let sql = format!(
+                    "{FIRE_SELECT}
+                     WHERE status = 'claimed'
+                       AND (tenant_scope, schedule_id, fire_count) > (?1, ?2, ?3)
+                     ORDER BY tenant_scope, schedule_id, fire_count
+                     LIMIT ?4"
+                );
+                query_fire_rows(conn, &sql, params![tenant, schedule, count, bounded])?
+            } else {
+                let sql = format!(
+                    "{FIRE_SELECT}
+                     WHERE status = 'claimed'
+                     ORDER BY tenant_scope, schedule_id, fire_count
+                     LIMIT ?1"
+                );
+                query_fire_rows(conn, &sql, params![bounded])?
+            };
+            if rows.len() < limit
+                && let Some((tenant, schedule, count)) = cursor.as_ref()
+            {
+                let remaining = i64::try_from(limit - rows.len()).unwrap_or(i64::MAX);
+                let sql = format!(
+                    "{FIRE_SELECT}
+                     WHERE status = 'claimed'
+                       AND (tenant_scope, schedule_id, fire_count) <= (?1, ?2, ?3)
+                     ORDER BY tenant_scope, schedule_id, fire_count
+                     LIMIT ?4"
+                );
+                rows.extend(query_fire_rows(
+                    conn,
+                    &sql,
+                    params![tenant, schedule, count, remaining],
                 )?);
             }
-            Ok(out)
+            if let Some(last) = rows.last() {
+                *cursor = Some((
+                    last.tenant_scope.to_string(),
+                    last.schedule_id.to_string(),
+                    i64_from_fire_count(last.fire_count)?,
+                ));
+            }
+            Ok(rows)
         })
     }
 
@@ -1124,6 +1235,7 @@ mod tests {
     use finstack_ai_kernel::Timestamp;
 
     use super::SqliteWorkerStore;
+    use crate::inbox::{InboxKind, InboxRow, InboxStore};
     use crate::wake::{WakeIndexStore, WakeReason, WakeRow};
 
     fn ts(ms: i64) -> Timestamp {
@@ -1154,6 +1266,20 @@ mod tests {
             lease_expires_at: None,
             attempts: 0,
         }
+    }
+
+    /// Buffer a response under `row`'s inbox key.
+    fn buffer_response(store: &SqliteWorkerStore, row: &WakeRow) {
+        let entry = InboxRow::try_new(
+            Arc::clone(&row.tenant_scope),
+            row.session_id,
+            Arc::clone(&row.pending_id),
+            InboxKind::Interaction,
+            Arc::from(&br#"{"approved":true}"#[..]),
+            ts(0),
+        )
+        .expect("entry");
+        store.insert(&entry).expect("insert");
     }
 
     #[test]
@@ -1188,10 +1314,11 @@ mod tests {
         assert_eq!(loaded, vec![row]);
     }
 
-    /// The interaction deadline round-trips and never gates dueness: it is
-    /// read by the tick after the fact, not by the store's due predicate.
+    /// The interaction deadline round-trips. Before it passes the row is
+    /// inbox-driven: nothing to apply means not due, a buffered response
+    /// means due.
     #[test]
-    fn an_interaction_deadline_round_trips_without_gating_dueness() {
+    fn an_interaction_deadline_round_trips_and_the_row_waits_for_the_inbox() {
         let dir = tempfile::tempdir().expect("dir");
         let store = SqliteWorkerStore::try_open(dir.path().join("w.sqlite")).expect("open");
 
@@ -1201,16 +1328,83 @@ mod tests {
         row.expires_at = Some(ts(9_000));
         store.upsert(&row, None).expect("upsert");
 
-        let due = store.load_due(ts(1_000), 10).expect("load_due");
-        assert_eq!(
-            due,
-            vec![row.clone()],
-            "still inbox-driven before the deadline"
+        assert!(
+            store.load_due(ts(1_000), 10).expect("load_due").is_empty(),
+            "no response and a future deadline: nothing to drive"
         );
         assert_eq!(
             store.load_tenant("tenant-a").expect("tenant"),
-            vec![row],
+            vec![row.clone()],
             "and the deadline survives the round trip"
+        );
+        buffer_response(&store, &row);
+        assert_eq!(
+            store.load_due(ts(1_000), 10).expect("load_due"),
+            vec![row],
+            "a buffered response makes it due before the deadline"
+        );
+    }
+
+    /// A version-3 database created before the pending-id index existed
+    /// gains it on the next open: the DDL is idempotent and no schema
+    /// version bump is involved.
+    #[test]
+    fn v3_database_without_pending_index_gains_it_on_open() {
+        let dir = tempfile::tempdir().expect("dir");
+        let path = dir.path().join("w.sqlite");
+        drop(SqliteWorkerStore::try_open(&path).expect("create"));
+        let raw = rusqlite::Connection::open(&path).expect("raw");
+        raw.execute_batch("DROP INDEX finstack_workflow_worker_wake_pending")
+            .expect("drop index");
+        drop(raw);
+
+        let store = SqliteWorkerStore::try_open(&path).expect("reopen");
+        let indexed: bool = store
+            .with_conn(|conn| {
+                conn.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_master
+                                   WHERE type = 'index' AND name = 'finstack_workflow_worker_wake_pending')",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(|_| crate::WorkerError::StoreUnavailable { code: "test" })
+            })
+            .expect("query");
+        assert!(indexed, "the index is recreated on open");
+        let version: i64 = store
+            .with_conn(|conn| {
+                conn.query_row(
+                    "SELECT version FROM finstack_workflow_worker_schema WHERE singleton = 1",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(|_| crate::WorkerError::StoreUnavailable { code: "test" })
+            })
+            .expect("version");
+        assert_eq!(version, 3, "no schema version bump");
+    }
+
+    /// A tenant restriction is pushed into the query, so another tenant's
+    /// rows never consume the scoped page's slots.
+    #[test]
+    fn scoped_due_pages_skip_other_tenants() {
+        let dir = tempfile::tempdir().expect("dir");
+        let store = SqliteWorkerStore::try_open(dir.path().join("w.sqlite")).expect("open");
+        store
+            .upsert(&timer_row("tenant-a", 1, 1_000), None)
+            .expect("a");
+        store
+            .upsert(&timer_row("tenant-b", 2, 1_000), None)
+            .expect("b");
+        let page = store
+            .load_due_scoped(Some("tenant-b"), ts(1_000), 1)
+            .expect("scoped");
+        assert_eq!(page.len(), 1);
+        assert_eq!(page[0].tenant_scope.as_ref(), "tenant-b");
+        assert_eq!(
+            store.load_due(ts(1_000), 10).expect("all").len(),
+            2,
+            "an unscoped page still sees every tenant"
         );
     }
 
@@ -1249,45 +1443,107 @@ mod tests {
     }
 
     /// `load_due`'s SQL predicate must agree with [`crate::wake::wake_due`]
-    /// row for row: a freshly parked inbox-driven row (`wake_at: None`) is
-    /// immediately due, one backed off by `record_failure` sleeps until its
-    /// retry instant, and a timer row without a `wake_at` is never due.
+    /// row for row, across every clause: a timer is due at its `wake_at` and
+    /// never without one; a runnable row likewise; an inbox-driven row needs
+    /// a buffered response or (interaction only) a passed deadline, and a
+    /// backoff `wake_at` in the future parks it even with a response waiting.
     #[test]
     fn sqlite_dueness_matches_the_in_memory_predicate() {
         let dir = tempfile::tempdir().expect("dir");
         let store = SqliteWorkerStore::try_open(dir.path().join("w.sqlite")).expect("open");
 
-        let mut fresh = timer_row("tenant-a", 1, 0);
-        fresh.reason = WakeReason::Deferred;
-        fresh.wake_at = None;
-        let mut backed_off = timer_row("tenant-a", 2, 0);
-        backed_off.reason = WakeReason::Interaction;
-        backed_off.wake_at = Some(ts(5_000));
+        // Deferred, fresh park, response buffered: due.
+        let mut fresh_with_inbox = timer_row("tenant-a", 1, 0);
+        fresh_with_inbox.reason = WakeReason::Deferred;
+        fresh_with_inbox.wake_at = None;
+        // Interaction, backed off into the future, response buffered: not due.
+        let mut backed_off_with_inbox = timer_row("tenant-a", 2, 0);
+        backed_off_with_inbox.reason = WakeReason::Interaction;
+        backed_off_with_inbox.wake_at = Some(ts(5_000));
+        // Timer at its instant: due.
         let due_timer = timer_row("tenant-a", 3, 1_000);
+        // Timer with no instant: never due.
         let mut timerless = timer_row("tenant-a", 4, 0);
         timerless.wake_at = None;
+        // Interaction, no response, future deadline: not due.
+        let mut parked_without_inbox = timer_row("tenant-a", 5, 0);
+        parked_without_inbox.reason = WakeReason::Interaction;
+        parked_without_inbox.wake_at = None;
+        parked_without_inbox.expires_at = Some(ts(9_000));
+        // Interaction, no response, passed deadline: due for expiry.
+        let mut expired = timer_row("tenant-a", 6, 0);
+        expired.reason = WakeReason::Interaction;
+        expired.wake_at = None;
+        expired.expires_at = Some(ts(1_500));
+        // Interaction, backed off past its instant, no response, no
+        // deadline: not due (the backoff is open but there is nothing to do).
+        let mut backoff_passed_without_inbox = timer_row("tenant-a", 7, 0);
+        backoff_passed_without_inbox.reason = WakeReason::Interaction;
+        backoff_passed_without_inbox.wake_at = Some(ts(1_000));
+        // Runnable without an instant: not due (hosts enqueue with `Some(now)`).
+        let mut runnable_unscheduled = timer_row("tenant-a", 8, 0);
+        runnable_unscheduled.reason = WakeReason::Runnable;
+        runnable_unscheduled.wake_at = None;
+        // Runnable at its instant: due.
+        let mut runnable = timer_row("tenant-a", 9, 1_000);
+        runnable.reason = WakeReason::Runnable;
 
-        for row in [&fresh, &backed_off, &due_timer, &timerless] {
+        let rows = [
+            &fresh_with_inbox,
+            &backed_off_with_inbox,
+            &due_timer,
+            &timerless,
+            &parked_without_inbox,
+            &expired,
+            &backoff_passed_without_inbox,
+            &runnable_unscheduled,
+            &runnable,
+        ];
+        for row in rows {
             store.upsert(row, None).expect("upsert");
         }
+        buffer_response(&store, &fresh_with_inbox);
+        buffer_response(&store, &backed_off_with_inbox);
+        let inbox_pending = |row: &WakeRow| {
+            store
+                .load(
+                    row.tenant_scope.as_ref(),
+                    row.session_id,
+                    row.pending_id.as_ref(),
+                )
+                .expect("inbox")
+                .is_some()
+        };
 
         let now = ts(2_000);
         let due = store.load_due(now, 10).expect("load_due");
-        for row in [&fresh, &backed_off, &due_timer, &timerless] {
+        for row in rows {
             assert_eq!(
                 due.contains(row),
-                crate::wake::wake_due(row, now),
+                crate::wake::wake_due(row, now, inbox_pending(row)),
                 "sqlite and in-memory dueness disagree for {:?}",
                 row.session_id,
             );
         }
-        assert_eq!(due.len(), 2, "the fresh non-timer row and the due timer");
+        assert_eq!(
+            due,
+            vec![
+                fresh_with_inbox.clone(),
+                due_timer.clone(),
+                expired.clone(),
+                runnable.clone()
+            ],
+            "the fresh deferred row, the due timer, the expired interaction and the runnable row"
+        );
 
-        // Past the backoff, the inbox-driven row rejoins the due set.
-        let later = ts(6_000);
+        // Past the backoff (5_000) and the deadline (9_000), the backed-off
+        // row rejoins the due set and the deadline'd row becomes due by expiry.
+        let later = ts(10_000);
         let due_later = store.load_due(later, 10).expect("load_due");
-        assert!(due_later.contains(&backed_off));
-        assert!(crate::wake::wake_due(&backed_off, later));
+        assert!(due_later.contains(&backed_off_with_inbox));
+        assert!(crate::wake::wake_due(&backed_off_with_inbox, later, true));
+        assert!(due_later.contains(&parked_without_inbox));
+        assert!(crate::wake::wake_due(&parked_without_inbox, later, false));
     }
 
     #[test]

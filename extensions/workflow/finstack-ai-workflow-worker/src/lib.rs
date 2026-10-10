@@ -2,8 +2,11 @@
 //!
 //! Owns three adapter tables — a wake index, cron-fire records, and a
 //! response inbox — and a tick loop that claims due work with CAS leases.
-//! Every table is a hint; the kernel journal stays authoritative.
+//! Every table is a hint; the kernel journal stays authoritative. The wake
+//! index and inbox are always required; cron scheduling is opt-in through
+//! [`WorkerBuilder::cron`].
 
+mod cron_bridge;
 mod error;
 mod fires;
 mod inbox;
@@ -34,7 +37,7 @@ pub use wake::{
 };
 pub use worker::{
     InteractionDeliveryOutcome, InteractionLifecycle, PortsFactory, RunStarter, StartedRun,
-    TickReport, WorkerBuilder, WorkerHandle, WorkflowExecution, WorkflowWorker,
+    TickOutcome, TickReport, WorkerBuilder, WorkerHandle, WorkflowExecution, WorkflowWorker,
 };
 
 mod blocking;

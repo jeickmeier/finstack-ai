@@ -14,7 +14,7 @@ use finstack_ai_workflow_local::{
 };
 use finstack_ai_workflow_worker::{
     FireStore, InboxKind, InboxRow, InboxStore, MemoryWorkerStore, PortsFactory, RunStarter,
-    StartedRun, WakeIndexStore, WakeReason, WorkerBuilder, WorkerError, park_for_wake,
+    StartedRun, TickReport, WakeIndexStore, WakeReason, WorkerBuilder, WorkerError, park_for_wake,
 };
 
 use crate::helpers::{
@@ -65,9 +65,7 @@ fn builder_rejects_unsafe_runtime_limits() {
     let store = Arc::new(MemoryWorkerStore::new());
     let builder = WorkerBuilder::new(
         memory_store(),
-        Arc::new(MemoryCronStore::new()),
         Arc::clone(&store) as Arc<dyn WakeIndexStore>,
-        Arc::clone(&store) as Arc<dyn FireStore>,
         Arc::clone(&store) as Arc<dyn InboxStore>,
     )
     .batch_limit(0);
@@ -78,9 +76,7 @@ fn builder_rejects_unsafe_runtime_limits() {
 
     let builder = WorkerBuilder::new(
         memory_store(),
-        Arc::new(MemoryCronStore::new()),
         Arc::clone(&store) as Arc<dyn WakeIndexStore>,
-        Arc::clone(&store) as Arc<dyn FireStore>,
         Arc::clone(&store) as Arc<dyn InboxStore>,
     )
     .lease_ttl_ms(1_000)
@@ -89,6 +85,48 @@ fn builder_rejects_unsafe_runtime_limits() {
         panic!("drive budget must stay below the lease ttl");
     };
     assert_eq!(error.code(), "drive_timeout_exceeds_lease");
+
+    let builder = WorkerBuilder::new(
+        memory_store(),
+        Arc::clone(&store) as Arc<dyn WakeIndexStore>,
+        Arc::clone(&store) as Arc<dyn InboxStore>,
+    )
+    .max_response_attempts(0);
+    let Err(error) = builder.build() else {
+        panic!("a zero response bound would dead-letter nothing and retry forever");
+    };
+    assert_eq!(error.code(), "max_response_attempts_zero");
+
+    let builder = WorkerBuilder::new(
+        memory_store(),
+        Arc::clone(&store) as Arc<dyn WakeIndexStore>,
+        Arc::clone(&store) as Arc<dyn InboxStore>,
+    )
+    .register_starter(
+        "nightly",
+        Arc::new(CountingStarter {
+            calls: AtomicUsize::new(0),
+        }),
+    );
+    let Err(error) = builder.build() else {
+        panic!("a starter without cron tables can never be reached");
+    };
+    assert_eq!(error.code(), "cron_not_configured");
+
+    let builder = WorkerBuilder::new(
+        memory_store(),
+        Arc::clone(&store) as Arc<dyn WakeIndexStore>,
+        Arc::clone(&store) as Arc<dyn InboxStore>,
+    )
+    .cron(
+        Arc::new(MemoryCronStore::new()),
+        Arc::clone(&store) as Arc<dyn FireStore>,
+        Duration::ZERO,
+    );
+    let Err(error) = builder.build() else {
+        panic!("a zero retention is a misconfiguration, not a purge-everything switch");
+    };
+    assert_eq!(error.code(), "fire_retention_zero");
 }
 
 #[tokio::test]
@@ -112,10 +150,13 @@ async fn tick_fires_due_cron_and_starts_runs_exactly_once() {
     let clock = ExternalClock::new(timestamp(2_000));
     let worker = WorkerBuilder::new(
         journal,
-        cron,
         Arc::clone(&store) as Arc<dyn WakeIndexStore>,
-        Arc::clone(&store) as Arc<dyn FireStore>,
         Arc::clone(&store) as Arc<dyn InboxStore>,
+    )
+    .cron(
+        cron,
+        Arc::clone(&store) as Arc<dyn FireStore>,
+        Duration::from_secs(1),
     )
     .clock(clock.clone())
     .register_starter("nightly", Arc::clone(&starter) as Arc<dyn RunStarter>)
@@ -131,6 +172,65 @@ async fn tick_fires_due_cron_and_starts_runs_exactly_once() {
     let repeat = Box::pin(worker.tick()).await.expect("repeat tick");
     assert_eq!(repeat.runs_started, 0, "fire is not re-started");
     assert_eq!(starter.calls.load(Ordering::Acquire), 1);
+
+    // Far past the one-second retention the tick claims the next fire, then
+    // purges the aged started one; only the fire started this tick remains
+    // for a manual purge to find.
+    clock.set(timestamp(9_000));
+    let aged = Box::pin(worker.tick()).await.expect("past retention");
+    assert_eq!(aged.runs_started, 1);
+    assert_eq!(
+        store.purge_started(timestamp(10_000), 10).expect("purge"),
+        1,
+        "the tick purged the fire started at 2_015; the one started at 9_000 remains"
+    );
+}
+
+/// The purge horizon is `now - retention`. On the deterministic default
+/// clock (the unix epoch) with a seven-day retention it is still a valid
+/// timestamp, and with a retention so large that the horizon falls before
+/// representable time the purge is skipped: nothing can be that old, and the
+/// wake phase must still run.
+#[tokio::test]
+async fn a_purge_horizon_before_representable_time_skips_the_purge() {
+    for retention in [
+        Duration::from_hours(7 * 24),
+        Duration::from_millis(u64::MAX >> 1),
+    ] {
+        let store = Arc::new(MemoryWorkerStore::new());
+        let worker = WorkerBuilder::new(
+            memory_store(),
+            Arc::clone(&store) as Arc<dyn WakeIndexStore>,
+            Arc::clone(&store) as Arc<dyn InboxStore>,
+        )
+        .cron(
+            Arc::new(MemoryCronStore::new()),
+            Arc::clone(&store) as Arc<dyn FireStore>,
+            retention,
+        )
+        .build()
+        .expect("worker on the default epoch clock");
+        let report = Box::pin(worker.tick())
+            .await
+            .expect("the tick survives an unrepresentable purge horizon");
+        assert_eq!(report, TickReport::default(), "retention {retention:?}");
+    }
+}
+
+/// A cron-less worker reports zero cron counters and never touches a cron
+/// or fire table: the fields stay on [`TickReport`] for hosts that read them.
+#[tokio::test]
+async fn a_worker_without_cron_reports_zero_cron_counters() {
+    let store = Arc::new(MemoryWorkerStore::new());
+    let worker = WorkerBuilder::new(
+        memory_store(),
+        Arc::clone(&store) as Arc<dyn WakeIndexStore>,
+        Arc::clone(&store) as Arc<dyn InboxStore>,
+    )
+    .build()
+    .expect("worker");
+    let report = Box::pin(worker.tick()).await.expect("tick");
+    assert_eq!(report, TickReport::default());
 }
 
 /// A due timer row is claimed, its committed timer is fired, and — because
@@ -159,9 +259,7 @@ async fn tick_fires_a_due_timer_and_keeps_the_row_when_no_new_wait() {
     let recover_from = Arc::clone(&journal) as Arc<dyn JournalStore>;
     let worker = WorkerBuilder::new(
         journal,
-        Arc::new(MemoryCronStore::new()),
         Arc::clone(&store) as Arc<dyn WakeIndexStore>,
-        Arc::clone(&store) as Arc<dyn FireStore>,
         Arc::clone(&store) as Arc<dyn InboxStore>,
     )
     .clock(clock.clone())
@@ -236,9 +334,7 @@ async fn tick_reparks_a_row_that_is_due_before_its_committed_timer() {
 
     let worker = WorkerBuilder::new(
         journal,
-        Arc::new(MemoryCronStore::new()),
         Arc::clone(&store) as Arc<dyn WakeIndexStore>,
-        Arc::clone(&store) as Arc<dyn FireStore>,
         Arc::clone(&store) as Arc<dyn InboxStore>,
     )
     .clock(clock.clone())
@@ -301,9 +397,7 @@ async fn tick_dead_letters_a_durable_external_ingress_rejection() {
 
     let worker = WorkerBuilder::new(
         journal,
-        Arc::new(MemoryCronStore::new()),
         Arc::clone(&store) as Arc<dyn WakeIndexStore>,
-        Arc::clone(&store) as Arc<dyn FireStore>,
         Arc::clone(&store) as Arc<dyn InboxStore>,
     )
     .clock(clock.clone())
@@ -354,16 +448,50 @@ async fn spawn_ticks_and_shuts_down_cleanly() {
     let worker = Arc::new(
         WorkerBuilder::new(
             journal,
-            cron,
             Arc::clone(&store) as Arc<dyn WakeIndexStore>,
-            Arc::clone(&store) as Arc<dyn FireStore>,
             Arc::clone(&store) as Arc<dyn InboxStore>,
+        )
+        .cron(
+            cron,
+            Arc::clone(&store) as Arc<dyn FireStore>,
+            Duration::from_hours(7 * 24),
         )
         .build()
         .expect("worker"),
     );
     let handle = Arc::clone(&worker).spawn(Duration::from_millis(5));
     tokio::time::sleep(Duration::from_millis(30)).await;
+    handle.shutdown().await;
+}
+
+/// Every iteration of the spawned loop publishes its outcome, so a host can
+/// observe liveness without a logging dependency.
+#[tokio::test]
+async fn spawned_worker_publishes_tick_outcomes() {
+    let journal = memory_store();
+    let store = Arc::new(MemoryWorkerStore::new());
+    let worker = Arc::new(
+        WorkerBuilder::new(
+            journal,
+            Arc::clone(&store) as Arc<dyn WakeIndexStore>,
+            Arc::clone(&store) as Arc<dyn InboxStore>,
+        )
+        .build()
+        .expect("worker"),
+    );
+    let handle = Arc::clone(&worker).spawn(Duration::from_millis(5));
+    let mut last_tick = handle.last_tick();
+    let outcome = tokio::time::timeout(Duration::from_secs(5), last_tick.wait_for(Option::is_some))
+        .await
+        .expect("a tick is published within the budget")
+        .expect("the loop outlives the wait")
+        .expect("published outcome");
+    assert_eq!(outcome.error_code, None);
+    assert_eq!(outcome.report, TickReport::default());
+    assert!(
+        outcome.at > finstack_ai_kernel::UNIX_EPOCH,
+        "the outcome carries the wall-clock tick instant"
+    );
     handle.shutdown().await;
 }
 
@@ -376,10 +504,13 @@ async fn dropping_the_handle_aborts_the_tick_loop() {
     let worker = Arc::new(
         WorkerBuilder::new(
             journal,
-            cron,
             Arc::clone(&store) as Arc<dyn WakeIndexStore>,
-            Arc::clone(&store) as Arc<dyn FireStore>,
             Arc::clone(&store) as Arc<dyn InboxStore>,
+        )
+        .cron(
+            cron,
+            Arc::clone(&store) as Arc<dyn FireStore>,
+            Duration::from_hours(7 * 24),
         )
         .build()
         .expect("worker"),

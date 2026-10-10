@@ -4,13 +4,15 @@
 //! file, builds a [`WorkerBuilder`] with no `PortsFactory` or `RunStarter`
 //! registered, and spawns the tick loop until `ctrl-c`.
 //!
-//! With nothing registered the only phase that does useful work is cron:
-//! due schedules are claimed and recorded as fires, which then wait for a
-//! host with a matching `RunStarter`. This daemon touches no parked session
-//! at all — resuming one, including reaping a wake row whose run already
-//! reached a terminal state, needs host-owned ports (a model, tools,
-//! middleware) that only an embedding host can supply, so every due wake row
-//! is counted as a failure and backed off until such a host runs.
+//! With nothing registered the only phase that does useful work is cron,
+//! which this daemon opts into with [`WorkerBuilder::cron`]: due schedules
+//! are claimed and recorded as fires, which then wait for a host with a
+//! matching `RunStarter`, and started fires older than
+//! `DEFAULT_FIRE_RETENTION` are purged in bounded batches. This daemon
+//! touches no parked session at all — resuming one, including reaping a wake
+//! row whose run already reached a terminal state, needs host-owned ports (a
+//! model, tools, middleware) that only an embedding host can supply, so every
+//! due wake row is skipped unclaimed, and untouched, until such a host runs.
 //!
 //! Enable the `daemon` feature to build this binary. Run
 //! `cargo run -p finstack-ai-workflow-worker --features daemon -- <sqlite-path>`.
@@ -38,6 +40,10 @@ const JOURNAL_LIMITS: SqliteStoreLimits = SqliteStoreLimits {
 /// Poll interval between ticks.
 const POLL_INTERVAL: Duration = Duration::from_millis(500);
 
+/// How long started fires are kept for operator inspection before the tick
+/// purges them: seven days.
+const DEFAULT_FIRE_RETENTION: Duration = Duration::from_hours(7 * 24);
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn Error>> {
     let path = std::env::args().nth(1).ok_or_else(|| {
@@ -62,14 +68,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         busy_timeout: DEFAULT_BUSY_TIMEOUT,
     })?);
     let worker = Arc::new(
-        WorkerBuilder::new(
-            journal,
-            cron,
-            Arc::clone(&store) as _,
-            Arc::clone(&store) as _,
-            Arc::clone(&store) as _,
-        )
-        .build()?,
+        WorkerBuilder::new(journal, Arc::clone(&store) as _, Arc::clone(&store) as _)
+            .cron(cron, Arc::clone(&store) as _, DEFAULT_FIRE_RETENTION)
+            .build()?,
     );
     let handle = worker.spawn(POLL_INTERVAL);
     tokio::signal::ctrl_c().await?;

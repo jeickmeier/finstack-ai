@@ -132,9 +132,10 @@ pub struct WakeRow {
     /// Condition under which this session is due.
     pub reason: WakeReason,
     /// Earliest instant at which this row is due. Set at park time for
-    /// [`WakeReason::Timer`] rows; for the inbox-driven reasons it is `None`
-    /// until `record_failure` pushes it forward as a retry backoff. Either
-    /// way, a set value gates dueness — see [`wake_due`].
+    /// [`WakeReason::Timer`] rows and at enqueue time for
+    /// [`WakeReason::Runnable`] rows; for the inbox-driven reasons it is
+    /// `None` until `record_failure` pushes it forward as a retry backoff.
+    /// Either way, a set value gates dueness — see [`wake_due`].
     pub wake_at: Option<Timestamp>,
     /// Semantic deadline of the parked wait, when it has one. Written at park
     /// time for [`WakeReason::Interaction`] rows from the committed
@@ -144,10 +145,10 @@ pub struct WakeRow {
     /// This is deliberately *not* `wake_at`: `wake_at` is the retry gate that
     /// `record_failure` owns, and overloading it would make a backed-off row
     /// forget its deadline (and a deadline'd row invisible to inbox delivery
-    /// until the deadline). The deadline never gates
-    /// [`WakeIndexStore::load_due`]; the tick reads it after the fact to
-    /// decide whether a parked interaction with no buffered response is due
-    /// for the kernel's own expiry.
+    /// until the deadline). A passed deadline is one of the two conditions
+    /// that make an interaction row due in [`wake_due`] — the other being a
+    /// buffered response — and the tick then attaches the session so the
+    /// kernel can commit its own expiry.
     pub expires_at: Option<Timestamp>,
     /// Identifier of the pending effect this row resumes.
     pub pending_id: Arc<str>,
@@ -181,9 +182,39 @@ pub trait WakeIndexStore: Send + Sync {
     ) -> Result<(), WorkerError>;
     /// Read a bounded, rotating page of due rows with absent or expired leases.
     /// A zero limit does not advance the cursor. Ordering across calls is not stable.
+    ///
+    /// Dueness is [`wake_due`]: a store that shares a database with the
+    /// inbox evaluates the buffered-response condition itself (the sqlite
+    /// store with an `EXISTS` subquery, the in-memory store against its own
+    /// inbox map). A store without inbox access may treat that condition as
+    /// satisfied; the tick re-checks the inbox before and after claiming,
+    /// so over-approximating here costs a page slot, never a wrong resume.
     /// # Errors
     /// Returns store-unavailable or integrity failures.
     fn load_due(&self, now: Timestamp, limit: usize) -> Result<Vec<WakeRow>, WorkerError>;
+    /// [`WakeIndexStore::load_due`] restricted to one tenant when `tenant_scope`
+    /// is `Some`.
+    ///
+    /// The default filters a [`WakeIndexStore::load_due`] page after the
+    /// fact, so rows of other tenants can consume the page's slots; stores
+    /// that can push the restriction into the query should override it.
+    /// # Errors
+    /// Returns store-unavailable or integrity failures.
+    fn load_due_scoped(
+        &self,
+        tenant_scope: Option<&str>,
+        now: Timestamp,
+        limit: usize,
+    ) -> Result<Vec<WakeRow>, WorkerError> {
+        let rows = self.load_due(now, limit)?;
+        Ok(match tenant_scope {
+            None => rows,
+            Some(tenant) => rows
+                .into_iter()
+                .filter(|row| row.tenant_scope.as_ref() == tenant)
+                .collect(),
+        })
+    }
     /// Read every row for one tenant, including leased rows.
     /// # Errors
     /// Returns store-unavailable or integrity failures.
@@ -237,18 +268,26 @@ pub fn lease_open(row: &WakeRow, now: Timestamp) -> bool {
     row.lease_expires_at.is_none_or(|expires| expires <= now)
 }
 
-/// Whether the row is due at `now` (lease aside).
+/// Whether the row is due at `now` (lease aside), given whether a buffered
+/// response for it exists in the inbox (`inbox_pending`).
 ///
-/// Timer rows require a scheduled `wake_at` that has arrived. Non-timer rows
-/// are driven by the inbox rather than the clock, so they are due
-/// immediately — unless `record_failure` pushed `wake_at` forward as a
-/// retry backoff, in which case they wait for it like a timer does. Freshly
-/// parked non-timer rows carry `wake_at: None` and stay immediately due.
+/// Timer and runnable rows are clock-driven: they require a scheduled
+/// `wake_at` that has arrived. Interaction and deferred rows are
+/// inbox-driven: `wake_at` is only the retry gate `record_failure` pushes
+/// forward (`None` on a fresh park), and once that gate is open the row is
+/// due only when there is something to apply — a buffered response, or, for
+/// an interaction, a deadline that has passed and lets the kernel expire it.
+/// A backed-off row therefore stays parked until its retry instant even
+/// when its response is already buffered.
 #[must_use]
-pub fn wake_due(row: &WakeRow, now: Timestamp) -> bool {
+pub fn wake_due(row: &WakeRow, now: Timestamp, inbox_pending: bool) -> bool {
     match row.reason {
         WakeReason::Runnable | WakeReason::Timer => row.wake_at.is_some_and(|due| due <= now),
-        WakeReason::Interaction | WakeReason::Deferred => row.wake_at.is_none_or(|due| due <= now),
+        WakeReason::Interaction => {
+            row.wake_at.is_none_or(|due| due <= now)
+                && (inbox_pending || row.expires_at.is_some_and(|deadline| deadline <= now))
+        }
+        WakeReason::Deferred => row.wake_at.is_none_or(|due| due <= now) && inbox_pending,
     }
 }
 

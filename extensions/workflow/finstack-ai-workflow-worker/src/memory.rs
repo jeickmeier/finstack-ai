@@ -14,7 +14,8 @@ use crate::wake::{
 };
 
 type WakeRows = BTreeMap<(Arc<str>, SessionId), WakeRow>;
-type FireRows = BTreeMap<(Arc<str>, Arc<str>, u64), FireRow>;
+type FireKey = (Arc<str>, Arc<str>, u64);
+type FireRows = BTreeMap<FireKey, FireRow>;
 type InboxRows = BTreeMap<(Arc<str>, SessionId, Arc<str>), InboxRow>;
 
 #[derive(Debug, Default)]
@@ -30,6 +31,7 @@ pub struct MemoryWorkerStore {
     wake: Mutex<WakeRows>,
     wake_cursor: Mutex<Option<(Arc<str>, SessionId)>>,
     fires: Mutex<FireRows>,
+    fire_cursor: Mutex<Option<FireKey>>,
     inbox: Mutex<MemoryInboxState>,
 }
 
@@ -74,8 +76,23 @@ impl WakeIndexStore for MemoryWorkerStore {
     }
 
     fn load_due(&self, now: Timestamp, limit: usize) -> Result<Vec<WakeRow>, WorkerError> {
+        self.load_due_scoped(None, now, limit)
+    }
+
+    /// The in-memory equivalent of the sqlite store's `EXISTS` subquery: the
+    /// buffered-response condition of [`wake_due`] is read from this store's
+    /// own inbox map while the page is built, so both stores apply one
+    /// predicate. Lock order is wake, cursor, inbox; no other method takes
+    /// more than one of these.
+    fn load_due_scoped(
+        &self,
+        tenant_scope: Option<&str>,
+        now: Timestamp,
+        limit: usize,
+    ) -> Result<Vec<WakeRow>, WorkerError> {
         let wake = locked(&self.wake)?;
         let mut cursor = locked(&self.wake_cursor)?;
+        let inbox = locked(&self.inbox)?;
         let (after, before) = match cursor.as_ref() {
             Some(key) => (
                 wake.range((std::ops::Bound::Excluded(key), std::ops::Bound::Unbounded)),
@@ -83,10 +100,18 @@ impl WakeIndexStore for MemoryWorkerStore {
             ),
             None => (wake.range(..), wake.range(..)),
         };
+        let inbox_pending = |row: &WakeRow| {
+            inbox.active.contains_key(&(
+                Arc::clone(&row.tenant_scope),
+                row.session_id,
+                Arc::clone(&row.pending_id),
+            ))
+        };
         let rows: Vec<WakeRow> = after
             .chain(before.take(if cursor.is_some() { usize::MAX } else { 0 }))
             .map(|(_, row)| row)
-            .filter(|row| lease_open(row, now) && wake_due(row, now))
+            .filter(|row| tenant_scope.is_none_or(|tenant| row.tenant_scope.as_ref() == tenant))
+            .filter(|row| lease_open(row, now) && wake_due(row, now, inbox_pending(row)))
             .take(limit)
             .cloned()
             .collect();
@@ -234,12 +259,29 @@ impl FireStore for MemoryWorkerStore {
 
     fn load_unstarted(&self, limit: usize) -> Result<Vec<FireRow>, WorkerError> {
         let fires = locked(&self.fires)?;
-        Ok(fires
-            .values()
+        let mut cursor = locked(&self.fire_cursor)?;
+        let (after, before) = match cursor.as_ref() {
+            Some(key) => (
+                fires.range((std::ops::Bound::Excluded(key), std::ops::Bound::Unbounded)),
+                fires.range((std::ops::Bound::Unbounded, std::ops::Bound::Included(key))),
+            ),
+            None => (fires.range(..), fires.range(..)),
+        };
+        let rows: Vec<FireRow> = after
+            .chain(before.take(if cursor.is_some() { usize::MAX } else { 0 }))
+            .map(|(_, row)| row)
             .filter(|row| row.status == FireStatus::Claimed)
             .take(limit)
             .cloned()
-            .collect())
+            .collect();
+        if let Some(last) = rows.last() {
+            *cursor = Some((
+                Arc::clone(&last.tenant_scope),
+                Arc::clone(&last.schedule_id),
+                last.fire_count,
+            ));
+        }
+        Ok(rows)
     }
 
     fn purge_started(&self, before: Timestamp, limit: usize) -> Result<usize, WorkerError> {
@@ -388,6 +430,7 @@ mod tests {
     use finstack_ai_kernel::Timestamp;
 
     use super::MemoryWorkerStore;
+    use crate::inbox::{InboxKind, InboxRow, InboxStore};
     use crate::wake::{WakeIndexStore, WakeReason, WakeRow};
 
     fn ts(ms: i64) -> Timestamp {
@@ -431,13 +474,45 @@ mod tests {
     }
 
     #[test]
-    fn non_timer_rows_are_always_due() {
+    fn non_timer_rows_are_due_only_with_a_buffered_response() {
         let store = MemoryWorkerStore::new();
         let mut row = timer_row("tenant-a", 1, 9_000);
         row.reason = WakeReason::Interaction;
         row.wake_at = None;
         store.upsert(&row, None).expect("upsert");
+        assert!(
+            store.load_due(ts(0), 10).expect("idle").is_empty(),
+            "nothing to apply: the row stays parked"
+        );
+        let entry = InboxRow::try_new(
+            Arc::clone(&row.tenant_scope),
+            row.session_id,
+            Arc::clone(&row.pending_id),
+            InboxKind::Interaction,
+            Arc::from(&br#"{"approved":true}"#[..]),
+            ts(0),
+        )
+        .expect("entry");
+        store.insert(&entry).expect("insert");
         assert_eq!(store.load_due(ts(0), 10).expect("due").len(), 1);
+    }
+
+    /// A tenant restriction is applied inside the page, so another tenant's
+    /// rows never consume the scoped page's slots.
+    #[test]
+    fn scoped_due_pages_skip_other_tenants() {
+        let store = MemoryWorkerStore::new();
+        store
+            .upsert(&timer_row("tenant-a", 1, 1_000), None)
+            .expect("a");
+        store
+            .upsert(&timer_row("tenant-b", 2, 1_000), None)
+            .expect("b");
+        let page = store
+            .load_due_scoped(Some("tenant-b"), ts(1_000), 1)
+            .expect("scoped");
+        assert_eq!(page.len(), 1);
+        assert_eq!(page[0].tenant_scope.as_ref(), "tenant-b");
     }
 
     #[test]

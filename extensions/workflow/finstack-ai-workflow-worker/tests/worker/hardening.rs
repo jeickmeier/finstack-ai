@@ -12,18 +12,20 @@ use std::time::Duration;
 
 use finstack_ai_kernel::{
     AuthorizationEvidence, InteractionResolution, InteractionResolutionCommand, OperationLocator,
-    PrincipalRef, RawJson,
+    PrincipalRef, RawJson, SessionId, Timestamp,
 };
 use finstack_ai_runtime::commit::CommitCoordinator;
 use finstack_ai_runtime::ids::ExternalClock;
-use finstack_ai_runtime::ports::journal::JournalStore;
+use finstack_ai_runtime::ports::journal::{JournalStore, StoreError};
 use finstack_ai_runtime::ports::model::Model;
-use finstack_ai_runtime::workflow::WorkflowWait;
-use finstack_ai_test::{ScriptedModel, ScriptedModelAction, ScriptedModelPlan};
-use finstack_ai_workflow_local::MemoryCronStore;
+use finstack_ai_runtime::workflow::{WorkflowSession, WorkflowWait};
+use finstack_ai_store_memory::MemoryJournalStore;
+use finstack_ai_test::{
+    FaultJournalStore, ScriptedModel, ScriptedModelAction, ScriptedModelPlan, StoreOperation,
+};
 use finstack_ai_workflow_worker::{
-    FireStore, InboxKind, InboxRow, InboxStore, MemoryWorkerStore, PortsFactory, WakeIndexStore,
-    WakeReason, WakeRow, WorkerBuilder, WorkerError, park_for_wake,
+    InboxKind, InboxRow, InboxStore, MemoryWorkerStore, PortsFactory, WakeIndexStore, WakeLease,
+    WakeReason, WakeRow, WorkerBuilder, WorkerError, WorkflowWorker, park_for_wake,
 };
 
 use crate::helpers::{
@@ -48,10 +50,22 @@ impl PortsFactory for BindPorts {
     }
 }
 
-/// A wake row whose `workflow_kind` has no registered ports factory is
-/// isolated as one counted failure, backed off with the same exponential
-/// schedule as any other failed resume, and does not stop a healthy row in
-/// the same tick from resuming.
+/// Ports factory for rows with no run behind them: registered so the row is
+/// claimed, never reached because the attach that precedes `bind` fails.
+struct NeverBinds;
+
+impl PortsFactory for NeverBinds {
+    fn bind(&self, _session: WorkflowSession) -> Result<WorkflowSession, WorkerError> {
+        Err(WorkerError::InvalidConfiguration {
+            code: "never_binds",
+        })
+    }
+}
+
+/// A wake row whose session the journal does not hold is isolated as one
+/// counted failure, backed off with the same exponential schedule as any
+/// other failed resume, and does not stop a healthy row in the same tick
+/// from resuming.
 #[tokio::test]
 async fn a_poisoned_row_backs_off_and_does_not_stall_the_tick() {
     let journal = memory_store();
@@ -75,15 +89,15 @@ async fn a_poisoned_row_backs_off_and_does_not_stall_the_tick() {
     healthy.wake_at = Some(timestamp(2_100));
     store.upsert(&healthy, None).expect("healthy row");
 
-    // A poisoned row for a workflow kind with no registered ports factory.
-    // Its claim never touches the journal: `resume_row` fails in the ports
-    // lookup itself, before any session attach, so no real run is needed.
+    // A poisoned row for a session the journal has never seen. Its claim is
+    // real, but `resume_row` fails at the session attach, before `bind`, so
+    // no real run is needed.
     let poisoned = WakeRow {
         tenant_scope: Arc::from("tenant-a"),
         session_id: id(99),
         lane_id: id(2),
         run_id: id(3),
-        workflow_kind: Arc::from("unregistered-kind"),
+        workflow_kind: Arc::from("poisoned-kind"),
         reason: WakeReason::Timer,
         wake_at: Some(timestamp(2_050)),
         expires_at: None,
@@ -98,14 +112,13 @@ async fn a_poisoned_row_backs_off_and_does_not_stall_the_tick() {
     clock.set(timestamp(2_200));
     let worker = WorkerBuilder::new(
         journal,
-        Arc::new(MemoryCronStore::new()),
         Arc::clone(&store) as Arc<dyn WakeIndexStore>,
-        Arc::clone(&store) as Arc<dyn FireStore>,
         Arc::clone(&store) as Arc<dyn InboxStore>,
     )
     .clock(clock.clone())
     .drive_timeout(Duration::from_secs(5))
     .register_ports("research", Arc::new(BindPorts { model }))
+    .register_ports("poisoned-kind", Arc::new(NeverBinds))
     .build()
     .expect("worker");
 
@@ -210,9 +223,7 @@ async fn a_stale_wake_row_is_corrected_by_the_journal() {
 
     let worker = WorkerBuilder::new(
         Arc::clone(&journal) as Arc<dyn JournalStore>,
-        Arc::new(MemoryCronStore::new()),
         Arc::clone(&store) as Arc<dyn WakeIndexStore>,
-        Arc::clone(&store) as Arc<dyn FireStore>,
         Arc::clone(&store) as Arc<dyn InboxStore>,
     )
     .clock(clock.clone())
@@ -239,6 +250,377 @@ async fn a_stale_wake_row_is_corrected_by_the_journal() {
     assert!(
         store.load_tenant("tenant-a").expect("rows").is_empty(),
         "the stale row is deleted once the worker sees Terminal"
+    );
+}
+
+/// Synthetic due timer row for `session` under `kind`.
+fn timer_row(session: u64, kind: &str, due: Timestamp) -> WakeRow {
+    WakeRow {
+        tenant_scope: Arc::from("tenant-a"),
+        session_id: id(session),
+        lane_id: id(2),
+        run_id: id(3),
+        workflow_kind: Arc::from(kind),
+        reason: WakeReason::Timer,
+        wake_at: Some(due),
+        expires_at: None,
+        pending_id: Arc::from("effect-1"),
+        leased_by: None,
+        lease_id: None,
+        lease_expires_at: None,
+        attempts: 0,
+    }
+}
+
+/// A due row whose `workflow_kind` this worker does not serve is skipped
+/// before any claim: no lease, no attempt, no backoff, no counted failure,
+/// so a worker that does serve the kind finds the row exactly as parked.
+#[tokio::test]
+async fn an_unserved_kind_is_skipped_unclaimed_and_unwritten() {
+    let store = Arc::new(MemoryWorkerStore::new());
+    let row = timer_row(7, "served-elsewhere", timestamp(1_000));
+    store.upsert(&row, None).expect("row");
+    let worker = WorkerBuilder::new(
+        memory_store() as Arc<dyn JournalStore>,
+        Arc::clone(&store) as Arc<dyn WakeIndexStore>,
+        Arc::clone(&store) as Arc<dyn InboxStore>,
+    )
+    .clock(ExternalClock::new(timestamp(2_000)))
+    .register_ports("research", Arc::new(NeverBinds))
+    .build()
+    .expect("worker");
+
+    let report = Box::pin(worker.tick()).await.expect("tick");
+    assert_eq!(report.failures, 0, "not this worker's failure");
+    assert_eq!(report.sessions_resumed, 0);
+    assert_eq!(
+        store.load_tenant("tenant-a").expect("rows"),
+        vec![row],
+        "the row is untouched: unleased, no attempt, original wake_at"
+    );
+}
+
+/// Wake store whose claim consumes the row's inbox entry first, standing in
+/// for a second worker that drained it between our page load and our claim.
+struct ConsumingClaim {
+    inner: Arc<MemoryWorkerStore>,
+    entry: InboxRow,
+}
+
+impl WakeIndexStore for ConsumingClaim {
+    fn upsert(&self, row: &WakeRow, lease: Option<&WakeLease>) -> Result<(), WorkerError> {
+        self.inner.upsert(row, lease)
+    }
+    fn delete(
+        &self,
+        tenant_scope: &str,
+        session_id: SessionId,
+        lease: Option<&WakeLease>,
+    ) -> Result<(), WorkerError> {
+        self.inner.delete(tenant_scope, session_id, lease)
+    }
+    fn load_due(&self, now: Timestamp, limit: usize) -> Result<Vec<WakeRow>, WorkerError> {
+        self.inner.load_due(now, limit)
+    }
+    fn load_tenant(&self, tenant_scope: &str) -> Result<Vec<WakeRow>, WorkerError> {
+        self.inner.load_tenant(tenant_scope)
+    }
+    fn contains_interaction(
+        &self,
+        tenant_scope: &str,
+        pending_id: &str,
+    ) -> Result<bool, WorkerError> {
+        self.inner.contains_interaction(tenant_scope, pending_id)
+    }
+    fn try_claim(
+        &self,
+        tenant_scope: &str,
+        session_id: SessionId,
+        worker_id: &str,
+        now: Timestamp,
+        lease_ttl_ms: u64,
+    ) -> Result<Option<WakeLease>, WorkerError> {
+        assert!(
+            self.inner.delete_if_digest(
+                self.entry.tenant_scope.as_ref(),
+                self.entry.session_id,
+                self.entry.pending_id.as_ref(),
+                self.entry.payload_digest,
+            )?,
+            "the entry is consumed exactly once, at claim time"
+        );
+        self.inner
+            .try_claim(tenant_scope, session_id, worker_id, now, lease_ttl_ms)
+    }
+    fn renew(
+        &self,
+        lease: &WakeLease,
+        now: Timestamp,
+        lease_ttl_ms: u64,
+    ) -> Result<bool, WorkerError> {
+        self.inner.renew(lease, now, lease_ttl_ms)
+    }
+    fn release(&self, lease: &WakeLease) -> Result<bool, WorkerError> {
+        self.inner.release(lease)
+    }
+    fn record_failure(&self, lease: &WakeLease, retry_at: Timestamp) -> Result<(), WorkerError> {
+        self.inner.record_failure(lease, retry_at)
+    }
+}
+
+/// An inbox-driven row whose entry disappears between the page load and the
+/// claim has nothing left to apply: the lease is released untouched instead
+/// of resuming a session with no response, and nothing is counted.
+#[tokio::test]
+async fn inbox_entry_consumed_between_load_and_claim_releases_lease() {
+    let inner = Arc::new(MemoryWorkerStore::new());
+    let mut row = timer_row(8, "research", timestamp(0));
+    row.reason = WakeReason::Interaction;
+    row.wake_at = None;
+    row.pending_id = Arc::from("interaction-8");
+    inner.upsert(&row, None).expect("row");
+    let entry = InboxRow::try_new(
+        Arc::clone(&row.tenant_scope),
+        row.session_id,
+        Arc::clone(&row.pending_id),
+        InboxKind::Interaction,
+        Arc::from(&br#"{"approved":true}"#[..]),
+        timestamp(1_000),
+    )
+    .expect("entry");
+    inner.insert(&entry).expect("buffer");
+    let wake = Arc::new(ConsumingClaim {
+        inner: Arc::clone(&inner),
+        entry,
+    });
+    let worker = WorkerBuilder::new(
+        memory_store() as Arc<dyn JournalStore>,
+        wake as Arc<dyn WakeIndexStore>,
+        Arc::clone(&inner) as Arc<dyn InboxStore>,
+    )
+    .clock(ExternalClock::new(timestamp(2_000)))
+    .register_ports("research", Arc::new(NeverBinds))
+    .build()
+    .expect("worker");
+
+    let report = Box::pin(worker.tick()).await.expect("tick");
+    assert_eq!(report.failures, 0, "report: {report:?}");
+    assert_eq!(report.sessions_resumed, 0);
+    assert_eq!(report.responses_rejected, 0);
+    let rows = inner.load_tenant("tenant-a").expect("rows");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].leased_by, None, "the lease is released");
+    assert_eq!(rows[0].lease_id, None);
+    assert_eq!(rows[0].attempts, 0, "nothing failed");
+    assert!(inner.load_batch(10).expect("inbox").is_empty());
+}
+
+/// Everything the transient-failure proofs share: a run parked on an
+/// interaction with its resolution already buffered, the worker over a
+/// fault-injecting journal, and the identities the assertions use.
+struct BufferedResolution {
+    journal: Arc<MemoryJournalStore>,
+    faulty: Arc<FaultJournalStore>,
+    store: Arc<MemoryWorkerStore>,
+    clock: ExternalClock,
+    worker: WorkflowWorker,
+}
+
+/// Park a run on an interaction (committed straight onto the journal, as in
+/// `cross_tenant_delivery_is_rejected_at_resolve_time`), buffer a valid
+/// resolution for it, and build the worker over a [`FaultJournalStore`] so
+/// a test can make the ingress commit fail on demand.
+async fn buffered_resolution(seed: u64, max_response_attempts: u32) -> BufferedResolution {
+    let journal = memory_store();
+    let model: Arc<dyn Model> = Arc::new(ScriptedModel::from_plans(profile(), Vec::new()));
+    let clock = ExternalClock::new(timestamp(2_000));
+    let interaction_id = crate::helpers::request_interaction(&journal, timestamp(2_000)).await;
+    let mut session = WorkflowSession::trusted_seeded(
+        Arc::clone(&journal) as Arc<dyn JournalStore>,
+        locator(),
+        clock.clone(),
+        seed,
+    )
+    .await
+    .expect("attach")
+    .with_ports(Arc::clone(&model), crate::helpers::locked_profile(), None);
+    let wait = session.drive_until_wait().await.expect("interaction wait");
+    assert!(matches!(wait, WorkflowWait::Interaction { .. }));
+    let store = Arc::new(MemoryWorkerStore::new());
+    park_for_wake(&mut session, store.as_ref(), "research").expect("park");
+    drop(session);
+
+    let faulty = Arc::new(FaultJournalStore::new(
+        Arc::clone(&journal) as Arc<dyn JournalStore>
+    ));
+    let worker = WorkerBuilder::new(
+        Arc::clone(&faulty) as Arc<dyn JournalStore>,
+        Arc::clone(&store) as Arc<dyn WakeIndexStore>,
+        Arc::clone(&store) as Arc<dyn InboxStore>,
+    )
+    .clock(clock.clone())
+    .drive_timeout(Duration::from_millis(300))
+    .max_response_attempts(max_response_attempts)
+    .register_ports("research", Arc::new(BindPorts { model }))
+    .build()
+    .expect("worker");
+    let command = InteractionResolutionCommand::try_new(
+        locator(),
+        InteractionResolution::try_new(
+            interaction_id,
+            "resolution-1",
+            PrincipalRef::try_new("issuer", "subject", Some("tenant-a")).expect("principal"),
+            AuthorizationEvidence::try_new("policy-v1", "decision-v1").expect("auth"),
+            RawJson::parse(r#"{"approved":true}"#).expect("response"),
+            None::<&str>,
+        )
+        .expect("resolution"),
+    )
+    .expect("command");
+    worker
+        .deliver_interaction(&command, timestamp(2_000))
+        .expect("deliver");
+    BufferedResolution {
+        journal,
+        faulty,
+        store,
+        clock,
+        worker,
+    }
+}
+
+/// A journal that is briefly unavailable while the ingress commits the
+/// buffered resolution is not a verdict on the response: the entry stays in
+/// the inbox, nothing is dead-lettered, the row backs off, and the next tick
+/// past the backoff applies the resolution.
+#[tokio::test]
+async fn transient_ingress_store_failure_keeps_inbox_entry() {
+    let BufferedResolution {
+        journal,
+        faulty,
+        store,
+        clock,
+        worker,
+    } = Box::pin(buffered_resolution(850, 8)).await;
+
+    // The first append of the tick is the ingress commit of the resolution.
+    faulty.fail_next(
+        StoreOperation::Append,
+        StoreError::Unavailable {
+            reason_code: "test_blip",
+        },
+    );
+    let blip = Box::pin(worker.tick()).await.expect("tick");
+    assert_eq!(blip.responses_rejected, 0, "report: {blip:?}");
+    assert_eq!(blip.sessions_resumed, 0);
+    assert_eq!(blip.failures, 1, "the transient failure backs the row off");
+    assert_eq!(
+        store.load_batch(10).expect("inbox").len(),
+        1,
+        "the response is kept for redelivery"
+    );
+    assert!(
+        store
+            .load_dead_letters(10)
+            .expect("dead letters")
+            .is_empty()
+    );
+    let rows = store.load_tenant("tenant-a").expect("rows");
+    assert_eq!(rows[0].attempts, 1);
+    assert_eq!(rows[0].leased_by, None);
+    let untouched = CommitCoordinator::recover(
+        Arc::clone(&journal) as Arc<dyn JournalStore>,
+        locator().session_id,
+    )
+    .await
+    .expect("recover");
+    assert!(
+        untouched.state().pending_interaction().is_some(),
+        "nothing was committed while the store was down"
+    );
+
+    clock.jump(5_000).expect("past backoff");
+    let applied = Box::pin(worker.tick()).await.expect("tick");
+    assert_eq!(applied.responses_rejected, 0, "report: {applied:?}");
+    assert!(
+        store
+            .load_dead_letters(10)
+            .expect("dead letters")
+            .is_empty()
+    );
+    let resolved = CommitCoordinator::recover(
+        Arc::clone(&journal) as Arc<dyn JournalStore>,
+        locator().session_id,
+    )
+    .await
+    .expect("recover");
+    assert!(
+        resolved.state().pending_interaction().is_none(),
+        "the buffered resolution was applied once the store came back"
+    );
+}
+
+/// A transient failure that recurs `max_response_attempts` times is not
+/// retried forever: the entry is dead-lettered with the last failure's code
+/// and the row is released for a corrected command.
+#[tokio::test]
+async fn response_attempts_bound_dead_letters() {
+    let BufferedResolution {
+        journal,
+        faulty,
+        store,
+        clock,
+        worker,
+    } = Box::pin(buffered_resolution(860, 2)).await;
+
+    faulty.fail_next(
+        StoreOperation::Append,
+        StoreError::Unavailable {
+            reason_code: "test_blip",
+        },
+    );
+    let first = Box::pin(worker.tick()).await.expect("first tick");
+    assert_eq!(first.failures, 1, "report: {first:?}");
+    assert_eq!(
+        first.responses_rejected, 0,
+        "one failure is under the bound"
+    );
+    assert_eq!(store.load_tenant("tenant-a").expect("rows")[0].attempts, 1);
+
+    clock.jump(5_000).expect("past backoff");
+    faulty.fail_next(
+        StoreOperation::Append,
+        StoreError::Unavailable {
+            reason_code: "test_blip",
+        },
+    );
+    let second = Box::pin(worker.tick()).await.expect("second tick");
+    assert_eq!(second.failures, 0, "report: {second:?}");
+    assert_eq!(
+        second.responses_rejected, 1,
+        "the second failure reaches the bound and dead-letters the entry"
+    );
+    assert!(store.load_batch(10).expect("inbox").is_empty());
+    let dead = store.load_dead_letters(10).expect("dead letters");
+    assert_eq!(dead.len(), 1);
+    assert_eq!(
+        dead[0].reason_code.as_ref(),
+        "ingress_rejected",
+        "the last failure's stable code is retained for operators"
+    );
+    let rows = store.load_tenant("tenant-a").expect("rows");
+    assert_eq!(rows.len(), 1, "the wake row stays for a corrected command");
+    assert_eq!(rows[0].leased_by, None);
+    assert_eq!(rows[0].attempts, 1, "dead-lettering is not another failure");
+    let pending = CommitCoordinator::recover(
+        Arc::clone(&journal) as Arc<dyn JournalStore>,
+        locator().session_id,
+    )
+    .await
+    .expect("recover");
+    assert!(
+        pending.state().pending_interaction().is_some(),
+        "the interaction was never resolved"
     );
 }
 
@@ -318,9 +700,7 @@ async fn cross_tenant_delivery_is_rejected_at_resolve_time() {
 
     let worker = WorkerBuilder::new(
         Arc::clone(&journal) as Arc<dyn JournalStore>,
-        Arc::new(MemoryCronStore::new()),
         Arc::clone(&store) as Arc<dyn WakeIndexStore>,
-        Arc::clone(&store) as Arc<dyn FireStore>,
         Arc::clone(&store) as Arc<dyn InboxStore>,
     )
     .clock(clock.clone())

@@ -147,8 +147,13 @@ pub trait FireStore: Send + Sync {
         started_session: SessionId,
     ) -> Result<FireStartOutcome, WorkerError>;
 
-    /// Load every claimed-but-not-started fire, across all tenants, ordered
-    /// by `(tenant_scope, schedule_id, fire_count)`.
+    /// Read a bounded, rotating page of claimed-but-not-started fires across
+    /// all tenants, keyed by `(tenant_scope, schedule_id, fire_count)`.
+    ///
+    /// Successive calls continue after the last fire returned and wrap
+    /// around, so a fire that can never start cannot starve the fires behind
+    /// it. A zero limit does not advance the cursor. Ordering across calls is
+    /// not stable.
     ///
     /// # Errors
     ///
@@ -212,9 +217,57 @@ mod tests {
         assert_eq!(store.purge_started(ts(3_000), 10).expect("purge"), 1);
     }
 
+    /// `load_unstarted` pages on a rotating cursor: with a limit of one, three
+    /// claimed fires are each visited once across three calls, then the
+    /// cursor wraps.
+    fn exercise_unstarted_rotation(store: &dyn FireStore) {
+        for count in 1..=3 {
+            store
+                .record_claimed(&FireRow {
+                    tenant_scope: Arc::from("tenant-a"),
+                    schedule_id: Arc::from("nightly"),
+                    fire_count: count,
+                    fired_at: ts(1_000),
+                    status: FireStatus::Claimed,
+                    started_session: None,
+                })
+                .expect("claim");
+        }
+        let mut seen = Vec::new();
+        for _ in 0..3 {
+            let page = store.load_unstarted(1).expect("page");
+            assert_eq!(page.len(), 1);
+            seen.push(page[0].fire_count);
+        }
+        seen.sort_unstable();
+        assert_eq!(seen, vec![1, 2, 3], "every claimed fire is visited once");
+        assert_eq!(
+            store.load_unstarted(1).expect("wrap")[0].fire_count,
+            1,
+            "the cursor wraps around"
+        );
+        assert_eq!(
+            store.load_unstarted(10).expect("remaining").len(),
+            3,
+            "a larger page wraps to include everything"
+        );
+    }
+
     #[test]
     fn memory_fire_store_round_trips() {
         exercise_fire_store(&crate::MemoryWorkerStore::new());
+    }
+
+    #[test]
+    fn memory_unstarted_fires_rotate() {
+        exercise_unstarted_rotation(&crate::MemoryWorkerStore::new());
+    }
+
+    #[test]
+    fn sqlite_unstarted_fires_rotate() {
+        let dir = tempfile::tempdir().expect("dir");
+        let store = crate::SqliteWorkerStore::try_open(dir.path().join("w.sqlite")).expect("open");
+        exercise_unstarted_rotation(&store);
     }
 
     #[test]
