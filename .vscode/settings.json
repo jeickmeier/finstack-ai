@@ -1,0 +1,6 @@
+{
+    "sonarlint.connectedMode.project": {
+        "connectionId": "jeickmeier-1",
+        "projectKey": "jeickmeier_finstack-ai"
+    }
+}
