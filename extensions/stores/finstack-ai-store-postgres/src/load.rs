@@ -446,13 +446,23 @@ async fn loaded_tail(
 }
 
 /// Assemble the port's [`LoadedSession`] from verified rows.
+///
+/// After a prune the record at `chain_anchor_sequence` is the retained last
+/// record of an otherwise deleted batch: it anchors chain verification
+/// (which the caller has already run over `stored`) but its batch is no
+/// longer a committed batch the port reports. It is dropped here, before
+/// regrouping, so every backend reports the same post-prune shape as the
+/// in-memory store, which removes the boundary batch outright.
 fn loaded_session(
     session_id: SessionId,
     session: &SessionRow,
     head_checksum: Option<Digest>,
-    stored: Vec<StoredRecord>,
+    mut stored: Vec<StoredRecord>,
     snapshot: Option<OpaqueSnapshot>,
 ) -> Result<LoadedSession, StoreError> {
+    if session.chain_anchor_sequence > 1 {
+        stored.retain(|row| row.envelope.sequence() != session.chain_anchor_sequence);
+    }
     Ok(LoadedSession {
         session_id,
         head_sequence: session.current_sequence,

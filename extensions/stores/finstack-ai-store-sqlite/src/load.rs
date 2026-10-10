@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use finstack_ai_kernel::{
@@ -28,8 +29,26 @@ pub(crate) struct SessionRow {
     pub(crate) current_sequence: u64,
     pub(crate) head_checksum: Option<Digest>,
     pub(crate) snapshot_sequence: Option<u64>,
+    /// First sequence this process must verify from. Greater than one only
+    /// after a prune, in which case the record *at* this sequence is the
+    /// retained boundary record of an otherwise deleted batch.
     pub(crate) chain_anchor_sequence: u64,
     pub(crate) chain_anchor_checksum: Option<Digest>,
+    /// Committed batches charged to the session (schema v2 counter).
+    pub(crate) batch_count: usize,
+    /// Committed records charged to the session (schema v2 counter).
+    pub(crate) record_count: usize,
+    pub(crate) metadata: Metadata,
+}
+
+impl SessionRow {
+    /// Sequence of the retained prune-boundary record, when the session has
+    /// been pruned. That record anchors chain verification but belongs to a
+    /// batch the port no longer reports (the in-memory store drops it
+    /// outright), so loaders exclude its batch from `committed_batches`.
+    pub(crate) fn boundary_sequence(&self) -> Option<u64> {
+        (self.chain_anchor_sequence > 1).then_some(self.chain_anchor_sequence)
+    }
 }
 
 pub(crate) struct StoredRecord {
@@ -263,7 +282,7 @@ fn load_session(
         head_sequence: session.current_sequence,
         head_checksum,
         metadata,
-        committed_batches: group_batches(connection, &stored)?.into(),
+        committed_batches: group_batches(connection, &stored, &session)?.into(),
         accelerated: snapshot.as_ref().and_then(accelerated_from),
         snapshot,
     })
@@ -388,7 +407,7 @@ fn loaded_tail(
         head_sequence: session.current_sequence,
         head_checksum: session.head_checksum,
         metadata,
-        committed_batches: group_batches(connection, stored)?.into(),
+        committed_batches: group_batches(connection, stored, session)?.into(),
         accelerated: snapshot.as_ref().and_then(accelerated_from),
         snapshot,
     })
@@ -423,22 +442,12 @@ fn load_session_extras(
     session: &SessionRow,
     snapshot_bytes: usize,
 ) -> Result<(Metadata, Option<OpaqueSnapshot>), StoreError> {
-    let metadata = connection
-        .query_row(
-            "SELECT metadata FROM sessions WHERE session_id = ?1",
-            params![session_id.as_bytes().as_slice()],
-            |row| row.get::<_, Vec<u8>>(0),
-        )
-        .map_err(map_sqlite_error)?;
-    let metadata = Metadata::parse(metadata).map_err(|_| StoreError::Integrity {
-        reason_code: "sqlite_metadata",
-    })?;
     let snapshot = if session.snapshot_sequence.is_some() {
         load_snapshot(connection, session_id, snapshot_bytes)?
     } else {
         None
     };
-    Ok((metadata, snapshot))
+    Ok((session.metadata.clone(), snapshot))
 }
 
 pub(crate) fn load_snapshot(
@@ -571,10 +580,26 @@ fn verify_scan_page(
     Ok(())
 }
 
+/// Rebuild the committed batches of a contiguous, sequence-ordered run of
+/// records against the declared batch boundaries.
+///
+/// One query fetches every batch of the session that can still own a record
+/// in `stored` (those ending at or after its lowest sequence); the chunk loop
+/// then only consults that map. A batch that ends exactly at the session's
+/// prune boundary is the boundary batch: only its last record survived the
+/// prune, so it is verified (the caller already did) but not reported, which
+/// is the shape the in-memory store produces. Any other disagreement between
+/// the stored rows and the declared boundaries is corruption.
 fn group_batches(
     connection: &Connection,
     stored: &[StoredRecord],
+    session: &SessionRow,
 ) -> Result<Vec<CommittedBatch>, StoreError> {
+    let Some(lowest) = stored.first().map(|row| row.envelope.sequence()) else {
+        return Ok(Vec::new());
+    };
+    let declared = load_batch_bounds(connection, session_id_of(stored)?, lowest)?;
+    let boundary = session.boundary_sequence();
     let mut batches = Vec::new();
     for run in stored.chunk_by(|left, right| left.batch_id == right.batch_id) {
         let Some(first) = run.first() else {
@@ -585,16 +610,12 @@ fn group_batches(
         let last_sequence = run
             .last()
             .map_or(first_sequence, |row| row.envelope.sequence());
-        let (declared_first, declared_last) = connection
-            .query_row(
-                "SELECT first_sequence, last_sequence FROM batches WHERE batch_id = ?1",
-                params![batch_id.as_bytes().as_slice()],
-                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
-            )
-            .map_err(map_sqlite_error)?;
-        let declared_first = u64_from_i64(declared_first, "first_sequence")?;
-        let declared_last = u64_from_i64(declared_last, "last_sequence")?;
-        if first_sequence > declared_first && last_sequence == declared_last {
+        let Some(&(declared_first, declared_last)) = declared.get(&batch_id) else {
+            return Err(StoreError::Integrity {
+                reason_code: "committed_batch_invalid",
+            });
+        };
+        if boundary == Some(declared_last) && last_sequence == declared_last {
             continue;
         }
         if first_sequence != declared_first || last_sequence != declared_last {
@@ -614,6 +635,59 @@ fn group_batches(
     Ok(batches)
 }
 
+/// The session every stored row belongs to (rows come from one session query).
+fn session_id_of(stored: &[StoredRecord]) -> Result<SessionId, StoreError> {
+    stored
+        .first()
+        .map(|row| row.envelope.session_id())
+        .ok_or(StoreError::Integrity {
+            reason_code: "committed_batch_invalid",
+        })
+}
+
+/// Declared `(first_sequence, last_sequence)` of every batch of `session_id`
+/// ending at or after `from_sequence`, keyed by batch id.
+fn load_batch_bounds(
+    connection: &Connection,
+    session_id: SessionId,
+    from_sequence: u64,
+) -> Result<BTreeMap<AppendBatchId, (u64, u64)>, StoreError> {
+    let mut statement = connection
+        .prepare_cached(
+            "SELECT batch_id, first_sequence, last_sequence FROM batches
+             WHERE session_id = ?1 AND last_sequence >= ?2
+             ORDER BY first_sequence",
+        )
+        .map_err(map_sqlite_error)?;
+    let rows = statement
+        .query_map(
+            params![
+                session_id.as_bytes().as_slice(),
+                i64_from_u64(from_sequence, "from_sequence")?,
+            ],
+            |row| {
+                Ok((
+                    row.get::<_, Vec<u8>>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            },
+        )
+        .map_err(map_sqlite_error)?;
+    let mut bounds = BTreeMap::new();
+    for row in rows {
+        let (batch_id, first_sequence, last_sequence) = row.map_err(map_sqlite_error)?;
+        bounds.insert(
+            id_from_blob(&batch_id)?,
+            (
+                u64_from_i64(first_sequence, "first_sequence")?,
+                u64_from_i64(last_sequence, "last_sequence")?,
+            ),
+        );
+    }
+    Ok(bounds)
+}
+
 pub(crate) fn load_session_row(
     connection: &Connection,
     session_id: SessionId,
@@ -624,10 +698,14 @@ pub(crate) fn load_session_row(
         snapshot_sequence,
         chain_anchor_sequence,
         chain_anchor_checksum,
+        batch_count,
+        record_count,
+        metadata,
     )) = connection
         .query_row(
             "SELECT current_sequence, head_checksum, snapshot_sequence,
-                    chain_anchor_sequence, chain_anchor_checksum
+                    chain_anchor_sequence, chain_anchor_checksum,
+                    batch_count, record_count, metadata
              FROM sessions WHERE session_id = ?1",
             params![session_id.as_bytes().as_slice()],
             |row| {
@@ -637,6 +715,9 @@ pub(crate) fn load_session_row(
                     row.get::<_, Option<i64>>(2)?,
                     row.get::<_, i64>(3)?,
                     row.get::<_, Option<Vec<u8>>>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, i64>(6)?,
+                    row.get::<_, Vec<u8>>(7)?,
                 ))
             },
         )
@@ -656,26 +737,22 @@ pub(crate) fn load_session_row(
             .as_deref()
             .map(digest_from_blob)
             .transpose()?,
+        batch_count: usize_from_i64(batch_count, "batch_count")?,
+        record_count: usize_from_i64(record_count, "record_count")?,
+        metadata: Metadata::parse(metadata).map_err(|_| StoreError::Integrity {
+            reason_code: "sqlite_metadata",
+        })?,
     }))
 }
 
-/// The committed footprint of `session_id`, for append admission.
-pub(crate) fn session_usage(
-    connection: &Connection,
-    session_id: SessionId,
-) -> Result<SessionUsage, StoreError> {
-    Ok(SessionUsage {
-        batches: count_where(
-            connection,
-            "SELECT COUNT(*) FROM batches WHERE session_id = ?1",
-            session_id,
-        )?,
-        records: count_where(
-            connection,
-            "SELECT COUNT(*) FROM records WHERE session_id = ?1",
-            session_id,
-        )?,
-    })
+/// The committed footprint of a session, for append admission. Read from the
+/// counters the append and prune transactions maintain (schema v2) rather
+/// than counted on every call.
+pub(crate) fn session_usage(session: &SessionRow) -> SessionUsage {
+    SessionUsage {
+        batches: session.batch_count,
+        records: session.record_count,
+    }
 }
 
 pub(crate) fn count_sessions(connection: &Connection) -> Result<usize, StoreError> {
@@ -685,29 +762,19 @@ pub(crate) fn count_sessions(connection: &Connection) -> Result<usize, StoreErro
     usize_from_i64(count, "sessions")
 }
 
-fn count_where(
-    connection: &Connection,
-    sql: &str,
-    session_id: SessionId,
-) -> Result<usize, StoreError> {
-    let count: i64 = connection
-        .query_row(sql, params![session_id.as_bytes().as_slice()], |row| {
-            row.get(0)
-        })
-        .map_err(map_sqlite_error)?;
-    usize_from_i64(count, "count")
-}
-
+/// The batch that committed `record_id`, if any. Runs once per record of
+/// every append, so the statement is cached on the connection.
 pub(crate) fn lookup_record_batch(
     connection: &Connection,
     record_id: RecordId,
 ) -> Result<Option<AppendBatchId>, StoreError> {
-    let bytes = connection
-        .query_row(
-            "SELECT batch_id FROM records WHERE record_id = ?1",
-            params![record_id.as_bytes().as_slice()],
-            |row| row.get::<_, Vec<u8>>(0),
-        )
+    let mut statement = connection
+        .prepare_cached("SELECT batch_id FROM records WHERE record_id = ?1")
+        .map_err(map_sqlite_error)?;
+    let bytes = statement
+        .query_row(params![record_id.as_bytes().as_slice()], |row| {
+            row.get::<_, Vec<u8>>(0)
+        })
         .optional()
         .map_err(map_sqlite_error)?;
     bytes.as_deref().map(id_from_blob).transpose()

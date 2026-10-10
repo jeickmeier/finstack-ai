@@ -64,7 +64,12 @@ impl PostgresJournalStore {
     /// from `ensure_schema` otherwise.
     pub async fn try_open(config: PostgresStoreConfig) -> Result<Self, StoreError> {
         config.validate()?;
-        let client = connect_and_prepare(&config).await?;
+        // The TLS client configuration (root store, protocol versions) is
+        // built once here and cloned per connection: `MakeRustlsConnect`
+        // wraps an `Arc<ClientConfig>`, so each pooled connection shares it
+        // instead of re-parsing the trust anchors.
+        let transport = Transport::from_config(&config)?;
+        let client = connect_and_prepare(&config, &transport).await?;
         tokio::time::timeout(
             config.operation_timeout,
             ensure_schema(&client, &config.schema, config.schema_policy),
@@ -79,7 +84,8 @@ impl PostgresJournalStore {
             config.pool_size,
             Box::new(move || {
                 let pool_config = pool_config.clone();
-                Box::pin(async move { connect_and_prepare(&pool_config).await })
+                let transport = transport.clone();
+                Box::pin(async move { connect_and_prepare(&pool_config, &transport).await })
             }),
             // A connection can die while idle in the pool (server restart,
             // network drop) with nothing else noticing; the pool checks
@@ -97,6 +103,32 @@ impl PostgresJournalStore {
     }
 }
 
+/// The wire transport every pooled connection is opened with, resolved
+/// once per store from [`PostgresStoreConfig::tls_mode`].
+#[derive(Clone)]
+pub(crate) enum Transport {
+    /// [`PostgresTlsMode::Disable`]: plaintext.
+    Plain,
+    /// [`PostgresTlsMode::Require`]: rustls over the shared client config.
+    Rustls(tokio_postgres_rustls::MakeRustlsConnect),
+}
+
+impl Transport {
+    /// Build the transport, validating any caller-provided trust anchors.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StoreError::InvalidRequest`] when the configured CA PEM is
+    /// unparseable (`postgres_tls_ca_invalid`) or no TLS configuration can
+    /// be assembled (`postgres_tls_config_invalid`).
+    pub(crate) fn from_config(config: &PostgresStoreConfig) -> Result<Self, StoreError> {
+        match config.tls_mode {
+            PostgresTlsMode::Disable => Ok(Self::Plain),
+            PostgresTlsMode::Require => postgres_tls(config).map(Self::Rustls),
+        }
+    }
+}
+
 /// Open one physical connection, apply its session-scoped setup (spec D6),
 /// and spawn its driving task.
 ///
@@ -108,19 +140,20 @@ impl PostgresJournalStore {
 /// statements fail.
 pub(crate) async fn connect_and_prepare(
     config: &PostgresStoreConfig,
+    transport: &Transport,
 ) -> Result<tokio_postgres::Client, StoreError> {
     let mut postgres =
         tokio_postgres::Config::from_str(&config.url).map_err(|_| StoreError::InvalidRequest {
             reason_code: "postgres_url_invalid",
         })?;
-    let client = match config.tls_mode {
-        PostgresTlsMode::Disable => {
+    let client = match transport {
+        Transport::Plain => {
             postgres.ssl_mode(tokio_postgres::config::SslMode::Disable);
             connect(&postgres, tokio_postgres::NoTls, config.connect_timeout).await?
         }
-        PostgresTlsMode::Require => {
+        Transport::Rustls(tls) => {
             postgres.ssl_mode(tokio_postgres::config::SslMode::Require);
-            connect(&postgres, postgres_tls(config)?, config.connect_timeout).await?
+            connect(&postgres, tls.clone(), config.connect_timeout).await?
         }
     };
 
@@ -211,6 +244,36 @@ fn postgres_tls(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn transport_is_built_once_from_the_configured_mode() {
+        let mut config = PostgresStoreConfig::new(
+            "postgres://localhost/db",
+            finstack_ai_runtime::ports::journal::StoreLimits {
+                sessions: 1,
+                batches_per_session: 1,
+                records_per_session: 1,
+                snapshot_bytes: 1,
+            },
+        );
+        assert!(matches!(
+            Transport::from_config(&config),
+            Ok(Transport::Rustls(_))
+        ));
+        config.tls_mode = PostgresTlsMode::Disable;
+        assert!(matches!(
+            Transport::from_config(&config),
+            Ok(Transport::Plain)
+        ));
+        config.tls_mode = PostgresTlsMode::Require;
+        config.tls_ca_pem = Some(Arc::from(b"not a certificate".as_slice()));
+        assert!(matches!(
+            Transport::from_config(&config),
+            Err(StoreError::InvalidRequest {
+                reason_code: "postgres_tls_ca_invalid"
+            })
+        ));
+    }
 
     #[test]
     fn tls_builder_accepts_public_roots() {

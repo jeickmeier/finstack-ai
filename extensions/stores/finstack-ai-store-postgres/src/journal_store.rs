@@ -158,21 +158,26 @@ impl JournalStore for PostgresJournalStore {
     /// propagating an `Err` — per the port contract, `health()` is a status
     /// report, not a fallible operation.
     ///
-    /// Both halves of the probe are bounded by
-    /// [`crate::config::PostgresStoreConfig::connect_timeout`]. The checkout
-    /// needs it because on an exhausted pool (every permit checked out and
-    /// none returned) `Pool::get` would otherwise wait on the semaphore
-    /// indefinitely, turning one stuck caller into a `health()` that never
-    /// resolves. The `SELECT 1` round trip needs it because a connection
+    /// The probe's two halves are bounded separately: the checkout by
+    /// [`crate::config::PostgresStoreConfig::checkout_timeout`] and the
+    /// `SELECT 1` round trip by
+    /// [`crate::config::PostgresStoreConfig::operation_timeout`]. The
+    /// checkout needs it because on an exhausted pool (every permit checked
+    /// out and none returned) `Pool::get` would otherwise wait on the
+    /// semaphore indefinitely, turning one stuck caller into a `health()`
+    /// that never resolves. The `SELECT 1` round trip needs it because a connection
     /// whose backend is black-holed (a dropped network path with no RST, a
     /// wedged server) never returns an error either — it simply never
     /// answers. A probe that times out reports `ready: false` *and* discards
     /// the connection: it may still deliver its answer later, so it must
     /// never go back to the idle queue (spec D2).
     ///
-    /// This only bounds the health path — every other [`JournalStore`]
-    /// method still awaits `Pool::get` and its statements without a timeout,
-    /// so their semantics are unchanged.
+    /// Every other [`JournalStore`] method is bounded the same way through
+    /// the store's shared `run` helper: `checkout_timeout` on the pool checkout
+    /// (`postgres_pool_timeout`) and `operation_timeout` on the statements
+    /// (`postgres_operation_timeout`, or `AmbiguousAcknowledgement` for a
+    /// write whose `COMMIT` may have landed). The health probe differs only
+    /// in reporting `ready: false` instead of an error.
     fn health(&self) -> PortFuture<Result<StoreHealth, StoreError>> {
         let pool = self.pool.clone();
         let durable = matches!(self.config.durability, PostgresDurability::Durable);
@@ -194,7 +199,7 @@ impl JournalStore for PostgresJournalStore {
                         true
                     } else {
                         // The probe query failed — or never answered within
-                        // `checkout_bound` — on an otherwise checked-out
+                        // `operation_bound` — on an otherwise checked-out
                         // connection; treat it as poisoned per spec D2
                         // rather than risk returning a broken (or
                         // black-holed, with an unread `SELECT 1` reply still

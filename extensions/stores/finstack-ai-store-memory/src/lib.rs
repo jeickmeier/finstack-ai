@@ -24,7 +24,7 @@
 // Allow expect() in doc tests (they are test code)
 #![doc(test(attr(allow(clippy::expect_used))))]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use finstack_ai_kernel::{
@@ -219,8 +219,14 @@ impl MemoryJournalStore {
         Ok(committed)
     }
 
-    /// Verify one session's chain, using (and maintaining) the shared
-    /// verified-head cache according to `cache_use`.
+    /// Verify one session's chain, consulting the shared verified-head
+    /// cache according to `cache_use`. Never writes the cache: whether the
+    /// result may be remembered depends on what lock the caller holds (see
+    /// [`Self::remember_if_head_unchanged`]).
+    ///
+    /// Takes a [`SessionChain`] rather than the session itself so callers
+    /// that captured the chain under the store lock can verify it after
+    /// releasing that lock.
     ///
     /// The cache never changes the outcome: [`verify_head_against_cache`]
     /// falls back to a full verification whenever the cached anchor is not
@@ -228,48 +234,55 @@ impl MemoryJournalStore {
     fn verify_session_head(
         &self,
         session_id: SessionId,
-        session: &SessionData,
+        chain: &SessionChain,
         read: VerifiedRead,
         cache_use: CacheUse,
     ) -> Result<Option<Digest>, StoreError> {
-        let records = flatten_records(session);
+        let records = chain.records();
         let cached = match cache_use {
             CacheUse::Proving => read.head,
             CacheUse::Windowed => None,
         };
-        match verify_head_against_cache(
-            ChainAnchor {
-                session_id,
-                next_sequence: session.anchor_next_sequence,
-                previous_checksum: session.anchor_previous_checksum,
-            },
+        verify_head_against_cache(
+            chain.anchor(session_id),
             &records,
-            session.head_sequence,
-            session.head_checksum,
+            chain.head_sequence,
+            chain.head_checksum,
             cached,
-        ) {
-            Ok(head) => {
-                if cache_use == CacheUse::Proving {
-                    self.verified.remember(
-                        session_id,
-                        read,
-                        VerifiedHead {
-                            sequence: session.head_sequence,
-                            checksum: head,
-                        },
-                    );
-                }
-                Ok(head)
+        )
+        .inspect_err(|error| {
+            // Spec D9(b): an integrity failure invalidates whatever this
+            // process believed it had verified for this session.
+            if matches!(error, StoreError::Integrity { .. }) {
+                self.verified.invalidate(session_id);
             }
-            Err(error) => {
-                // Spec D9(b): an integrity failure invalidates whatever this
-                // process believed it had verified for this session.
-                if matches!(error, StoreError::Integrity { .. }) {
-                    self.verified.invalidate(session_id);
-                }
-                Err(error)
-            }
+        })
+    }
+
+    /// Record `head` as verified, but only if the session still ends there.
+    ///
+    /// For a proof produced *outside* the store lock (scan, prune): a
+    /// concurrent writer's newer head must not be overwritten by this
+    /// older-but-valid one. The cache's generation guard alone cannot
+    /// prevent that — an intervening append bumps nothing, so its proof
+    /// would be silently replaced by the pre-append head verified here.
+    /// Re-checking the head under the lock is what rules it out: if the
+    /// session moved on, that writer has already recorded its own (newer,
+    /// equally valid) proof and this one is simply dropped.
+    fn remember_if_head_unchanged(
+        &self,
+        session_id: SessionId,
+        head: VerifiedHead,
+    ) -> Result<(), StoreError> {
+        let inner = self.lock()?;
+        let head_unchanged = inner.sessions.get(&session_id).is_some_and(|session| {
+            session.head_sequence == head.sequence && session.head_checksum == head.checksum
+        });
+        if head_unchanged {
+            let read = self.verified.read(session_id);
+            self.verified.remember(session_id, read, head);
         }
+        Ok(())
     }
 
     /// Load and verify a whole session journal.
@@ -287,7 +300,20 @@ impl MemoryJournalStore {
         let Some(session) = inner.sessions.get(&session_id) else {
             return Ok(LoadedSession::empty(session_id));
         };
-        self.verify_session_head(session_id, session, read, cache_use)?;
+        let chain = SessionChain::capture(session);
+        let head = self.verify_session_head(session_id, &chain, read, cache_use)?;
+        // Still under `inner`: no append can have moved the head, so the
+        // proof is recorded directly (the generation guard covers the rest).
+        if cache_use == CacheUse::Proving {
+            self.verified.remember(
+                session_id,
+                read,
+                VerifiedHead {
+                    sequence: session.head_sequence,
+                    checksum: head,
+                },
+            );
+        }
         Ok(LoadedSession {
             session_id,
             head_sequence: session.head_sequence,
@@ -378,18 +404,33 @@ impl MemoryJournalStore {
     fn scan_sync(&self, request: ScanRequest) -> Result<ScanPage, StoreError> {
         validate_scan_limit(request.limit)?;
         let read = self.verified.read(request.session_id);
-        let inner = self.lock()?;
-        let Some(session) = inner.sessions.get(&request.session_id) else {
-            return Ok(ScanPage {
-                session_id: request.session_id,
-                records: Arc::from([]),
-                next_sequence: None,
-            });
+        // `inner` is one mutex over *every* session, so the chain walk must
+        // not run under it. Capture the session's chain (one `Arc` clone per
+        // batch) and release the lock before verifying, exactly as
+        // `prune_sync` does.
+        let chain = {
+            let inner = self.lock()?;
+            let Some(session) = inner.sessions.get(&request.session_id) else {
+                return Ok(ScanPage {
+                    session_id: request.session_id,
+                    records: Arc::from([]),
+                    next_sequence: None,
+                });
+            };
+            SessionChain::capture(session)
         };
-        self.verify_session_head(request.session_id, session, read, CacheUse::Proving)?;
+        let head = self.verify_session_head(request.session_id, &chain, read, CacheUse::Proving)?;
+        self.remember_if_head_unchanged(
+            request.session_id,
+            VerifiedHead {
+                sequence: chain.head_sequence,
+                checksum: head,
+            },
+        )?;
         let start = scan_start(request.from_sequence);
         let limit = usize::try_from(request.limit).unwrap_or(usize::MAX);
-        let (records, saw_more) = slice_records(session, start, limit);
+        let (records, saw_more) =
+            slice_records(chain.boundary_record.as_ref(), &chain.batches, start, limit);
         let next_sequence = scan_next_sequence(&records, saw_more);
         Ok(ScanPage {
             session_id: request.session_id,
@@ -535,13 +576,7 @@ impl MemoryJournalStore {
             sequence: session.head_sequence,
             checksum: session.head_checksum,
         };
-        let records = flatten_records(session);
-        let stored_head = session.head_checksum;
-        let anchor = ChainAnchor {
-            session_id: request.session_id,
-            next_sequence: session.anchor_next_sequence,
-            previous_checksum: session.anchor_previous_checksum,
-        };
+        let chain = SessionChain::capture(session);
 
         inner.batches_by_id.retain(|_, entry| {
             entry.request.session_id() != request.session_id
@@ -555,7 +590,11 @@ impl MemoryJournalStore {
                 inner.records_by_id.remove(&record_id);
             }
         }
-        let retained_batch_ids = inner.batches_by_id.keys().copied().collect::<Vec<_>>();
+        let retained_batch_ids = inner
+            .batches_by_id
+            .keys()
+            .copied()
+            .collect::<BTreeSet<AppendBatchId>>();
         inner
             .records_by_id
             .retain(|_, batch_id| retained_batch_ids.contains(batch_id));
@@ -564,33 +603,16 @@ impl MemoryJournalStore {
         // journal re-verified in full before a new one is recorded.
         self.verified.invalidate(request.session_id);
         // `inner` is one mutex over *every* session, so nothing expensive may
-        // run under it. `records` is already an owned clone and `stored_head`
-        // a `Copy` digest, so the chain walk needs no lock at all: release it
-        // first, and every unrelated append/load/scan keeps running while this
-        // prune re-verifies.
+        // run under it. `chain` is an owned capture, so the chain walk needs
+        // no lock at all: release it first, and every unrelated
+        // append/load/scan keeps running while this prune re-verifies.
         drop(inner);
-        verify_full_head(anchor, &records, stored_head)?;
-        // The cache write does go back under `inner`, briefly, for
-        // `append_sync`'s reason: a concurrent writer's newer head must not be
-        // overwritten by this older-but-valid one. The generation guard alone
-        // cannot prevent that — an intervening append bumps nothing, so its
-        // proof would be silently replaced by the pre-append head verified
-        // above. Re-checking the head under the lock is what rules it out: if
-        // the session moved on, that writer has already recorded its own
-        // (newer, equally valid) proof and this one is simply dropped.
-        {
-            let inner = self.lock()?;
-            let head_unchanged = inner
-                .sessions
-                .get(&request.session_id)
-                .is_some_and(|session| {
-                    session.head_sequence == head.sequence && session.head_checksum == head.checksum
-                });
-            if head_unchanged {
-                let read = self.verified.read(request.session_id);
-                self.verified.remember(request.session_id, read, head);
-            }
-        }
+        verify_full_head(
+            chain.anchor(request.session_id),
+            &chain.records(),
+            chain.head_checksum,
+        )?;
+        self.remember_if_head_unchanged(request.session_id, head)?;
         Ok(PruneReceipt {
             pruned_through_sequence,
             retained_outstanding,
@@ -735,6 +757,56 @@ struct BatchIndexEntry {
     history_pruned: bool,
 }
 
+/// Everything a chain verification or page slice needs, captured from a
+/// session so the store lock can be released before the records are walked.
+///
+/// Capturing is cheap: each batch's records are one shared
+/// `Arc<[RecordEnvelope]>`, so this clones one `Arc` per batch plus the
+/// boundary record, never the envelopes themselves.
+struct SessionChain {
+    head_sequence: u64,
+    head_checksum: Option<Digest>,
+    anchor_next_sequence: u64,
+    anchor_previous_checksum: Option<Digest>,
+    boundary_record: Option<RecordEnvelope>,
+    batches: Vec<CommittedBatch>,
+}
+
+impl SessionChain {
+    fn capture(session: &SessionData) -> Self {
+        Self {
+            head_sequence: session.head_sequence,
+            head_checksum: session.head_checksum,
+            anchor_next_sequence: session.anchor_next_sequence,
+            anchor_previous_checksum: session.anchor_previous_checksum,
+            boundary_record: session.boundary_record.clone(),
+            batches: session.batches.clone(),
+        }
+    }
+
+    fn anchor(&self, session_id: SessionId) -> ChainAnchor {
+        ChainAnchor {
+            session_id,
+            next_sequence: self.anchor_next_sequence,
+            previous_checksum: self.anchor_previous_checksum,
+        }
+    }
+
+    /// Every retained record in sequence order: the prune-boundary record
+    /// (when the session was pruned) followed by the batches' records.
+    fn records(&self) -> Vec<RecordEnvelope> {
+        self.boundary_record
+            .iter()
+            .cloned()
+            .chain(
+                self.batches
+                    .iter()
+                    .flat_map(|batch| batch.records.iter().cloned()),
+            )
+            .collect()
+    }
+}
+
 fn loaded_from_batches(
     session_id: SessionId,
     session: &SessionData,
@@ -767,24 +839,15 @@ fn loaded_from_batches(
     })
 }
 
-fn flatten_records(session: &SessionData) -> Vec<RecordEnvelope> {
-    session
-        .boundary_record
-        .iter()
-        .cloned()
-        .chain(
-            session
-                .batches
-                .iter()
-                .flat_map(|batch| batch.records.iter().cloned()),
-        )
-        .collect()
-}
-
-fn slice_records(session: &SessionData, start: u64, limit: usize) -> (Vec<RecordEnvelope>, bool) {
+fn slice_records(
+    boundary_record: Option<&RecordEnvelope>,
+    batches: &[CommittedBatch],
+    start: u64,
+    limit: usize,
+) -> (Vec<RecordEnvelope>, bool) {
     let mut records = Vec::new();
     let mut saw_more = false;
-    if let Some(boundary) = &session.boundary_record
+    if let Some(boundary) = boundary_record
         && boundary.sequence() >= start
     {
         if limit == 0 {
@@ -792,7 +855,7 @@ fn slice_records(session: &SessionData, start: u64, limit: usize) -> (Vec<Record
         }
         records.push(boundary.clone());
     }
-    'batches: for batch in &session.batches {
+    'batches: for batch in batches {
         for record in batch.records.iter() {
             if record.sequence() < start {
                 continue;
@@ -810,17 +873,20 @@ fn slice_records(session: &SessionData, start: u64, limit: usize) -> (Vec<Record
 #[cfg(test)]
 mod tests {
     use std::future::Future;
+    use std::sync::mpsc;
     use std::sync::{Arc, Barrier};
     use std::task::{Context, Poll, Waker};
     use std::thread;
+    use std::time::Duration;
 
     use finstack_ai_kernel::{
-        LaneCreated, LaneTag, RECORD_FORMAT_VERSION, RECORD_KIND_VERSION, RecordBody, RecordDraft,
-        RecordTag, SessionCreated, SessionTag, Timestamp,
+        KernelState, LaneCreated, LaneTag, RECORD_FORMAT_VERSION, RECORD_KIND_VERSION, RecordBody,
+        RecordDraft, RecordTag, SessionCreated, SessionTag, Timestamp, UNIX_EPOCH,
     };
     use finstack_ai_protocol::{envelope_checksum, payload_digest, verify_envelope};
-    use finstack_ai_runtime::ports::journal::SCAN_PAGE_MAX_RECORDS;
+    use finstack_ai_runtime::ports::journal::{IdempotencyHorizon, SCAN_PAGE_MAX_RECORDS};
     use finstack_ai_test::store_fixtures::{draft, id, request};
+    use finstack_ai_test::{PruneBoundaryConformanceCase, check_prune_boundary_conformance};
 
     use super::*;
 
@@ -1208,5 +1274,223 @@ mod tests {
         .expect("load");
         assert_eq!(loaded.head_sequence, 1);
         assert_eq!(loaded.committed_batches.len(), 1);
+    }
+
+    /// Snapshot ending exactly on `sequence`, written through the port.
+    fn write_aligned_snapshot(store: &MemoryJournalStore, sequence: u64, head_checksum: Digest) {
+        let mut state = KernelState::default();
+        state.set_last_applied_sequence(sequence);
+        block_on(store.write_state_snapshot(StateSnapshotRequest {
+            session_id: id::<SessionTag>(1),
+            state,
+            head_checksum,
+            pending_timer_scheduled_at: None,
+            last_model_continuation: None,
+        }))
+        .expect("aligned snapshot");
+    }
+
+    fn prune_session_one(store: &MemoryJournalStore) -> PruneReceipt {
+        block_on(store.prune(PruneRequest {
+            session_id: id::<SessionTag>(1),
+            horizon: IdempotencyHorizon {
+                expire_at: UNIX_EPOCH,
+            },
+        }))
+        .expect("prune")
+    }
+
+    #[test]
+    fn prune_boundary_batch_is_omitted() {
+        let store = MemoryJournalStore::try_new(limits()).expect("store");
+        block_on(check_prune_boundary_conformance(
+            &store,
+            PruneBoundaryConformanceCase {
+                prefix: request(1, 1, 1, vec![draft(1, 1), draft(2, 1)]),
+                boundary: request(2, 1, 3, vec![draft(3, 1)]),
+                tail: request(3, 1, 4, vec![draft(4, 1), draft(5, 1)]),
+                snapshot_bytes: limits().snapshot_bytes,
+            },
+        ))
+        .expect("prune boundary conformance");
+    }
+
+    /// Liveness check for the scan path: while one thread scans a session
+    /// continuously (each scan verifies the whole chain), another thread's
+    /// lock-taking writes must keep completing. Before `scan_sync` released
+    /// `inner` ahead of verification, every scan serialized every other
+    /// session's writers behind its chain walk.
+    #[test]
+    fn scan_releases_lock_before_verification() {
+        let store = Arc::new(
+            MemoryJournalStore::try_new(MemoryStoreLimits {
+                sessions: 2,
+                batches_per_session: 64,
+                records_per_session: 256,
+                snapshot_bytes: 1024,
+            })
+            .expect("store"),
+        );
+        let mut head = None;
+        for ordinal in 1..=64_u64 {
+            let committed =
+                block_on(store.append(request(ordinal, 1, ordinal, vec![draft(ordinal, 1)])))
+                    .expect("append");
+            head = committed.records.last().map(RecordEnvelope::checksum);
+        }
+        block_on(store.append(request(1_000, 2, 1, vec![draft(1_000, 2)]))).expect("session 2");
+
+        let (done_tx, done_rx) = mpsc::channel();
+        let scanner = {
+            let store = Arc::clone(&store);
+            let done_tx = done_tx.clone();
+            thread::spawn(move || {
+                for _ in 0..200 {
+                    // Scanning takes and releases `inner` twice per call,
+                    // with the chain walk in between.
+                    let page = block_on(store.scan(ScanRequest {
+                        session_id: id::<SessionTag>(1),
+                        from_sequence: 0,
+                        limit: 8,
+                    }))
+                    .expect("scan");
+                    assert_eq!(page.records.len(), 8);
+                }
+                done_tx.send("scanner").expect("report");
+            })
+        };
+        let writer = {
+            let store = Arc::clone(&store);
+            thread::spawn(move || {
+                for round in 0..200_u64 {
+                    // A mutating method on the *same* session: it needs
+                    // `inner` and must interleave with the scans.
+                    let metadata = Metadata::parse(format!(r#"{{"round":{round}}}"#).as_bytes())
+                        .expect("metadata");
+                    block_on(store.write_metadata(WriteMetadataRequest {
+                        session_id: id::<SessionTag>(1),
+                        expected_head_checksum: head,
+                        metadata,
+                    }))
+                    .expect("metadata write");
+                    block_on(store.load(LoadRequest {
+                        session_id: id::<SessionTag>(2),
+                    }))
+                    .expect("other session load");
+                }
+                done_tx.send("writer").expect("report");
+            })
+        };
+        let mut reported = Vec::new();
+        for _ in 0..2 {
+            reported.push(
+                done_rx
+                    .recv_timeout(Duration::from_secs(30))
+                    .expect("scan and writes must both finish: lock held across verification?"),
+            );
+        }
+        reported.sort_unstable();
+        assert_eq!(reported, ["scanner", "writer"]);
+        scanner.join().expect("scanner thread");
+        writer.join().expect("writer thread");
+    }
+
+    /// Prune over 2000 records in 200 batches, with the retained index
+    /// checked against a naive reference computed from the pre-prune maps
+    /// using the old linear `Vec::contains` retention rule.
+    #[test]
+    fn prune_retention_matches_naive_reference_over_many_batches() {
+        const BATCHES: u64 = 200;
+        const PER_BATCH: u64 = 10;
+        const BOUNDARY_BATCH: u64 = 101;
+        let store = MemoryJournalStore::try_new(MemoryStoreLimits {
+            sessions: 1,
+            batches_per_session: 200,
+            records_per_session: 2_000,
+            snapshot_bytes: 4_096,
+        })
+        .expect("store");
+        let mut boundary_checksum = None;
+        let mut expected_tail = Vec::new();
+        for batch in 1..=BATCHES {
+            let first = (batch - 1) * PER_BATCH + 1;
+            let drafts = (first..first + PER_BATCH)
+                .map(|ordinal| draft(ordinal, 1))
+                .collect::<Vec<_>>();
+            let committed =
+                block_on(store.append(request(batch, 1, first, drafts))).expect("append");
+            if batch == BOUNDARY_BATCH {
+                boundary_checksum = committed.records.last().map(RecordEnvelope::checksum);
+            }
+            if batch > BOUNDARY_BATCH {
+                expected_tail.push(committed);
+            }
+        }
+        let pruned_through = BOUNDARY_BATCH * PER_BATCH;
+        let (records_before, batches_before) = {
+            let inner = store.inner.lock().expect("inner");
+            (
+                inner.records_by_id.clone(),
+                inner
+                    .batches_by_id
+                    .iter()
+                    .map(|(batch_id, entry)| (*batch_id, entry.committed.clone()))
+                    .collect::<BTreeMap<_, _>>(),
+            )
+        };
+        assert_eq!(records_before.len(), 2_000);
+        assert_eq!(batches_before.len(), 200);
+
+        write_aligned_snapshot(&store, pruned_through, boundary_checksum.expect("boundary"));
+        let receipt = prune_session_one(&store);
+        assert_eq!(receipt.pruned_through_sequence, pruned_through);
+
+        // Naive reference: every batch ending at or after the boundary stays;
+        // of the boundary batch's records only its last survives; every other
+        // record stays iff its batch stays (linear-scan membership).
+        let retained_batches = batches_before
+            .iter()
+            .filter(|(_, committed)| committed.last_sequence >= pruned_through)
+            .map(|(batch_id, _)| *batch_id)
+            .collect::<Vec<_>>();
+        let boundary = batches_before
+            .values()
+            .find(|committed| committed.last_sequence == pruned_through)
+            .expect("boundary batch");
+        let boundary_record_id = boundary.records.last().expect("record").record_id();
+        let expected_records = records_before
+            .iter()
+            .filter(|(record_id, batch_id)| {
+                retained_batches.contains(batch_id)
+                    && (**batch_id != boundary.batch_id || **record_id == boundary_record_id)
+            })
+            .map(|(record_id, batch_id)| (*record_id, *batch_id))
+            .collect::<BTreeMap<_, _>>();
+        assert_eq!(retained_batches.len(), 100);
+        assert_eq!(expected_records.len(), 99 * 10 + 1);
+
+        let inner = store.inner.lock().expect("inner");
+        assert_eq!(inner.records_by_id, expected_records);
+        assert_eq!(
+            inner.batches_by_id.keys().copied().collect::<Vec<_>>(),
+            retained_batches
+        );
+        let session = inner.sessions.get(&id::<SessionTag>(1)).expect("session");
+        assert_eq!(session.batches, expected_tail);
+        assert_eq!(session.records, 99 * 10 + 1);
+        assert_eq!(
+            session
+                .boundary_record
+                .as_ref()
+                .map(RecordEnvelope::sequence),
+            Some(pruned_through)
+        );
+        drop(inner);
+
+        let loaded = block_on(store.load(LoadRequest {
+            session_id: id::<SessionTag>(1),
+        }))
+        .expect("load after prune");
+        assert_eq!(loaded.committed_batches.as_ref(), expected_tail.as_slice());
     }
 }

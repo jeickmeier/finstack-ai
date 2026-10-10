@@ -181,6 +181,7 @@ fn corrupt_database_fails_closed() {
     );
 }
 
+#[cfg(feature = "fault-injection")]
 #[test]
 fn disk_full_maps_to_sqlite_disk_full() {
     let dir = TempDir::new().expect("tempdir");
@@ -275,6 +276,7 @@ fn concurrent_readers_never_observe_a_torn_batch() {
     }
 }
 
+#[cfg(feature = "fault-injection")]
 #[test]
 fn process_kill_after_ack_preserves_the_committed_batch() {
     let dir = TempDir::new().expect("tempdir");

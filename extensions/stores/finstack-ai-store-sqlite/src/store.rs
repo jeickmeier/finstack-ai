@@ -15,7 +15,7 @@ use rusqlite::{Transaction, TransactionBehavior, params};
 
 use crate::append::append_in_transaction;
 use crate::config::{SqliteStoreConfig, health_label, is_memory_path};
-use crate::error::{i64_from_u64, map_sqlite_error};
+use crate::error::{i64_from_u64, map_sqlite_error, u64_from_i64};
 use crate::load::{load_session_row, load_session_window, load_snapshot, scan_session};
 use crate::worker::{WorkerCtx, WorkerHandle};
 
@@ -46,7 +46,11 @@ pub struct SqliteJournalStore {
 }
 
 impl SqliteJournalStore {
-    /// Open or create a store, apply one-way v1 schema, and verify the file.
+    /// Open or create a store, migrate the file forward to the current
+    /// schema ([`crate::SCHEMA_USER_VERSION`]: a fresh file gets v1 then
+    /// v2, a v1 file gets the v2 counter migration), and verify the file.
+    /// Migration is one-way; an older binary fails closed on the upgraded
+    /// file.
     ///
     /// Copy `*.sqlite`, `*-wal`, and `*-shm` together before any later
     /// migrator. See the crate README for backup guidance.
@@ -152,7 +156,7 @@ impl SqliteJournalStore {
                 })?;
                 sessions.push(SessionListRow {
                     session_id: SessionId::from_bytes(session_id),
-                    head_sequence: u64::try_from(current_sequence).unwrap_or_default(),
+                    head_sequence: u64_from_i64(current_sequence, "current_sequence")?,
                     metadata,
                 });
             }
@@ -167,6 +171,9 @@ impl SqliteJournalStore {
     }
 
     /// Current database page count on the owned connection. Used by SQLite durability contract disk-full tests.
+    ///
+    /// Only compiled with the `fault-injection` feature.
+    #[cfg(feature = "fault-injection")]
     #[doc(hidden)]
     pub fn page_count(&self) -> Result<i64, StoreError> {
         self.worker.call(|ctx| {
@@ -177,6 +184,9 @@ impl SqliteJournalStore {
     }
 
     /// Cap the database page count on the owned connection. Used by SQLite durability contract disk-full tests.
+    ///
+    /// Only compiled with the `fault-injection` feature.
+    #[cfg(feature = "fault-injection")]
     #[doc(hidden)]
     pub fn set_max_page_count(&self, pages: i64) -> Result<(), StoreError> {
         self.worker.call(move |ctx| {
@@ -187,6 +197,9 @@ impl SqliteJournalStore {
     }
 
     /// Switch off WAL so `max_page_count` can raise `SQLITE_FULL` on the next write.
+    ///
+    /// Only compiled with the `fault-injection` feature.
+    #[cfg(feature = "fault-injection")]
     #[doc(hidden)]
     pub fn use_rollback_journal_for_test(&self) -> Result<(), StoreError> {
         self.worker.call(|ctx| {
@@ -201,6 +214,9 @@ impl SqliteJournalStore {
     }
 
     /// Insert a padding blob on the owned connection. Used to exhaust free pages.
+    ///
+    /// Only compiled with the `fault-injection` feature.
+    #[cfg(feature = "fault-injection")]
     #[doc(hidden)]
     pub fn insert_padding_blob(&self, bytes: usize) -> Result<(), StoreError> {
         self.worker.call(move |ctx| {
@@ -218,6 +234,9 @@ impl SqliteJournalStore {
     }
 
     /// Persist a batch's rows, then `ROLLBACK`. Used by SQLite rollback fault case.
+    ///
+    /// Only compiled with the `fault-injection` feature.
+    #[cfg(feature = "fault-injection")]
     #[doc(hidden)]
     pub fn append_then_rollback(&self, request: &AppendRequest) -> Result<(), StoreError> {
         let request = request.clone();
@@ -514,16 +533,30 @@ impl WorkerCtx {
                     ],
                 )
                 .map_err(map_sqlite_error)?;
-            transaction
+            let deleted_records = transaction
                 .execute(
                     "DELETE FROM records WHERE session_id = ?1 AND sequence < ?2",
                     params![request.session_id.as_bytes().as_slice(), pruned_through],
                 )
                 .map_err(map_sqlite_error)?;
-            transaction
+            let deleted_batches = transaction
                 .execute(
                     "DELETE FROM batches WHERE session_id = ?1 AND last_sequence < ?2",
                     params![request.session_id.as_bytes().as_slice(), pruned_through],
+                )
+                .map_err(map_sqlite_error)?;
+            // Subtract exactly the rows this statement removed so the
+            // footprint counters stay in step with the tables (schema v2).
+            transaction
+                .execute(
+                    "UPDATE sessions
+                     SET batch_count = batch_count - ?1, record_count = record_count - ?2
+                     WHERE session_id = ?3",
+                    params![
+                        i64_from_usize(deleted_batches)?,
+                        i64_from_usize(deleted_records)?,
+                        request.session_id.as_bytes().as_slice(),
+                    ],
                 )
                 .map_err(map_sqlite_error)?;
             Ok(PruneReceipt {
@@ -533,4 +566,10 @@ impl WorkerCtx {
             })
         })
     }
+}
+
+fn i64_from_usize(value: usize) -> Result<i64, StoreError> {
+    i64::try_from(value).map_err(|_| StoreError::Integrity {
+        reason_code: "prune_count",
+    })
 }

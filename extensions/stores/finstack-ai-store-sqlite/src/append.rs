@@ -79,10 +79,9 @@ pub(crate) fn append_in_transaction(
     check_append_sequence(current_head, request.expected_sequence())?;
 
     let session_is_new = session.is_none();
-    let (sessions, usage) = if session_is_new {
-        (count_sessions(transaction)?, None)
-    } else {
-        (0, Some(session_usage(transaction, request.session_id())?))
+    let (sessions, usage) = match session.as_ref() {
+        None => (count_sessions(transaction)?, None),
+        Some(row) => (0, Some(session_usage(row))),
     };
     admit_append_limits(*limits, sessions, usage, request.records().len())?;
 
@@ -109,8 +108,9 @@ fn persist_committed_batch(
         transaction
             .execute(
                 "INSERT INTO sessions
-                 (session_id, current_sequence, head_checksum, snapshot_sequence, metadata)
-                 VALUES (?1, 0, NULL, NULL, ?2)",
+                 (session_id, current_sequence, head_checksum, snapshot_sequence, metadata,
+                  batch_count, record_count)
+                 VALUES (?1, 0, NULL, NULL, ?2, 0, 0)",
                 params![
                     request.session_id().as_bytes().as_slice(),
                     Metadata::empty().as_bytes(),
@@ -150,16 +150,25 @@ fn persist_committed_batch(
             .ok_or(StoreError::Integrity {
                 reason_code: "sequence_exhausted",
             })?;
+    // The head CAS also charges the batch to the session's committed
+    // footprint, so the counters move in the same transaction as the rows
+    // they describe (schema v2; the postgres store does the same).
+    let record_count =
+        i64::try_from(committed.records.len()).map_err(|_| StoreError::Integrity {
+            reason_code: "record_count",
+        })?;
     let updated = transaction
         .execute(
             "UPDATE sessions
-             SET current_sequence = ?1, head_checksum = ?2
+             SET current_sequence = ?1, head_checksum = ?2,
+                 batch_count = batch_count + 1, record_count = record_count + ?5
              WHERE session_id = ?3 AND current_sequence = ?4",
             params![
                 i64_from_u64(committed.last_sequence, "last_sequence")?,
                 head_checksum.as_bytes().as_slice(),
                 request.session_id().as_bytes().as_slice(),
                 i64_from_u64(previous_sequence, "previous_sequence")?,
+                record_count,
             ],
         )
         .map_err(map_sqlite_error)?;
@@ -171,6 +180,8 @@ fn persist_committed_batch(
     Ok(())
 }
 
+/// Persist one committed envelope. Runs once per record of every append, so
+/// the statement is cached on the connection.
 fn insert_record(
     transaction: &Transaction<'_>,
     batch_id: AppendBatchId,
@@ -182,31 +193,33 @@ fn insert_record(
     let previous = envelope
         .previous_checksum()
         .map(|digest| *digest.as_bytes());
-    transaction
-        .execute(
+    let mut statement = transaction
+        .prepare_cached(
             "INSERT INTO records (
                 session_id, sequence, record_id, batch_id, lane_id, run_id, kind,
                 format_version, kind_version, payload_cbor, timestamp, committed_at,
                 payload_digest, previous_checksum, envelope_checksum, derived_event_ids
              ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, NULL, ?12, ?13, ?14, ?15)",
-            params![
-                envelope.session_id().as_bytes().as_slice(),
-                i64_from_u64(envelope.sequence(), "sequence")?,
-                envelope.record_id().as_bytes().as_slice(),
-                batch_id.as_bytes().as_slice(),
-                envelope.lane_id().as_bytes().as_slice(),
-                run_id.as_ref().map(<[u8; 16]>::as_slice),
-                envelope.body().kind_name(),
-                i64::from(envelope.format_version()),
-                i64::from(envelope.kind_version()),
-                payload_cbor,
-                envelope.timestamp().as_unix_ms(),
-                envelope.payload_digest().as_bytes().as_slice(),
-                previous.as_ref().map(<[u8; 32]>::as_slice),
-                envelope.checksum().as_bytes().as_slice(),
-                derived_event_ids,
-            ],
         )
+        .map_err(map_sqlite_error)?;
+    statement
+        .execute(params![
+            envelope.session_id().as_bytes().as_slice(),
+            i64_from_u64(envelope.sequence(), "sequence")?,
+            envelope.record_id().as_bytes().as_slice(),
+            batch_id.as_bytes().as_slice(),
+            envelope.lane_id().as_bytes().as_slice(),
+            run_id.as_ref().map(<[u8; 16]>::as_slice),
+            envelope.body().kind_name(),
+            i64::from(envelope.format_version()),
+            i64::from(envelope.kind_version()),
+            payload_cbor,
+            envelope.timestamp().as_unix_ms(),
+            envelope.payload_digest().as_bytes().as_slice(),
+            previous.as_ref().map(<[u8; 32]>::as_slice),
+            envelope.checksum().as_bytes().as_slice(),
+            derived_event_ids,
+        ])
         .map_err(map_sqlite_error)?;
     Ok(())
 }
