@@ -257,6 +257,36 @@ async fn http_429_maps_to_retryable_gemini_http_error() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn http_error_carries_status_metadata() {
+    let (base_url, server) = serve_response(
+        "402 Payment Required",
+        "application/json",
+        HTTP_429.as_bytes().to_vec(),
+        false,
+    )
+    .await;
+    let result = provider(&base_url)
+        .request(request(draft(OutputSpec::PlainText, Arc::from([]))))
+        .await;
+    let Err(error) = result else {
+        panic!("402 must fail");
+    };
+    assert_eq!(error.code(), "gemini_http_error");
+    assert!(!error.retryable());
+    assert_eq!(
+        error.message(),
+        "Gemini generateContent endpoint returned HTTP 402"
+    );
+    assert_eq!(
+        error.metadata().as_raw_json().as_str(),
+        r#"{"http_status":402}"#
+    );
+    // The body is never consulted: no canary, no body text in any surface.
+    assert!(!format!("{error:?}").contains("provider-body-secret-canary"));
+    server.abort();
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn api_key_header_sent_and_never_logged() {
     // The provider hard-fails config construction when a credential is
     // configured against a non-HTTPS base URL (SEC-INV: credentials require

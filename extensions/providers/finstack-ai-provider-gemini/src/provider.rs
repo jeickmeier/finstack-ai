@@ -7,7 +7,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, PoisonError, RwLock};
 
 use finstack_ai_kernel::{ErrorCategory, Metadata, OutputSpec};
-use finstack_ai_provider_wire::{GeminiGenerateContentAssembly, StreamNormError, StreamNormKind};
+use finstack_ai_provider_wire::{
+    GeminiGenerateContentAssembly, StreamNormError, http_error, stream_norm_error,
+};
 use finstack_ai_runtime::ports::PortFuture;
 use finstack_ai_runtime::ports::model::{
     CancellationSignal, InputCapabilities, MediaResolveKind, Model, ModelCapabilities,
@@ -20,9 +22,8 @@ use reqwest::redirect::Policy;
 use tokio::sync::mpsc;
 
 use crate::error::{
-    GEMINI_CANCELLED, GEMINI_HTTP_ERROR, GEMINI_RESPONSE_INVALID, GEMINI_STREAM_LIMIT_EXCEEDED,
-    GEMINI_TIMEOUT, GEMINI_TRANSPORT_ERROR, config_error, error, request_error, response_error,
-    stream_error, stream_limit_error,
+    CODES, GEMINI_CANCELLED, GEMINI_RESPONSE_INVALID, GEMINI_STREAM_LIMIT_EXCEEDED, GEMINI_TIMEOUT,
+    GEMINI_TRANSPORT_ERROR, config_error, error, request_error, stream_error, stream_limit_error,
 };
 use crate::request::GenerateContentRequest;
 use crate::sse::GeminiSse;
@@ -62,7 +63,8 @@ impl GeminiProvider {
     ///
     /// # Errors
     ///
-    /// Rejects an empty/duplicate model catalog or invalid transport configuration.
+    /// Rejects an empty/duplicate model catalog, a model whose builder-set
+    /// context profile is invalid, or invalid transport configuration.
     ///
     /// # Examples
     ///
@@ -99,7 +101,8 @@ impl GeminiProvider {
     ///
     /// # Errors
     ///
-    /// Rejects an empty or duplicate catalog.
+    /// Rejects an empty or duplicate catalog, or a model whose context
+    /// profile is invalid.
     pub fn replace_model_catalog(&self, models: Vec<GeminiModelConfig>) -> Result<(), ModelError> {
         let by_name = catalog_from_models(models)?;
         *self.models.write().unwrap_or_else(PoisonError::into_inner) = by_name;
@@ -139,6 +142,7 @@ fn catalog_from_models(
 ) -> Result<BTreeMap<ModelName, GeminiModelConfig>, ModelError> {
     let mut by_name = BTreeMap::new();
     for model in models {
+        model.validate()?;
         if by_name.insert(model.name().clone(), model).is_some() {
             return Err(config_error("provider contains a duplicate model name"));
         }
@@ -285,12 +289,11 @@ impl Model for GeminiProvider {
                 response = send => response.map_err(|source| transport_error(&source))?,
             };
             if !response.status().is_success() {
-                let retryable = matches!(response.status().as_u16(), 408 | 409 | 429 | 500..=599);
-                return Err(error(
-                    GEMINI_HTTP_ERROR,
-                    ErrorCategory::Model,
-                    retryable,
-                    "Gemini endpoint returned an unsuccessful status",
+                return Err(http_error(
+                    &CODES,
+                    "Gemini",
+                    "generateContent endpoint",
+                    response.status().as_u16(),
                 ));
             }
             let (sender, receiver) = mpsc::channel(STREAM_CHANNEL_CAPACITY);
@@ -408,11 +411,7 @@ async fn drive_response(
 }
 
 fn map_norm(error: &StreamNormError) -> ModelError {
-    match error.kind {
-        StreamNormKind::Limit => stream_limit_error(),
-        StreamNormKind::Stream => stream_error(error.message),
-        StreamNormKind::Response | StreamNormKind::Incomplete => response_error(error.message),
-    }
+    stream_norm_error(&CODES, "Gemini", error)
 }
 
 fn cancelled_error() -> ModelError {
@@ -611,6 +610,31 @@ mod tests {
             panic!("media without a configured resolver must fail closed");
         };
         assert_eq!(error.code(), crate::error::GEMINI_REQUEST_INVALID);
+    }
+
+    #[test]
+    fn invalid_builder_values_rejected_at_catalog() {
+        // Reserved + overhead above the window: unreachable through `try_new`,
+        // only through the infallible builders.
+        let oversized_margin = fixture_model()
+            .with_reserved_output_tokens(100_000)
+            .with_provider_overhead_tokens(100_000);
+        let config = GeminiConfig::try_new("http://127.0.0.1:9").expect("config");
+        let Err(error) = GeminiProvider::try_new(config, vec![oversized_margin.clone()]) else {
+            panic!("a model whose margins exceed the window must be rejected");
+        };
+        assert_eq!(error.code(), crate::error::GEMINI_CONFIG_INVALID);
+        assert_eq!(error.message(), "provider model context profile is invalid");
+
+        let zero_reserved = fixture_model().with_reserved_output_tokens(0);
+        let config = GeminiConfig::try_new("http://127.0.0.1:9").expect("config");
+        let provider = GeminiProvider::try_new(config, vec![fixture_model()]).expect("provider");
+        let Err(error) = provider.replace_model_catalog(vec![zero_reserved]) else {
+            panic!("a zero reserved-output margin must be rejected");
+        };
+        assert_eq!(error.code(), crate::error::GEMINI_CONFIG_INVALID);
+        // The catalog is untouched after a rejected replacement.
+        assert_eq!(provider.descriptor().models.len(), 1);
     }
 
     #[test]

@@ -145,7 +145,9 @@ impl GeminiGenerateContentAssembly {
     /// # Errors
     ///
     /// Returns [`StreamNormError`] when the chunk is malformed, the prompt was
-    /// blocked, or the candidate reported a non-terminal finish reason.
+    /// blocked, the candidate stopped at its output token limit
+    /// (`MAX_TOKENS`, reported as [`StreamNormError::incomplete`]), or the
+    /// candidate reported any other non-terminal finish reason.
     pub fn consume(&mut self, data: &str) -> Result<Vec<ModelStreamItem>, StreamNormError> {
         let chunk: WireChunk = serde_json::from_str(data)
             .map_err(|_| StreamNormError::stream("SSE chunk is invalid JSON"))?;
@@ -212,11 +214,16 @@ impl GeminiGenerateContentAssembly {
             return Ok(Vec::new());
         }
         match reason {
-            "STOP" | "MAX_TOKENS" => {
+            "STOP" => {
                 let response = self.build_completed()?;
                 self.completed = true;
                 Ok(vec![ModelStreamItem::Completed(response)])
             }
+            // A truncated candidate is never a usable terminal: its text may
+            // be cut mid-token and a structured turn would be unparseable.
+            "MAX_TOKENS" => Err(StreamNormError::incomplete(
+                "candidate stopped at the output token limit",
+            )),
             _ => Err(StreamNormError::response(
                 "candidate reported a non-terminal finish reason",
             )),
@@ -259,8 +266,28 @@ impl GeminiGenerateContentAssembly {
         // The raw part is moved (not cloned) into the replay accumulator once
         // field extraction is done; an error above fails the whole stream, so
         // the skipped push can never reach a continuation envelope.
-        self.replay_parts.push(part);
+        self.push_replay_part(part);
         Ok(items)
+    }
+
+    /// Append one raw part to the replay accumulator.
+    ///
+    /// Gemini streams visible text as many small `{"text": ...}` parts; one
+    /// part per delta would make the continuation envelope grow with the
+    /// chunking of the stream rather than its content. Consecutive parts whose
+    /// only key is `text` are therefore folded into one. A part carrying any
+    /// other key (`thought`, `thoughtSignature`, `functionCall`, ...) is
+    /// always kept verbatim, so signatures stay attached to exactly the part
+    /// the model emitted them on.
+    fn push_replay_part(&mut self, part: Value) {
+        if let Some(text) = plain_text_part(&part)
+            && let Some(last) = self.replay_parts.last_mut()
+            && let Some(Value::String(existing)) = plain_text_slot(last)
+        {
+            existing.push_str(text);
+            return;
+        }
+        self.replay_parts.push(part);
     }
 
     fn consume_function_call(&mut self, call: &Value) -> Result<ModelStreamItem, StreamNormError> {
@@ -354,11 +381,13 @@ impl GeminiGenerateContentAssembly {
             .clone()
             .unwrap_or_else(|| self.request_id.clone());
         let mut assistant = Vec::with_capacity(self.opaque.len().saturating_add(1));
-        if self.structured {
+        // A structured turn that only emits function calls carries no text;
+        // the host resolves the tool calls and the JSON arrives on a later turn.
+        if self.structured && !self.text.is_empty() {
             let value = RawJson::parse(self.text.as_bytes())
                 .map_err(|_| StreamNormError::response("structured output is not valid JSON"))?;
             assistant.push(ContentBlock::Json(JsonBlock::new(value)));
-        } else if !self.text.is_empty() {
+        } else if !self.structured && !self.text.is_empty() {
             assistant.push(ContentBlock::Text(
                 TextBlock::try_new(self.text.as_str()).map_err(|_| {
                     StreamNormError::response("assistant text exceeds the kernel bound")
@@ -408,6 +437,24 @@ impl GeminiGenerateContentAssembly {
         RawJson::parse(bytes.as_slice())
             .map_err(|_| StreamNormError::response("provider continuation is not canonical JSON"))
     }
+}
+
+/// The text of a part whose only key is `text`, or `None` for any other part.
+fn plain_text_part(part: &Value) -> Option<&str> {
+    let object = part.as_object()?;
+    if object.len() != 1 {
+        return None;
+    }
+    object.get("text")?.as_str()
+}
+
+/// Mutable access to the `text` value of a part whose only key is `text`.
+fn plain_text_slot(part: &mut Value) -> Option<&mut Value> {
+    let object = part.as_object_mut()?;
+    if object.len() != 1 {
+        return None;
+    }
+    object.get_mut("text")
 }
 
 fn opaque_block(media_type: &str, value: &Value) -> Result<OpaqueBlock, StreamNormError> {
@@ -735,6 +782,124 @@ mod tests {
         ));
 
         let mut assembly = GeminiGenerateContentAssembly::new("request-2".to_owned(), true);
-        assert!(assembly.consume(CHUNK_STOP).is_err());
+        assembly
+            .consume(
+                r#"{"candidates":[{"content":{"role":"model","parts":[{"text":"{bad"}]},"index":0}],"responseId":"resp-1"}"#,
+            )
+            .unwrap();
+        let error = assembly
+            .consume(CHUNK_STOP)
+            .expect_err("truncated JSON text");
+        assert_eq!(error.kind, crate::StreamNormKind::Response);
+        assert!(!assembly.completed());
+    }
+
+    #[test]
+    fn structured_function_call_only_completes() {
+        let mut assembly = GeminiGenerateContentAssembly::new("request-1".to_owned(), true);
+        let items = assembly
+            .consume(
+                r#"{"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"id":"fc-1","name":"lookup","args":{"q":"x"}}}]},"index":0}],"responseId":"resp-1"}"#,
+            )
+            .unwrap();
+        assert!(matches!(items[0], ModelStreamItem::ToolCallDelta(_)));
+        let last = assembly.consume(CHUNK_STOP).unwrap();
+        let ModelStreamItem::Completed(response) = &last[1] else {
+            panic!("expected completed item");
+        };
+        assert!(assembly.completed());
+        assert!(
+            !response
+                .assistant_content
+                .iter()
+                .any(|block| matches!(block, ContentBlock::Json(_))),
+            "a tool-only structured turn must not synthesize a JSON block"
+        );
+        assert_eq!(response.tool_calls.len(), 1);
+        assert_eq!(response.tool_calls[0].name.as_ref(), "lookup");
+        assert_eq!(response.tool_calls[0].arguments.as_str(), r#"{"q":"x"}"#);
+    }
+
+    #[test]
+    fn consecutive_text_parts_merge_in_continuation() {
+        let mut assembly = GeminiGenerateContentAssembly::new("request-1".to_owned(), false);
+        assembly.consume(CHUNK_TEXT_ONE).unwrap();
+        assembly.consume(CHUNK_TEXT_TWO).unwrap();
+        assembly
+            .consume(
+                r#"{"candidates":[{"content":{"role":"model","parts":[{"text":"!"}]},"index":0}],"responseId":"resp-1"}"#,
+            )
+            .unwrap();
+        let last = assembly.consume(CHUNK_STOP).unwrap();
+        let ModelStreamItem::Completed(response) = &last[1] else {
+            panic!("expected completed item");
+        };
+        let ContentBlock::Text(text) = &response.assistant_content[0] else {
+            panic!("expected assistant text");
+        };
+        assert_eq!(text.text(), "Hello world!");
+        let continuation = response
+            .continuation_state
+            .as_ref()
+            .expect("continuation state");
+        let envelope: Value = serde_json::from_str(continuation.as_str()).unwrap();
+        let parts = envelope["replay_contents"][0]["parts"]
+            .as_array()
+            .expect("replay parts");
+        assert_eq!(parts.len(), 1, "three text chunks must fold into one part");
+        assert_eq!(parts[0], json!({"text": "Hello world!"}));
+    }
+
+    #[test]
+    fn signature_parts_are_not_merged() {
+        let mut assembly = GeminiGenerateContentAssembly::new("request-1".to_owned(), false);
+        assembly.consume(CHUNK_TEXT_ONE).unwrap();
+        assembly
+            .consume(
+                r#"{"candidates":[{"content":{"role":"model","parts":[{"text":"signed","thoughtSignature":"c2ln-fixture-001"}]},"index":0}],"responseId":"resp-1"}"#,
+            )
+            .unwrap();
+        assembly
+            .consume(
+                r#"{"candidates":[{"content":{"role":"model","parts":[{"text":"hidden","thought":true}]},"index":0}],"responseId":"resp-1"}"#,
+            )
+            .unwrap();
+        assembly.consume(CHUNK_TEXT_TWO).unwrap();
+        let last = assembly.consume(CHUNK_STOP).unwrap();
+        let ModelStreamItem::Completed(response) = &last[1] else {
+            panic!("expected completed item");
+        };
+        let continuation = response
+            .continuation_state
+            .as_ref()
+            .expect("continuation state");
+        let envelope: Value = serde_json::from_str(continuation.as_str()).unwrap();
+        let parts = envelope["replay_contents"][0]["parts"]
+            .as_array()
+            .expect("replay parts");
+        assert_eq!(
+            parts,
+            &vec![
+                json!({"text": "Hello "}),
+                json!({"text": "signed", "thoughtSignature": "c2ln-fixture-001"}),
+                json!({"text": "hidden", "thought": true}),
+                json!({"text": "world"}),
+            ]
+        );
+    }
+
+    #[test]
+    fn max_tokens_is_incomplete_error() {
+        let mut assembly = GeminiGenerateContentAssembly::new("request-1".to_owned(), false);
+        assembly.consume(CHUNK_TEXT_ONE).unwrap();
+        let error = assembly
+            .consume(
+                r#"{"candidates":[{"content":{"role":"model","parts":[{"text":"trunc"}]},"finishReason":"MAX_TOKENS","index":0}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5,"totalTokenCount":15},"responseId":"resp-1"}"#,
+            )
+            .expect_err("MAX_TOKENS must not complete");
+        assert_eq!(error.kind, crate::StreamNormKind::Incomplete);
+        assert!(!error.retryable);
+        assert!(!assembly.completed());
+        assert!(assembly.finish().is_err());
     }
 }
