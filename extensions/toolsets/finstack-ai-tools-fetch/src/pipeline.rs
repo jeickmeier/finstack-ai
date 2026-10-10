@@ -6,14 +6,14 @@
 //! codes); see the task brief for the numbered steps this module implements.
 
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use finstack_ai_kernel::{ErrorCategory, Metadata, Timestamp};
+use finstack_ai_kernel::{ErrorCategory, Metadata};
 use finstack_ai_net_guard::{
     BodyReadInterrupt, HostResolver, NetGuardError, UrlPolicy, VettedUrl, parse_and_vet_url,
     pinned_client, read_body_bounded_interruptible, resolve_and_pin,
 };
 use finstack_ai_runtime::artifact::ArtifactStore;
+use finstack_ai_runtime::ids::{Clock, SystemClock};
 use finstack_ai_runtime::ports::tool::{ToolCallContext, ToolError};
 use futures_util::StreamExt;
 use reqwest::header::{HeaderName, HeaderValue};
@@ -60,33 +60,19 @@ fn tool_error(
         .unwrap_or_else(Into::into)
 }
 
-fn deadline_elapsed(deadline: Option<Timestamp>) -> bool {
-    let Some(deadline) = deadline else {
-        return false;
-    };
-    now_unix_ms() >= deadline.as_unix_ms()
-}
-
-async fn wait_deadline(deadline: Option<Timestamp>) {
-    let Some(deadline) = deadline else {
-        std::future::pending::<()>().await;
-        return;
-    };
-    let remaining = deadline.as_unix_ms().saturating_sub(now_unix_ms());
-    let millis = u64::try_from(remaining).unwrap_or(0);
-    if millis == 0 {
-        return;
+/// Synchronous cancellation/deadline gate, evaluated before any network
+/// activity so an already-interrupted call never reaches the wire.
+///
+/// A clock that cannot produce a timestamp is treated as an elapsed
+/// deadline (fail closed), matching `RunCallContext::wait_deadline`.
+fn check_interrupted(ctx: &ToolCallContext) -> Result<(), ToolError> {
+    let interrupted = SystemClock
+        .now()
+        .map_or(true, |now| ctx.run.is_interrupted(now));
+    if interrupted {
+        return Err(timeout_error());
     }
-    tokio::time::sleep(Duration::from_millis(millis)).await;
-}
-
-fn now_unix_ms() -> i64 {
-    i64::try_from(
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |duration| duration.as_millis()),
-    )
-    .unwrap_or(i64::MAX)
+    Ok(())
 }
 
 fn timeout_error() -> ToolError {
@@ -164,8 +150,7 @@ async fn rejection_detail(response: reqwest::Response, ctx: &ToolCallContext) ->
     let mut stream = response.bytes_stream();
     loop {
         let next = tokio::select! {
-            () = ctx.run.cancellation.cancelled() => break,
-            () = wait_deadline(ctx.run.deadline) => break,
+            () = ctx.run.interrupted() => break,
             chunk = stream.next() => chunk,
         };
         let Some(Ok(chunk)) = next else {
@@ -258,8 +243,7 @@ async fn send_hop(
 
     let resolve = resolve_and_pin(current, state.resolver.as_ref());
     let addr = tokio::select! {
-        () = ctx.run.cancellation.cancelled() => return Err(timeout_error()),
-        () = wait_deadline(ctx.run.deadline) => return Err(timeout_error()),
+        () = ctx.run.interrupted() => return Err(timeout_error()),
         result = resolve => result.map_err(|e| map_vet_error(&e))?,
     };
     let client = pinned_client(current, addr, state.config.request_timeout)
@@ -290,8 +274,7 @@ async fn send_hop(
 
     let send = request.send();
     tokio::select! {
-        () = ctx.run.cancellation.cancelled() => Err(timeout_error()),
-        () = wait_deadline(ctx.run.deadline) => Err(timeout_error()),
+        () = ctx.run.interrupted() => Err(timeout_error()),
         result = send => result.map_err(|_| tool_error(
             FETCH_TRANSPORT_FAILED,
             ErrorCategory::Tool,
@@ -379,9 +362,7 @@ pub(crate) async fn execute_fetch(
     // requests are allowed in total (the initial request plus each follow).
     let mut hop = 0usize;
     let (status, response, vetted) = loop {
-        if ctx.run.cancellation.is_cancelled() || deadline_elapsed(ctx.run.deadline) {
-            return Err(timeout_error());
-        }
+        check_interrupted(ctx)?;
 
         let response = send_hop(state, ctx, &current, origin_is_loopback, user_agent).await?;
         let status = response.status();
@@ -420,7 +401,7 @@ pub(crate) async fn execute_fetch(
         effective_cap,
         BodyReadInterrupt::new(
             async move { cancellation.cancelled().await },
-            wait_deadline(ctx.run.deadline),
+            ctx.run.wait_deadline(),
         ),
     )
     .await

@@ -19,6 +19,7 @@ use finstack_ai_runtime::ports::model::{
 };
 use finstack_ai_runtime::ports::tool::{
     ToolCallContext, ToolError, ToolEventStream, ToolStreamItem, Toolset, ToolsetDescriptor,
+    verify_authority,
 };
 use futures_util::stream;
 use serde::Deserialize;
@@ -265,30 +266,19 @@ impl Toolset for HttpFetchToolset {
     }
 }
 
+/// Check the committed authority first (`tool_policy_denied` on a principal
+/// scope mismatch), then the tool identity carried by the validated call.
 fn validate_call_context(
     ctx: &ToolCallContext,
     call: &ValidatedToolCall,
     expected_id: &ToolId,
 ) -> Result<(), ToolError> {
+    verify_authority(ctx)?;
     if call.tool_id != *expected_id || call.call.tool_name() != TOOL_NAME {
         return Err(tool_error(
             FETCH_INVALID_ARGUMENTS,
             ErrorCategory::Validation,
             "http fetch call identity is invalid",
-        ));
-    }
-    let locator_scope = ctx.run.locator.tenant_scope.as_ref();
-    if ctx
-        .run
-        .authorization
-        .principal
-        .tenant_scope()
-        .is_some_and(|scope| scope != locator_scope)
-    {
-        return Err(tool_error(
-            FETCH_INVALID_ARGUMENTS,
-            ErrorCategory::Validation,
-            "http fetch principal scope does not match the committed effect",
         ));
     }
     Ok(())

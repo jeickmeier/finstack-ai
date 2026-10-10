@@ -1,5 +1,4 @@
-use std::net::IpAddr;
-
+use finstack_ai_net_guard::{NetGuardError, UrlPolicy, validate_fixed_endpoint};
 use thiserror::Error;
 
 use crate::{OPENAI_MEDIA_CREDENTIAL_REQUIRED, OPENAI_MEDIA_ENDPOINT_INVALID};
@@ -10,6 +9,11 @@ pub(crate) const DEFAULT_ENDPOINT: &str = "https://api.openai.com";
 #[derive(Clone)]
 pub struct OpenAiMediaConfig {
     /// Explicit API key. Empty values fail closed.
+    ///
+    /// Construction validates the value as
+    /// [`SecretString`](finstack_ai_runtime::ports::model::SecretString) and stores it as
+    /// an `Authorization` [`HeaderValue`](reqwest::header::HeaderValue) so
+    /// the raw key is not cloned on every call.
     pub api_key: String,
     /// HTTPS endpoint, or loopback HTTP for scripted fixtures. Empty selects
     /// `https://api.openai.com`.
@@ -46,46 +50,33 @@ pub enum OpenAiMediaError {
     },
 }
 
+/// Validate the operator-configured endpoint through net-guard's fixed
+/// endpoint rules: `https` anywhere, plaintext `http` only on loopback, no
+/// userinfo, query, or fragment. A non-443 `https` port is accepted because
+/// `OpenAI`-compatible gateways commonly listen elsewhere.
 pub(crate) fn validate_endpoint(value: &str) -> Result<(), OpenAiMediaError> {
-    let Some((scheme, rest)) = value.split_once("://") else {
-        return Err(OpenAiMediaError::EndpointInvalid {
-            reason: "endpoint must be an http or https URL",
-        });
+    let policy = UrlPolicy {
+        allow_loopback_http: true,
+        allow_nonstandard_https_port: true,
     };
-    if !scheme.eq_ignore_ascii_case("http") && !scheme.eq_ignore_ascii_case("https") {
-        return Err(OpenAiMediaError::EndpointInvalid {
-            reason: "endpoint must be an http or https URL",
-        });
-    }
-    if rest.contains('@') || rest.contains('?') || rest.contains('#') {
-        return Err(OpenAiMediaError::EndpointInvalid {
-            reason: "endpoint contains forbidden components",
-        });
-    }
-    let host = endpoint_host(rest).ok_or(OpenAiMediaError::EndpointInvalid {
-        reason: "endpoint host is missing",
-    })?;
-    if scheme.eq_ignore_ascii_case("http") && !is_loopback_host(host) {
-        return Err(OpenAiMediaError::EndpointInvalid {
-            reason: "plaintext HTTP is allowed only for loopback endpoints",
-        });
-    }
-    Ok(())
+    validate_fixed_endpoint(value, &policy)
+        .map(drop)
+        .map_err(|error| OpenAiMediaError::EndpointInvalid {
+            reason: endpoint_reason(&error),
+        })
 }
 
-fn endpoint_host(rest: &str) -> Option<&str> {
-    if let Some(rest) = rest.strip_prefix('[') {
-        return rest.split(']').next().filter(|host| !host.is_empty());
+/// Map a net-guard rejection onto the crate's stable, non-secret reasons.
+fn endpoint_reason(error: &NetGuardError) -> &'static str {
+    match error {
+        NetGuardError::InvalidUrl { reason } => match *reason {
+            "plaintext_http_forbidden" => "plaintext HTTP is allowed only for loopback endpoints",
+            "userinfo_forbidden" | "fragment_forbidden" | "query_forbidden" => {
+                "endpoint contains forbidden components"
+            }
+            "host_missing" | "port_missing" => "endpoint host is missing",
+            _ => "endpoint must be an http or https URL",
+        },
+        _ => "endpoint is invalid",
     }
-    rest.split(['/', ':'])
-        .next()
-        .filter(|host| !host.is_empty())
-}
-
-fn is_loopback_host(host: &str) -> bool {
-    let host = host
-        .strip_prefix('[')
-        .map_or(host, |rest| rest.strip_suffix(']').unwrap_or(rest));
-    host.eq_ignore_ascii_case("localhost")
-        || host.parse::<IpAddr>().is_ok_and(|addr| addr.is_loopback())
 }

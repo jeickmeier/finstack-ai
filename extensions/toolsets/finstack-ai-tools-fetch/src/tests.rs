@@ -288,6 +288,21 @@ fn tool_spec_is_valid_and_read_only() {
 }
 
 #[tokio::test]
+async fn principal_scope_mismatch_is_policy_denied() {
+    let toolset = HttpFetchToolset::try_new(config_with(&["docs.rs"])).unwrap();
+    let spec = toolset.tools()[0].clone();
+    let call = call_for(&spec, br#"{"url":"https://docs.rs/"}"#);
+    let mut ctx = tool_context();
+    ctx.run.authorization.principal =
+        PrincipalRef::try_new("issuer", "subject", Some("tenant-b")).expect("principal");
+    let error = drive_to_error_with_ctx(&toolset, ctx, call).await;
+    assert_eq!(
+        error.code(),
+        finstack_ai_runtime::ports::tool::TOOL_POLICY_DENIED
+    );
+}
+
+#[tokio::test]
 async fn unknown_argument_fields_are_rejected() {
     let toolset = HttpFetchToolset::try_new(config_with(&["docs.rs"])).unwrap();
     let spec = toolset.tools()[0].clone();

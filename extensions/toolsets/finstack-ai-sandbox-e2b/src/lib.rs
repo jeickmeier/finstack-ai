@@ -25,15 +25,17 @@
 // Allow expect() in doc tests (they are test code)
 #![doc(test(attr(allow(clippy::expect_used))))]
 
-use std::net::IpAddr;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use finstack_ai_kernel::{
-    ErrorCategory, Metadata, RawJson, RetrySafety, Timestamp, ToolExecutionMode, ToolId,
-    ValidatedToolCall,
+    ErrorCategory, Metadata, RawJson, RetrySafety, ToolExecutionMode, ToolId, ValidatedToolCall,
 };
-use finstack_ai_net_guard::{BodyReadInterrupt, NetGuardError, read_body_bounded_interruptible};
+use finstack_ai_net_guard::{
+    BodyReadInterrupt, NetGuardError, UrlPolicy, read_body_bounded_interruptible,
+    validate_fixed_endpoint,
+};
+use finstack_ai_runtime::ids::{Clock, SystemClock};
 use finstack_ai_runtime::ports::PortFuture;
 use finstack_ai_runtime::ports::model::{
     ApprovalMetadata, ApprovalRequirement, SideEffectClass, ToolDeferralSupport, ToolSpec,
@@ -130,6 +132,16 @@ impl E2bSandboxToolset {
     /// Returns [`E2bSandboxError::EndpointInvalid`] for a non-HTTP URL, userinfo,
     /// query, fragment, or plaintext HTTP off loopback.
     pub fn try_new(config: E2bSandboxConfig) -> Result<Self, E2bSandboxError> {
+        Self::try_new_with_request_timeout(config, REQUEST_TIMEOUT)
+    }
+
+    /// [`E2bSandboxToolset::try_new`] with an explicit per-request HTTP
+    /// timeout. Tests use a short timeout to exercise the transport-timeout
+    /// path without waiting out the production value.
+    fn try_new_with_request_timeout(
+        config: E2bSandboxConfig,
+        request_timeout: Duration,
+    ) -> Result<Self, E2bSandboxError> {
         if config.api_key.is_empty() {
             return Err(E2bSandboxError::CredentialRequired);
         }
@@ -184,7 +196,7 @@ impl E2bSandboxToolset {
         let client = reqwest::Client::builder()
             .http1_only()
             .redirect(reqwest::redirect::Policy::none())
-            .timeout(REQUEST_TIMEOUT)
+            .timeout(request_timeout)
             .build()
             .map_err(|_| E2bSandboxError::EndpointInvalid {
                 reason: "http_client",
@@ -274,23 +286,19 @@ impl Toolset for E2bSandboxToolset {
             .await?;
             let sandbox_id = accept_sandbox_id(&created.sandbox_id)?;
             let encoded_id = percent_encode_path_segment(sandbox_id);
-            let ran = match post_json::<RunCommandResponse>(
+            // The sandbox exists from here on, so it is released after the
+            // run attempt whatever the outcome; only a failed create skips
+            // the delete because there is nothing to release.
+            let ran = post_json::<RunCommandResponse>(
                 &client,
                 &api_key,
                 &format!("{endpoint}/sandboxes/{encoded_id}/run"),
                 &serde_json::json!({ "command": arguments.command }),
                 &ctx,
             )
-            .await
-            {
-                Ok(ran) => ran,
-                Err(error) => {
-                    if error.code() == E2B_TIMEOUT {
-                        delete_sandbox_best_effort(&client, &api_key, &endpoint, &encoded_id).await;
-                    }
-                    return Err(error);
-                }
-            };
+            .await;
+            delete_sandbox_best_effort(&client, &api_key, &endpoint, &encoded_id).await;
+            let ran = ran?;
             let output = serde_json::to_vec(&serde_json::json!({
                 "sandbox_id": sandbox_id,
                 "stdout": ran.stdout,
@@ -327,9 +335,7 @@ async fn post_json<T: for<'de> Deserialize<'de>>(
     body: &serde_json::Value,
     ctx: &ToolCallContext,
 ) -> Result<T, ToolError> {
-    if ctx.run.cancellation.is_cancelled() || deadline_elapsed(ctx.run.deadline) {
-        return Err(timeout_error());
-    }
+    check_interrupted(ctx)?;
     let send = client
         .post(url)
         .header("X-API-Key", api_key)
@@ -337,14 +343,17 @@ async fn post_json<T: for<'de> Deserialize<'de>>(
         .json(body)
         .send();
     let response = tokio::select! {
-        () = ctx.run.cancellation.cancelled() => return Err(timeout_error()),
-        () = wait_deadline(ctx.run.deadline) => return Err(timeout_error()),
-        result = send => result.map_err(|_| {
-            tool_error(
-                E2B_TRANSPORT_FAILED,
-                ErrorCategory::Tool,
-                "e2b request failed",
-            )
+        () = ctx.run.interrupted() => return Err(timeout_error()),
+        result = send => result.map_err(|error| {
+            if error.is_timeout() {
+                timeout_error()
+            } else {
+                tool_error(
+                    E2B_TRANSPORT_FAILED,
+                    ErrorCategory::Tool,
+                    "e2b request failed",
+                )
+            }
         })?,
     };
     let status = response.status();
@@ -368,7 +377,7 @@ async fn read_bounded_json<T: for<'de> Deserialize<'de>>(
         MAX_RESULT_BYTES,
         BodyReadInterrupt::new(
             async move { cancellation.cancelled().await },
-            wait_deadline(ctx.run.deadline),
+            ctx.run.wait_deadline(),
         ),
     )
     .await
@@ -394,33 +403,19 @@ async fn read_bounded_json<T: for<'de> Deserialize<'de>>(
     })
 }
 
-fn deadline_elapsed(deadline: Option<Timestamp>) -> bool {
-    let Some(deadline) = deadline else {
-        return false;
-    };
-    now_unix_ms() >= deadline.as_unix_ms()
-}
-
-async fn wait_deadline(deadline: Option<Timestamp>) {
-    let Some(deadline) = deadline else {
-        std::future::pending::<()>().await;
-        return;
-    };
-    let remaining = deadline.as_unix_ms().saturating_sub(now_unix_ms());
-    let millis = u64::try_from(remaining).unwrap_or(0);
-    if millis == 0 {
-        return;
+/// Synchronous cancellation/deadline gate, evaluated before any network
+/// activity so an already-interrupted call never reaches the wire.
+///
+/// A clock that cannot produce a timestamp is treated as an elapsed
+/// deadline (fail closed), matching `RunCallContext::wait_deadline`.
+fn check_interrupted(ctx: &ToolCallContext) -> Result<(), ToolError> {
+    let interrupted = SystemClock
+        .now()
+        .map_or(true, |now| ctx.run.is_interrupted(now));
+    if interrupted {
+        return Err(timeout_error());
     }
-    tokio::time::sleep(Duration::from_millis(millis)).await;
-}
-
-fn now_unix_ms() -> i64 {
-    i64::try_from(
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |duration| duration.as_millis()),
-    )
-    .unwrap_or(i64::MAX)
+    Ok(())
 }
 
 fn accept_sandbox_id(value: &str) -> Result<&str, ToolError> {
@@ -469,48 +464,35 @@ fn timeout_error() -> ToolError {
     )
 }
 
+/// Validate the operator-configured endpoint through net-guard's fixed
+/// endpoint rules: `https` anywhere, plaintext `http` only on loopback, no
+/// userinfo, query, or fragment. A non-443 `https` port is accepted because
+/// self-hosted E2B deployments commonly listen elsewhere.
 fn validate_endpoint(value: &str) -> Result<(), E2bSandboxError> {
-    let Some((scheme, rest)) = value.split_once("://") else {
-        return Err(E2bSandboxError::EndpointInvalid {
-            reason: "endpoint must be an http or https URL",
-        });
+    let policy = UrlPolicy {
+        allow_loopback_http: true,
+        allow_nonstandard_https_port: true,
     };
-    if !scheme.eq_ignore_ascii_case("http") && !scheme.eq_ignore_ascii_case("https") {
-        return Err(E2bSandboxError::EndpointInvalid {
-            reason: "endpoint must be an http or https URL",
-        });
-    }
-    if rest.contains('@') || rest.contains('?') || rest.contains('#') {
-        return Err(E2bSandboxError::EndpointInvalid {
-            reason: "endpoint contains forbidden components",
-        });
-    }
-    let host = endpoint_host(rest).ok_or(E2bSandboxError::EndpointInvalid {
-        reason: "endpoint host is missing",
-    })?;
-    if scheme.eq_ignore_ascii_case("http") && !is_loopback_host(host) {
-        return Err(E2bSandboxError::EndpointInvalid {
-            reason: "plaintext HTTP is allowed only for loopback endpoints",
-        });
-    }
-    Ok(())
+    validate_fixed_endpoint(value, &policy)
+        .map(drop)
+        .map_err(|error| E2bSandboxError::EndpointInvalid {
+            reason: endpoint_reason(&error),
+        })
 }
 
-fn endpoint_host(rest: &str) -> Option<&str> {
-    if let Some(rest) = rest.strip_prefix('[') {
-        return rest.split(']').next().filter(|host| !host.is_empty());
+/// Map a net-guard rejection onto the crate's stable, non-secret reasons.
+fn endpoint_reason(error: &NetGuardError) -> &'static str {
+    match error {
+        NetGuardError::InvalidUrl { reason } => match *reason {
+            "plaintext_http_forbidden" => "plaintext HTTP is allowed only for loopback endpoints",
+            "userinfo_forbidden" | "fragment_forbidden" | "query_forbidden" => {
+                "endpoint contains forbidden components"
+            }
+            "host_missing" | "port_missing" => "endpoint host is missing",
+            _ => "endpoint must be an http or https URL",
+        },
+        _ => "endpoint is invalid",
     }
-    rest.split(['/', ':'])
-        .next()
-        .filter(|host| !host.is_empty())
-}
-
-fn is_loopback_host(host: &str) -> bool {
-    let host = host
-        .strip_prefix('[')
-        .map_or(host, |rest| rest.strip_suffix(']').unwrap_or(rest));
-    host.eq_ignore_ascii_case("localhost")
-        || host.parse::<IpAddr>().is_ok_and(|addr| addr.is_loopback())
 }
 
 fn tool_error(code: &'static str, category: ErrorCategory, message: &'static str) -> ToolError {
@@ -524,7 +506,7 @@ mod tests {
     use std::time::Duration;
 
     use finstack_ai_kernel::{
-        Digest, EffectId, EffectOutputContract, EffectOutputKind, LaneId, Metadata,
+        Digest, EffectId, EffectOutputContract, EffectOutputKind, ErrorCategory, LaneId, Metadata,
         OperationLocator, PrincipalRef, RawJson, RunId, SessionId, ToolBatchId, ToolCallBlock,
         ToolCallId, ToolFailurePolicy, ValidatedToolCall,
     };
@@ -943,6 +925,125 @@ mod tests {
         assert!(
             delete.contains("delete /sandboxes/sbx-1"),
             "cancelled run must DELETE the sandbox: {delete}"
+        );
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn successful_run_deletes_the_sandbox() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let (seen_tx, mut seen_rx) = mpsc::unbounded_channel();
+        let server = tokio::spawn(async move {
+            respond(&listener, &seen_tx, 201, r#"{"sandbox_id":"sbx-1"}"#).await;
+            respond(&listener, &seen_tx, 200, r#"{"stdout":"ok","exit_code":0}"#).await;
+            respond(&listener, &seen_tx, 204, "").await;
+        });
+        let tools = E2bSandboxToolset::try_new(E2bSandboxConfig {
+            api_key: CANARY.into(),
+            endpoint: format!("http://{addr}"),
+            template: None,
+        })
+        .expect("tools");
+        let spec = &tools.tools()[0];
+        let call = ValidatedToolCall {
+            call: ToolCallBlock::try_new(
+                ToolCallId::from_bytes([6; 16]),
+                TOOL_NAME,
+                RawJson::parse(br#"{"command":"echo hi"}"#).expect("args"),
+            )
+            .expect("call"),
+            tool_id: spec.id.clone(),
+            component: None,
+            output_contract: EffectOutputContract {
+                kind: EffectOutputKind::ToolResult,
+                schema_version: 1,
+                schema_digest: Digest::raw_json(b"{}"),
+            },
+            retry_safety: spec.retry_safety,
+            deadline: None,
+            execution: spec.execution,
+            failure_policy: ToolFailurePolicy::ReturnToModel,
+        };
+        let mut stream = tools
+            .call(tool_context(), call)
+            .await
+            .expect("call started");
+        let item = stream.next().await.expect("item").expect("ok");
+        let crate::ToolStreamItem::Completed(result) = item else {
+            panic!("expected completion");
+        };
+        assert!(!result.is_error);
+        let create = seen_rx.recv().await.expect("create").to_ascii_lowercase();
+        let run = seen_rx.recv().await.expect("run").to_ascii_lowercase();
+        let delete = tokio::time::timeout(Duration::from_secs(3), seen_rx.recv())
+            .await
+            .expect("delete arrived")
+            .expect("delete")
+            .to_ascii_lowercase();
+        assert!(create.contains("post /sandboxes"));
+        assert!(run.contains("post /sandboxes/sbx-1/run"));
+        assert!(
+            delete.contains("delete /sandboxes/sbx-1"),
+            "successful run must DELETE the sandbox: {delete}"
+        );
+        server.await.expect("server");
+    }
+
+    #[tokio::test]
+    async fn reqwest_timeout_maps_to_e2b_timeout() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let (seen_tx, mut seen_rx) = mpsc::unbounded_channel();
+        // The fixture reads the create request and then never answers, so
+        // the client's own request timeout is what ends the call.
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("accept");
+            let mut buf = vec![0_u8; 8_192];
+            let n = stream.read(&mut buf).await.unwrap_or(0);
+            let _ = seen_tx.send(String::from_utf8_lossy(&buf[..n]).into_owned());
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            drop(stream);
+        });
+        let tools = E2bSandboxToolset::try_new_with_request_timeout(
+            E2bSandboxConfig {
+                api_key: CANARY.into(),
+                endpoint: format!("http://{addr}"),
+                template: None,
+            },
+            Duration::from_millis(200),
+        )
+        .expect("tools");
+        let spec = &tools.tools()[0];
+        let call = ValidatedToolCall {
+            call: ToolCallBlock::try_new(
+                ToolCallId::from_bytes([6; 16]),
+                TOOL_NAME,
+                RawJson::parse(br#"{"command":"echo hi"}"#).expect("args"),
+            )
+            .expect("call"),
+            tool_id: spec.id.clone(),
+            component: None,
+            output_contract: EffectOutputContract {
+                kind: EffectOutputKind::ToolResult,
+                schema_version: 1,
+                schema_digest: Digest::raw_json(b"{}"),
+            },
+            retry_safety: spec.retry_safety,
+            deadline: None,
+            execution: spec.execution,
+            failure_policy: ToolFailurePolicy::ReturnToModel,
+        };
+        let Err(error) = tools.call(tool_context(), call).await else {
+            panic!("stalled create must fail");
+        };
+        assert_eq!(error.code(), crate::E2B_TIMEOUT);
+        assert_eq!(error.category(), ErrorCategory::Deadline);
+        let create = seen_rx.recv().await.expect("create").to_ascii_lowercase();
+        assert!(create.contains("post /sandboxes"));
+        assert!(
+            seen_rx.try_recv().is_err(),
+            "a failed create has no sandbox to delete"
         );
         server.abort();
     }

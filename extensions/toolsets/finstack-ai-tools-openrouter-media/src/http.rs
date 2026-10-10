@@ -1,20 +1,21 @@
 //! Shared `OpenRouter` media HTTP helpers (`send_json` / `send_bytes`).
 
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use base64::Engine as _;
 pub(crate) use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-use finstack_ai_kernel::{ArtifactRef, ErrorCategory, Metadata, Sensitivity, Timestamp};
+use finstack_ai_kernel::{ArtifactRef, ErrorCategory, Metadata, Sensitivity};
 use finstack_ai_net_guard::{BodyReadInterrupt, NetGuardError, read_body_bounded_interruptible};
 use finstack_ai_runtime::Bytes;
 use finstack_ai_runtime::artifact::{
-    ArtifactMetadata, ArtifactScope, ArtifactStore, stage_required_artifact,
+    ArtifactError, ArtifactMetadata, ArtifactScope, ArtifactStore, stage_required_artifact,
 };
+use finstack_ai_runtime::ids::{Clock, SystemClock};
 use finstack_ai_runtime::ports::tool::{ToolCallContext, ToolError};
 use futures_util::StreamExt;
 use reqwest::header::HeaderValue;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::config::{
     MAX_RESULT_BYTES_CEILING, OPENROUTER_MEDIA_LIMIT_EXCEEDED, OPENROUTER_MEDIA_TIMEOUT,
@@ -38,7 +39,6 @@ pub(crate) struct Route {
     pub(crate) client: reqwest::Client,
     pub(crate) authorization: HeaderValue,
     pub(crate) endpoint: String,
-    pub(crate) endpoint_is_loopback: bool,
     pub(crate) referer: Option<String>,
     pub(crate) title: Option<String>,
     pub(crate) max_result_bytes: usize,
@@ -151,12 +151,17 @@ pub(crate) async fn deliver_media(
         },
     )
     .await
-    .map_err(|_| {
-        tool_error(
+    .map_err(|error| match error {
+        ArtifactError::TooLarge { .. } => tool_error(
             OPENROUTER_MEDIA_LIMIT_EXCEEDED,
+            ErrorCategory::Limit,
+            "openrouter media result exceeds the artifact store limit",
+        ),
+        _ => tool_error(
+            OPENROUTER_MEDIA_TRANSPORT_FAILED,
             ErrorCategory::Tool,
             "openrouter media artifact staging failed",
-        )
+        ),
     })?;
     Ok(DeliveredMedia {
         value: serde_json::json!({
@@ -168,16 +173,17 @@ pub(crate) async fn deliver_media(
     })
 }
 
-async fn dispatch(
+/// Serialize the request body exactly once; callers hand over a borrowing
+/// `Serialize` value rather than a pre-built `serde_json::Value` so large
+/// payloads (base64 audio) are neither cloned into a tree nor encoded twice.
+async fn dispatch<B: Serialize + ?Sized>(
     route: &Route,
     method: reqwest::Method,
     url: &str,
-    body: Option<&serde_json::Value>,
+    body: Option<&B>,
     ctx: &ToolCallContext,
 ) -> Result<reqwest::Response, ToolError> {
-    if ctx.run.cancellation.is_cancelled() || deadline_elapsed(ctx.run.deadline) {
-        return Err(timeout_error());
-    }
+    check_interrupted(ctx)?;
     let mut request = route
         .client
         .request(method, url)
@@ -189,14 +195,20 @@ async fn dispatch(
         request = request.header("X-Title", title);
     }
     if let Some(body) = body {
+        let bytes = serde_json::to_vec(body).map_err(|_| {
+            tool_error(
+                OPENROUTER_MEDIA_TRANSPORT_FAILED,
+                ErrorCategory::Internal,
+                "openrouter media request serialization failed",
+            )
+        })?;
         request = request
             .header("Content-Type", "application/json")
-            .json(body);
+            .body(bytes);
     }
     let send = request.send();
     let response = tokio::select! {
-        () = ctx.run.cancellation.cancelled() => return Err(timeout_error()),
-        () = wait_deadline(ctx.run.deadline) => return Err(timeout_error()),
+        () = ctx.run.interrupted() => return Err(timeout_error()),
         result = send => result.map_err(|_| {
             tool_error(
                 OPENROUTER_MEDIA_TRANSPORT_FAILED,
@@ -212,11 +224,11 @@ async fn dispatch(
     Ok(response)
 }
 
-pub(crate) async fn send_bytes(
+pub(crate) async fn send_bytes<B: Serialize + ?Sized>(
     route: &Route,
     method: reqwest::Method,
     url: &str,
-    body: Option<&serde_json::Value>,
+    body: Option<&B>,
     ctx: &ToolCallContext,
     cap: usize,
 ) -> Result<(Vec<u8>, Option<String>), ToolError> {
@@ -230,11 +242,11 @@ pub(crate) async fn send_bytes(
     Ok((bytes, content_type))
 }
 
-pub(crate) async fn send_json<T: for<'de> Deserialize<'de>>(
+pub(crate) async fn send_json<T: for<'de> Deserialize<'de>, B: Serialize + ?Sized>(
     route: &Route,
     method: reqwest::Method,
     url: &str,
-    body: Option<&serde_json::Value>,
+    body: Option<&B>,
     ctx: &ToolCallContext,
     cap: usize,
 ) -> Result<T, ToolError> {
@@ -260,7 +272,7 @@ async fn fetch_bytes_bounded(
         cap,
         BodyReadInterrupt::new(
             async move { cancellation.cancelled().await },
-            wait_deadline(ctx.run.deadline),
+            ctx.run.wait_deadline(),
         ),
     )
     .await
@@ -279,30 +291,19 @@ async fn fetch_bytes_bounded(
     })
 }
 
-pub(crate) fn deadline_elapsed(deadline: Option<Timestamp>) -> bool {
-    deadline.is_some_and(|deadline| now_unix_ms() >= deadline.as_unix_ms())
-}
-
-pub(crate) async fn wait_deadline(deadline: Option<Timestamp>) {
-    let Some(deadline) = deadline else {
-        std::future::pending::<()>().await;
-        return;
-    };
-    let remaining = deadline.as_unix_ms().saturating_sub(now_unix_ms());
-    let millis = u64::try_from(remaining).unwrap_or(0);
-    if millis == 0 {
-        return;
+/// Synchronous cancellation/deadline gate, evaluated before any network
+/// activity so an already-interrupted call never reaches the wire.
+///
+/// A clock that cannot produce a timestamp is treated as an elapsed
+/// deadline (fail closed), matching `RunCallContext::wait_deadline`.
+pub(crate) fn check_interrupted(ctx: &ToolCallContext) -> Result<(), ToolError> {
+    let interrupted = SystemClock
+        .now()
+        .map_or(true, |now| ctx.run.is_interrupted(now));
+    if interrupted {
+        return Err(timeout_error());
     }
-    tokio::time::sleep(Duration::from_millis(millis)).await;
-}
-
-fn now_unix_ms() -> i64 {
-    i64::try_from(
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |duration| duration.as_millis()),
-    )
-    .unwrap_or(i64::MAX)
+    Ok(())
 }
 
 pub(crate) fn timeout_error() -> ToolError {
@@ -351,8 +352,7 @@ async fn rejection_detail(response: reqwest::Response, ctx: &ToolCallContext) ->
     let mut stream = response.bytes_stream();
     loop {
         let next = tokio::select! {
-            () = ctx.run.cancellation.cancelled() => break,
-            () = wait_deadline(ctx.run.deadline) => break,
+            () = ctx.run.interrupted() => break,
             chunk = stream.next() => chunk,
         };
         let Some(Ok(chunk)) = next else {

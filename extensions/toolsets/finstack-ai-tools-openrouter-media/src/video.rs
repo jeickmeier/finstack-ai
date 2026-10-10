@@ -15,7 +15,7 @@ use crate::config::{
 };
 use crate::http::{
     BASE64_STANDARD, POLL_INTERVAL, Route, artifact_scope, deliver_media, invalid_arguments,
-    parse_arguments, send_bytes, send_json, timeout_error, tool_error, wait_deadline,
+    parse_arguments, send_bytes, send_json, timeout_error, tool_error,
 };
 
 pub(crate) const VIDEO_TOOL_ID: &str = "finstack.tools.openrouter_generate_video";
@@ -247,7 +247,7 @@ pub(crate) async fn handle_video_status(
             route,
             reqwest::Method::GET,
             &url,
-            None,
+            None::<&serde_json::Value>,
             ctx,
             MAX_RESULT_BYTES_CEILING,
         )
@@ -261,8 +261,7 @@ pub(crate) async fn handle_video_status(
             }));
         }
         tokio::select! {
-            () = ctx.run.cancellation.cancelled() => return Err(timeout_error()),
-            () = wait_deadline(ctx.run.deadline) => return Err(timeout_error()),
+            () = ctx.run.interrupted() => return Err(timeout_error()),
             () = tokio::time::sleep(POLL_INTERVAL) => {},
         }
     }
@@ -299,7 +298,7 @@ pub(crate) async fn handle_video_download(
         route,
         reqwest::Method::GET,
         &url,
-        None,
+        None::<&serde_json::Value>,
         ctx,
         store.limits().max_artifact_bytes,
     )
