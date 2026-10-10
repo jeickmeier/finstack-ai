@@ -6,7 +6,7 @@
 //! embedding index (its optional semantic leg only reads). Writes and
 //! reconciliation belong to the toolset and observer.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use finstack_ai_embeddings::embedder::TextEmbedder;
@@ -23,8 +23,13 @@ use finstack_ai_runtime::ports::context::{
     ContextProviderDescriptor, ContextRequest,
 };
 
-use crate::record::{MemoryBody, MemoryError, MemoryId, MemoryRecord, MemoryScope};
-use crate::store::{MatchEvidence, MemoryHit, MemoryQuery, MemoryStore};
+use crate::record::{
+    INLINE_BODY_MAX_BYTES, KEYWORD_MAX_BYTES, KEYWORDS_MAX_COUNT, MemoryBody, MemoryError,
+    MemoryId, MemoryRecord, MemoryScope,
+};
+use crate::store::{
+    MatchEvidence, MemoryHit, MemoryQuery, MemoryStore, MemoryStoreError, normalize_search_tokens,
+};
 
 /// Stable component identity for [`MemoryContextProvider`].
 const COMPONENT_ID: &str = "finstack.context.memory";
@@ -235,6 +240,35 @@ struct RecallEntry {
     item: ContextItem,
 }
 
+/// Keyword-leg tokens derived from `query`: the normalized search tokens
+/// (lowercased alphanumeric runs), minus any over [`KEYWORD_MAX_BYTES`],
+/// deduplicated, and capped at [`KEYWORDS_MAX_COUNT`] — always a query
+/// every store accepts, however long the user turn is.
+fn keyword_tokens(query: &str) -> Vec<Arc<str>> {
+    let mut seen = BTreeSet::new();
+    normalize_search_tokens(query)
+        .into_iter()
+        .filter(|token| token.len() <= KEYWORD_MAX_BYTES)
+        .filter(|token| seen.insert(token.clone()))
+        .take(KEYWORDS_MAX_COUNT)
+        .map(Arc::from)
+        .collect()
+}
+
+/// A lexical leg's outcome: a store that rejects the derived query
+/// (`InvalidRequest`) contributes nothing, exactly like the semantic leg,
+/// while a genuine store failure still fails the contribution.
+fn lexical_leg(
+    result: Result<Vec<MemoryHit>, MemoryStoreError>,
+    failure: &'static str,
+) -> Result<Vec<MemoryHit>, ContextError> {
+    match result {
+        Ok(hits) => Ok(hits),
+        Err(MemoryStoreError::InvalidRequest { .. }) => Ok(Vec::new()),
+        Err(_) => Err(contribution_invalid(failure)),
+    }
+}
+
 async fn search_candidates(
     store: &dyn MemoryStore,
     embedder: Option<&dyn TextEmbedder>,
@@ -242,24 +276,28 @@ async fn search_candidates(
     query: &str,
     limit: usize,
 ) -> Result<Vec<MemoryHit>, ContextError> {
-    let tokens: Arc<[Arc<str>]> = query
-        .split_whitespace()
-        .map(Arc::<str>::from)
-        .collect::<Vec<_>>()
-        .into();
-
-    let keyword_hits = store
-        .search(scope.clone(), MemoryQuery::Keywords(tokens), limit)
-        .await
-        .map_err(|_| contribution_invalid("memory keyword search failed"))?;
-    let full_text_hits = store
-        .search(
-            scope.clone(),
-            MemoryQuery::FullText(Arc::from(query)),
-            limit,
-        )
-        .await
-        .map_err(|_| contribution_invalid("memory full-text search failed"))?;
+    let tokens = keyword_tokens(query);
+    let keyword_hits = if tokens.is_empty() {
+        Vec::new()
+    } else {
+        lexical_leg(
+            store
+                .search(scope.clone(), MemoryQuery::Keywords(tokens.into()), limit)
+                .await,
+            "memory keyword search failed",
+        )?
+    };
+    let full_text = truncate_to_bytes(query, INLINE_BODY_MAX_BYTES);
+    let full_text_hits = lexical_leg(
+        store
+            .search(
+                scope.clone(),
+                MemoryQuery::FullText(Arc::from(full_text)),
+                limit,
+            )
+            .await,
+        "memory full-text search failed",
+    )?;
     let semantic_hits = match embedder {
         Some(embedder) => semantic_candidates(store, embedder, scope, query, limit).await,
         None => Vec::new(),
@@ -276,14 +314,16 @@ async fn search_candidates(
         }
         match merged.get_mut(&hit.record.id) {
             Some(existing) => {
-                existing.score = existing.score.max(hit.score);
                 // Keep the strongest evidence any leg produced for this
-                // record, not whichever hit happened to score higher.
-                // `score` is on a store-defined scale (a match count here, a
-                // rank position there), so choosing evidence by score would
-                // make recall order depend on which store is configured.
+                // record, together with the score that came with it, not
+                // whichever hit happened to score higher. `score` is on a
+                // store-defined scale (a match count here, a rank position
+                // there), so mixing scores across legs — or choosing
+                // evidence by score — would make recall order depend on
+                // which store is configured.
                 if tier_of(&hit.matched) < tier_of(&existing.matched) {
                     existing.matched = hit.matched;
+                    existing.score = hit.score;
                 }
             }
             None => {

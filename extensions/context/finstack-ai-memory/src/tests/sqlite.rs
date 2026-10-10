@@ -805,8 +805,47 @@ fn quick_check(path: &std::path::Path) -> String {
         .unwrap()
 }
 
+/// Assert the cached byte counters of the database at `path` equal the sums
+/// they cache, returning the `(inline_bytes, embedding_bytes)` they agree on.
+fn assert_counters_exact_at(path: &std::path::Path) -> (i64, i64) {
+    let connection = rusqlite::Connection::open(path).unwrap();
+    let (stored, recomputed) = crate::store::counters_audit(&connection).unwrap();
+    assert_eq!(stored, recomputed, "counters drifted from recomputed sums");
+    stored
+}
+
+/// Same audit over a store's own (possibly in-memory) connection.
+async fn assert_counters_exact(store: &SqliteMemoryStore) -> (i64, i64) {
+    let (stored, recomputed) = store
+        .inspect(crate::store::counters_audit)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored, recomputed, "counters drifted from recomputed sums");
+    stored
+}
+
+/// `(id, source_digest)` of every `memory_records` row at `path`, in id order.
+fn stored_source_digests(path: &std::path::Path) -> Vec<(String, Option<String>)> {
+    let connection = rusqlite::Connection::open(path).unwrap();
+    let mut statement = connection
+        .prepare("SELECT id, source_digest FROM memory_records ORDER BY id")
+        .unwrap();
+    let rows = statement
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap();
+    rows.map(Result::unwrap).collect()
+}
+
+/// The digest the current build computes for `record`'s content, as stored.
+fn expected_source_digest(record: &MemoryRecord) -> String {
+    embedding_source_digest(&embedding_source_text(record))
+        .unwrap()
+        .to_hex()
+}
+
 #[tokio::test]
-async fn sqlite_v1_schema_migrates_to_v3() {
+async fn sqlite_v1_schema_migrates_to_v4() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("memory-v1.sqlite");
     let connection = rusqlite::Connection::open(&path).unwrap();
@@ -832,6 +871,27 @@ async fn sqlite_v1_schema_migrates_to_v3() {
              PRAGMA user_version = 1;",
         )
         .unwrap();
+
+    let legacy = crate::tests::sample_record("m0", "t1");
+    connection
+        .execute(
+            "INSERT INTO memory_records
+             (id, tenant, user, agent, workspace, body_inline, blob_ref_json, preview,
+              sensitivity, keywords_json, provenance_json, created_at, last_confirmed_at,
+              supersedes, superseded_by, retention_json, tombstoned)
+             VALUES (?1, ?2, NULL, NULL, NULL, ?3, NULL, ?4, ?5, ?6, ?7, 0, 0, NULL, NULL, ?8, 0)",
+            rusqlite::params![
+                legacy.id.as_str(),
+                legacy.scope.tenant(),
+                "body text",
+                legacy.preview.as_ref(),
+                serde_json::to_string(&legacy.sensitivity).unwrap(),
+                serde_json::to_string(&legacy.keywords).unwrap(),
+                serde_json::to_string(&legacy.provenance).unwrap(),
+                serde_json::to_string(&legacy.retention).unwrap(),
+            ],
+        )
+        .unwrap();
     drop(connection);
 
     let store = SqliteMemoryStore::try_open(&path).unwrap();
@@ -840,19 +900,29 @@ async fn sqlite_v1_schema_migrates_to_v3() {
         .await
         .unwrap();
     drop(store);
-    assert_eq!(schema_version(&path), 3);
+    assert_eq!(schema_version(&path), 4);
     assert_eq!(embeddings_row_count(&path), 0);
     assert_eq!(quick_check(&path), "ok");
+    // The replayed legacy row and the fresh write both carry a digest, and
+    // the counters seeded through the chain equal the real sums.
+    assert_eq!(
+        stored_source_digests(&path),
+        vec![
+            (String::from("m0"), Some(expected_source_digest(&legacy))),
+            (
+                String::from("m1"),
+                Some(expected_source_digest(&crate::tests::sample_record(
+                    "m1", "t1"
+                ))),
+            ),
+        ]
+    );
+    assert_eq!(assert_counters_exact_at(&path), (18, 0));
 }
 
-/// Fabricate the exact v2 layout the previous release wrote, seeded with
-/// `record` in the records table, FTS index, and keyword index.
-fn fabricate_v2_database(path: &std::path::Path, record: &MemoryRecord) {
-    let scope_digest = record.scope.digest().unwrap().to_hex();
-    let connection = rusqlite::Connection::open(path).unwrap();
-    connection
-        .execute_batch(
-            "CREATE TABLE memory_records (
+/// The v2 layout the release before the embedding index wrote (user
+/// version applied separately so the v3 fabrication can share it).
+const V2_LAYOUT_DDL: &str = "CREATE TABLE memory_records (
                    scope_digest TEXT NOT NULL, id TEXT NOT NULL,
                    tenant TEXT NOT NULL, user TEXT, agent TEXT, workspace TEXT,
                    body_inline TEXT, blob_ref_json TEXT, preview TEXT NOT NULL,
@@ -889,10 +959,47 @@ fn fabricate_v2_database(path: &std::path::Path, record: &MemoryRecord) {
                    action_id TEXT NOT NULL UNIQUE,
                    action_json TEXT NOT NULL,
                    created_at INTEGER NOT NULL
+                 );";
+
+/// The v3 addition on top of [`V2_LAYOUT_DDL`], exactly as v3 created it.
+const V3_EMBEDDINGS_DDL: &str = "CREATE TABLE memory_embeddings (
+                   scope_digest TEXT NOT NULL, id TEXT NOT NULL, embedder_id TEXT NOT NULL,
+                   dimensions INTEGER NOT NULL, source_digest TEXT NOT NULL,
+                   vector BLOB NOT NULL, embedded_at INTEGER NOT NULL,
+                   PRIMARY KEY (scope_digest, id, embedder_id)
                  );
-                 PRAGMA user_version = 2;",
-        )
+                 CREATE INDEX memory_embeddings_space
+                   ON memory_embeddings(embedder_id, scope_digest);";
+
+/// Fabricate the exact v2 layout the previous release wrote, seeded with
+/// `record` in the records table, FTS index, and keyword index.
+fn fabricate_v2_database(path: &std::path::Path, record: &MemoryRecord) {
+    let connection = rusqlite::Connection::open(path).unwrap();
+    connection.execute_batch(V2_LAYOUT_DDL).unwrap();
+    connection
+        .execute_batch("PRAGMA user_version = 2;")
         .unwrap();
+    insert_fabricated_record(&connection, record);
+}
+
+/// Fabricate the exact v3 layout (v2 plus the embedding index, no stored
+/// source digest, no counters), seeded with `records`.
+fn fabricate_v3_database(path: &std::path::Path, records: &[MemoryRecord]) {
+    let connection = rusqlite::Connection::open(path).unwrap();
+    connection.execute_batch(V2_LAYOUT_DDL).unwrap();
+    connection.execute_batch(V3_EMBEDDINGS_DDL).unwrap();
+    connection
+        .execute_batch("PRAGMA user_version = 3;")
+        .unwrap();
+    for record in records {
+        insert_fabricated_record(&connection, record);
+    }
+}
+
+/// Seed one inline record (body `"body text"`, keyword `alpha`) into a
+/// fabricated pre-v4 records table, FTS index, and keyword index.
+fn insert_fabricated_record(connection: &rusqlite::Connection, record: &MemoryRecord) {
+    let scope_digest = record.scope.digest().unwrap().to_hex();
     connection
         .execute(
             "INSERT INTO memory_records
@@ -939,10 +1046,11 @@ fn fabricate_v2_database(path: &std::path::Path, record: &MemoryRecord) {
 }
 
 #[tokio::test]
-async fn sqlite_v2_schema_migrates_to_v3_preserving_data() {
+async fn sqlite_v2_schema_migrates_to_v4_preserving_data() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("memory-v2.sqlite");
-    fabricate_v2_database(&path, &crate::tests::sample_record("m1", "t1"));
+    let record = crate::tests::sample_record("m1", "t1");
+    fabricate_v2_database(&path, &record);
 
     let store = SqliteMemoryStore::try_open(&path).unwrap();
     let scope = MemoryScope::try_new("t1").unwrap();
@@ -968,19 +1076,113 @@ async fn sqlite_v2_schema_migrates_to_v3_preserving_data() {
     assert_eq!(keywords.len(), 1);
     drop(store);
 
-    assert_eq!(schema_version(&path), 3);
+    assert_eq!(schema_version(&path), 4);
     assert_eq!(embeddings_row_count(&path), 0);
     assert_eq!(quick_check(&path), "ok");
+    assert_eq!(
+        stored_source_digests(&path),
+        vec![(String::from("m1"), Some(expected_source_digest(&record)))]
+    );
+    assert_eq!(assert_counters_exact_at(&path), (9, 0));
+}
+
+#[tokio::test]
+async fn sqlite_v3_schema_migrates_to_v4_preserving_data() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("memory-v3.sqlite");
+    let records: Vec<MemoryRecord> = ["m1", "m2", "m3"]
+        .iter()
+        .map(|id| crate::tests::sample_record(id, "t1"))
+        .collect();
+    fabricate_v3_database(&path, &records);
+    // Space A: m1 indexed at its current content, m2 at stale content, m3
+    // never. Space B: only m3, current.
+    seed_embedding_row_with_digest(
+        &path,
+        "t1",
+        "m1",
+        SPACE_A,
+        &expected_source_digest(&records[0]),
+    );
+    seed_embedding_row_with_digest(&path, "t1", "m2", SPACE_A, "stale");
+    seed_embedding_row_with_digest(
+        &path,
+        "t1",
+        "m3",
+        SPACE_B,
+        &expected_source_digest(&records[2]),
+    );
+
+    let store = SqliteMemoryStore::try_open(&path).unwrap();
+    let scope = MemoryScope::try_new("t1").unwrap();
+    for record in &records {
+        let survivor = store
+            .get(scope.clone(), record.id.clone())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(survivor.preview.as_ref(), "body text");
+    }
+    let full_text = store
+        .search(scope.clone(), MemoryQuery::FullText(Arc::from("body")), 8)
+        .await
+        .unwrap();
+    assert_eq!(full_text.len(), 3);
+
+    // The SQL anti-join sees exactly the rows whose stored digest is absent
+    // or stale, without recomputing any digest.
+    let pending_a = store
+        .pending_embedding_sources(Arc::from(SPACE_A), 10)
+        .await
+        .unwrap();
+    assert_eq!(pending_ids(&pending_a), ["m2", "m3"]);
+    assert_eq!(
+        pending_a[0].source_digest.to_hex(),
+        expected_source_digest(&records[1])
+    );
+    let pending_b = store
+        .pending_embedding_sources(Arc::from(SPACE_B), 10)
+        .await
+        .unwrap();
+    assert_eq!(pending_ids(&pending_b), ["m1", "m2"]);
+    assert_eq!(
+        store
+            .embedding_coverage(scope.clone(), Arc::from(SPACE_A))
+            .await
+            .unwrap(),
+        Some(EmbeddingCoverage {
+            live_records: 3,
+            indexed_records: 1,
+        })
+    );
+    drop(store);
+
+    assert_eq!(schema_version(&path), 4);
+    assert_eq!(embeddings_row_count(&path), 3);
+    assert_eq!(quick_check(&path), "ok");
+    assert_eq!(
+        stored_source_digests(&path),
+        records
+            .iter()
+            .map(|record| (
+                record.id.as_str().to_owned(),
+                Some(expected_source_digest(record))
+            ))
+            .collect::<Vec<_>>()
+    );
+    // Three 9-byte inline bodies; three 2-dimensional f32 vectors.
+    assert_eq!(assert_counters_exact_at(&path), (27, 24));
 }
 
 #[test]
-fn sqlite_fresh_open_creates_v3_directly() {
+fn sqlite_fresh_open_creates_v4_directly() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("memory-fresh.sqlite");
     drop(SqliteMemoryStore::try_open(&path).unwrap());
-    assert_eq!(schema_version(&path), 3);
+    assert_eq!(schema_version(&path), 4);
     assert_eq!(embeddings_row_count(&path), 0);
     assert_eq!(quick_check(&path), "ok");
+    assert_eq!(assert_counters_exact_at(&path), (0, 0));
 }
 
 #[test]
@@ -989,7 +1191,7 @@ fn sqlite_future_schema_version_is_unsupported() {
     let path = directory.path().join("memory-future.sqlite");
     let connection = rusqlite::Connection::open(&path).unwrap();
     connection
-        .execute_batch("PRAGMA user_version = 4;")
+        .execute_batch("PRAGMA user_version = 5;")
         .unwrap();
     drop(connection);
     let error = SqliteMemoryStore::try_open(&path).err().unwrap();
@@ -1007,6 +1209,17 @@ const SPACE_B: &str = "embed.b-v1.2";
 /// Insert an embedding row directly, bypassing the store: eviction must hold
 /// for arbitrary rows, not only rows `store_embedding` accepted.
 fn seed_embedding_row(path: &std::path::Path, tenant: &str, id: &str, embedder_id: &str) {
+    seed_embedding_row_with_digest(path, tenant, id, embedder_id, "seeded");
+}
+
+/// [`seed_embedding_row`] with an explicit stored source digest.
+fn seed_embedding_row_with_digest(
+    path: &std::path::Path,
+    tenant: &str,
+    id: &str,
+    embedder_id: &str,
+    source_digest: &str,
+) {
     let scope_digest = MemoryScope::try_new(tenant)
         .unwrap()
         .digest()
@@ -1021,8 +1234,8 @@ fn seed_embedding_row(path: &std::path::Path, tenant: &str, id: &str, embedder_i
         .execute(
             "INSERT OR REPLACE INTO memory_embeddings
              (scope_digest, id, embedder_id, dimensions, source_digest, vector, embedded_at)
-             VALUES (?1, ?2, ?3, 2, 'seeded', ?4, 0)",
-            rusqlite::params![scope_digest, id, embedder_id, vector],
+             VALUES (?1, ?2, ?3, 2, ?5, ?4, 0)",
+            rusqlite::params![scope_digest, id, embedder_id, vector, source_digest],
         )
         .unwrap();
 }
@@ -1969,4 +2182,204 @@ async fn sqlite_reconcile_memory_embeddings_drains_and_is_idempotent() {
             .unwrap()
             .is_empty()
     );
+}
+
+#[tokio::test]
+async fn counters_track_every_write_path() {
+    let now = Arc::new(AtomicI64::new(0));
+    let store = controlled_sqlite(Arc::clone(&now), MemoryStoreLimits::default());
+    let scope = MemoryScope::try_new("t1").unwrap();
+    assert_eq!(assert_counters_exact(&store).await, (0, 0));
+
+    // put: a 9-byte inline body, then a blob body that counts nothing.
+    store
+        .put(Arc::from("k1"), crate::tests::sample_record("m1", "t1"))
+        .await
+        .unwrap();
+    assert_eq!(assert_counters_exact(&store).await, (9, 0));
+    store
+        .put(
+            Arc::from("k2"),
+            crate::tests::blob_backed_record("m2", "t1").await,
+        )
+        .await
+        .unwrap();
+    assert_eq!(assert_counters_exact(&store).await, (9, 0));
+
+    // store_embedding: three 2-dimensional rows, then a replacement that
+    // credits the row it overwrites.
+    embed_record(&store, &scope, "m1", SPACE_A, unit(vec![1.0, 0.0])).await;
+    embed_record(&store, &scope, "m2", SPACE_A, unit(vec![0.0, 1.0])).await;
+    embed_record(&store, &scope, "m1", SPACE_B, unit(vec![1.0, 1.0])).await;
+    assert_eq!(assert_counters_exact(&store).await, (9, 24));
+    embed_record(&store, &scope, "m1", SPACE_A, unit(vec![-1.0, 0.0])).await;
+    assert_eq!(assert_counters_exact(&store).await, (9, 24));
+
+    // correct: the 16-byte replacement joins the retained (superseded) row,
+    // and the superseded id leaves every space.
+    let mut replacement = crate::tests::sample_record("m3", "t1");
+    replacement.body = MemoryBody::Inline(Arc::from("longer body text"));
+    store
+        .correct(
+            Arc::from("k3"),
+            scope.clone(),
+            MemoryId::parse("m1").unwrap(),
+            replacement,
+        )
+        .await
+        .unwrap();
+    assert_eq!(assert_counters_exact(&store).await, (25, 8));
+
+    // forget: the tombstoned row keeps its (blob) body; its vector goes.
+    store
+        .forget(
+            Arc::from("k4"),
+            scope.clone(),
+            MemoryId::parse("m2").unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(assert_counters_exact(&store).await, (25, 0));
+
+    // forget_embedding_space: only that space's bytes are credited.
+    embed_record(&store, &scope, "m3", SPACE_A, unit(vec![1.0, 0.0])).await;
+    embed_record(&store, &scope, "m3", SPACE_B, unit(vec![0.0, 1.0])).await;
+    assert_eq!(assert_counters_exact(&store).await, (25, 16));
+    store
+        .forget_embedding_space(Arc::from(SPACE_A))
+        .await
+        .unwrap();
+    assert_eq!(assert_counters_exact(&store).await, (25, 8));
+
+    // sweep: an expired record and its vector leave on the next write.
+    let mut expiring = crate::tests::sample_record("m5", "t1");
+    expiring.retention = RetentionPolicy::ExpireAfterMs(1_000);
+    store.put(Arc::from("k5"), expiring).await.unwrap();
+    embed_record(&store, &scope, "m5", SPACE_B, unit(vec![1.0, 0.0])).await;
+    assert_eq!(assert_counters_exact(&store).await, (34, 16));
+    now.store(5_000, Ordering::SeqCst);
+    store
+        .put(Arc::from("k6"), crate::tests::sample_record("m6", "t1"))
+        .await
+        .unwrap();
+    assert_eq!(assert_counters_exact(&store).await, (34, 8));
+
+    // put over a tombstone: the revived id's inline body replaces the blob.
+    store
+        .put(Arc::from("k7"), crate::tests::sample_record("m2", "t1"))
+        .await
+        .unwrap();
+    assert_eq!(assert_counters_exact(&store).await, (43, 8));
+}
+
+#[tokio::test]
+async fn full_text_ranking_is_deterministic_on_ties() {
+    let store = SqliteMemoryStore::try_open_in_memory().unwrap();
+    let scope = MemoryScope::try_new("t1").unwrap();
+    // Inserted in reverse id order so rowid order and id order disagree.
+    for id in ["m2", "m1"] {
+        let mut record = crate::tests::sample_record(id, "t1");
+        record.preview = Arc::from("identical preview");
+        record.body = MemoryBody::Inline(Arc::from("identical preview"));
+        store
+            .put(Arc::from(format!("k-{id}")), record)
+            .await
+            .unwrap();
+    }
+    let search = || {
+        store.search(
+            scope.clone(),
+            MemoryQuery::FullText(Arc::from("identical")),
+            8,
+        )
+    };
+    let first = search().await.unwrap();
+    let second = search().await.unwrap();
+    let ids: Vec<&str> = first.iter().map(|hit| hit.record.id.as_str()).collect();
+    assert_eq!(ids, ["m1", "m2"]);
+    assert!(first[0].score > first[1].score);
+    assert_eq!(first, second);
+}
+
+#[tokio::test]
+async fn search_embedding_returns_same_hits_as_before() {
+    let store = SqliteMemoryStore::try_open_in_memory().unwrap();
+    let scope = MemoryScope::try_new("t1").unwrap();
+    let mut vectors: Vec<(String, EmbeddingVector)> = Vec::new();
+    for index in 0..24_i64 {
+        let id = format!("m{index:02}");
+        store
+            .put(
+                Arc::from(format!("k-{id}")),
+                crate::tests::sample_record(&id, "t1"),
+            )
+            .await
+            .unwrap();
+        #[allow(clippy::cast_precision_loss)]
+        let vector = unit(vec![
+            (index * 7 % 11) as f32 - 5.0,
+            (index * 3 % 7) as f32 - 3.0,
+            (index % 5) as f32 - 2.0,
+        ]);
+        embed_record(&store, &scope, &id, SPACE_A, vector.clone()).await;
+        vectors.push((id, vector));
+    }
+    // A forgotten row and a foreign-scope row must not rank.
+    store
+        .forget(
+            Arc::from("k-forget"),
+            scope.clone(),
+            MemoryId::parse("m05").unwrap(),
+        )
+        .await
+        .unwrap();
+    vectors.retain(|(id, _)| id != "m05");
+    store
+        .put(
+            Arc::from("k-other"),
+            crate::tests::sample_record("m00", "t2"),
+        )
+        .await
+        .unwrap();
+    embed_record(
+        &store,
+        &MemoryScope::try_new("t2").unwrap(),
+        "m00",
+        SPACE_A,
+        unit(vec![1.0, 0.5, -0.25]),
+    )
+    .await;
+
+    // The naive reference: score every live vector, sort by score then id.
+    let query = unit(vec![1.0, 0.5, -0.25]).unit_normalized();
+    let mut reference: Vec<(String, u32)> = vectors
+        .iter()
+        .map(|(id, vector)| {
+            let dot = query.dot(&vector.unit_normalized()).unwrap();
+            (id.clone(), similarity_score(dot))
+        })
+        .collect();
+    reference.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+
+    for limit in [1, 5, 23, 100] {
+        let hits = store
+            .search(
+                scope.clone(),
+                embedding_query(SPACE_A, unit(vec![1.0, 0.5, -0.25])),
+                limit,
+            )
+            .await
+            .unwrap();
+        let observed: Vec<(String, u32)> = hits
+            .iter()
+            .map(|hit| (hit.record.id.as_str().to_owned(), hit.score))
+            .collect();
+        let mut expected = reference.clone();
+        expected.truncate(limit);
+        assert_eq!(observed, expected, "limit {limit}");
+        assert!(
+            hits.iter()
+                .all(|hit| hit.matched == MatchEvidence::Semantic && hit.record.scope == scope)
+        );
+    }
 }

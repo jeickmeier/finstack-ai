@@ -23,10 +23,10 @@ pub const DEFAULT_MARKER: &str = "[[remember]]";
 /// A candidate memory extracted from run events, not yet persisted.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CandidateMemory {
-    /// Explicit identity for this candidate, when the extractor can assign
-    /// one deterministically. When `None`, the caller derives an id (e.g.
-    /// from a content digest).
-    pub id: Option<MemoryId>,
+    /// Identity of this candidate, assigned deterministically by the
+    /// extractor so that redelivery of the same events yields the same id
+    /// (and therefore the same idempotent capture).
+    pub id: MemoryId,
     /// Search/filter keywords for the candidate.
     pub keywords: Vec<Arc<str>>,
     /// Candidate memory content.
@@ -193,15 +193,11 @@ impl RuleBasedExtractor {
                 .map(|token| Arc::<str>::from(token.to_ascii_lowercase()))
                 .collect();
             candidates.push(CandidateMemory {
-                id: MemoryId::parse(
-                    &finstack_ai_kernel::fixed_domain_digest!(
-                        "memory-marker-line",
-                        1,
-                        format!("{source_run}\0{source_ref}\0{line_offset}").as_bytes(),
-                    )
-                    .to_hex(),
-                )
-                .ok(),
+                id: MemoryId::from_digest(&finstack_ai_kernel::fixed_domain_digest!(
+                    "memory-marker-line",
+                    1,
+                    format!("{source_run}\0{source_ref}\0{line_offset}").as_bytes(),
+                )),
                 keywords,
                 body: Arc::from(body),
                 sensitivity,

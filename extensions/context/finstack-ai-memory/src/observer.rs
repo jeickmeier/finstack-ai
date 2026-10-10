@@ -15,7 +15,6 @@
 //! observed batch ends in a bounded, error-swallowed drain of the store's
 //! embedding index; the same failure isolation applies to it absolutely.
 
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -172,25 +171,18 @@ impl MemoryObserver {
     }
 }
 
-fn capture_key(
-    id: Option<&crate::record::MemoryId>,
-    run: &str,
-    source: &str,
-    index: usize,
-) -> Arc<str> {
-    Arc::from(id.map_or_else(
-        || format!("capture:{run}:{source}:{index}"),
-        |id| {
-            format!(
-                "capture-id:{}",
-                finstack_ai_kernel::fixed_domain_digest!(
-                    "memory-capture-key",
-                    1,
-                    format!("{run}\0{source}\0{}", id.as_str()).as_bytes(),
-                )
-                .to_hex()
-            )
-        },
+/// Idempotency key of one capture: a digest over the candidate's origin and
+/// extractor-assigned id, so redelivery of the same events replays instead
+/// of duplicating.
+fn capture_key(id: &crate::record::MemoryId, run: &str, source: &str) -> Arc<str> {
+    Arc::from(format!(
+        "capture-id:{}",
+        finstack_ai_kernel::fixed_domain_digest!(
+            "memory-capture-key",
+            1,
+            format!("{run}\0{source}\0{}", id.as_str()).as_bytes(),
+        )
+        .to_hex()
     ))
 }
 
@@ -214,12 +206,6 @@ impl Observer for MemoryObserver {
                 .collect();
             let candidates = extractor.extract(&filtered);
 
-            // Candidate indices reset per originating (run, event) pair so
-            // the idempotency key `capture:{run_id}:{event_id}:{index}`
-            // stays stable across redelivery of the same batch, regardless
-            // of how many events an extractor scanned in one call.
-            let mut next_index: HashMap<(Arc<str>, Arc<str>), usize> = HashMap::new();
-
             for candidate in candidates {
                 diagnostics.attempted.fetch_add(1, Ordering::Relaxed);
                 let run_text = candidate
@@ -231,19 +217,11 @@ impl Observer for MemoryObserver {
                     .clone()
                     .unwrap_or_else(|| Arc::from("unknown"));
 
-                let slot = next_index
-                    .entry((Arc::clone(&run_text), Arc::clone(&ref_text)))
-                    .or_insert(0);
-                let index = *slot;
-                *slot += 1;
-
                 // Oversized candidates are dropped rather than stored inline.
                 // A body over the inline ceiling belongs in blob storage, and
                 // this observer holds no `ArtifactStore` to stage one into;
                 // skipping is the conservative default, and losing an
-                // opportunistic capture is never run impact. The index is
-                // allocated above first, so the surviving candidates'
-                // idempotency keys do not depend on the cap.
+                // opportunistic capture is never run impact.
                 if candidate.body.len() > INLINE_BODY_MAX_BYTES {
                     diagnostics.dropped.fetch_add(1, Ordering::Relaxed);
                     if let Ok(mut last) = diagnostics.last_diagnostic.lock() {
@@ -252,26 +230,13 @@ impl Observer for MemoryObserver {
                     continue;
                 }
 
-                // Extractor-assigned identities survive delivery boundaries;
-                // batch-local indices are only a fallback for custom extractors.
-                let idempotency_key =
-                    capture_key(candidate.id.as_ref(), &run_text, &ref_text, index);
-                let id = if let Some(id) = candidate.id.clone() {
-                    id
-                } else {
-                    let digest = finstack_ai_kernel::fixed_domain_digest!(
-                        "memory-observer-capture",
-                        1,
-                        format!("{run_text}\0{ref_text}\0{index}\0{}", candidate.body).as_bytes(),
-                    );
-                    // 64 hex chars: always within MEMORY_ID_MAX_BYTES.
-                    #[allow(clippy::unwrap_used)]
-                    crate::record::MemoryId::parse(&digest.to_hex()).unwrap()
-                };
+                // Extractor-assigned identities survive delivery boundaries,
+                // so the key (and the record id) is the same on redelivery.
+                let idempotency_key = capture_key(&candidate.id, &run_text, &ref_text);
 
                 let now = clock();
                 let record = MemoryRecord {
-                    id,
+                    id: candidate.id,
                     scope: scope.clone(),
                     keywords: Arc::from(candidate.keywords),
                     preview: preview_of(&candidate.body),

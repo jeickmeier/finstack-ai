@@ -15,4 +15,6 @@ mod queries;
 mod schema;
 mod worker;
 
+#[cfg(test)]
+pub(crate) use queries::counters_audit;
 pub use worker::SqliteMemoryStore;
