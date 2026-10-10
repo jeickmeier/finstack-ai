@@ -110,6 +110,91 @@ fn passthrough_still_lands_when_the_deadline_has_already_elapsed() {
     assert_eq!(failed.error.code.as_str(), "deadline_exceeded");
 }
 
+/// Only an id-cardinality rejection triggers the limit-crossing retry. Any
+/// other kernel rejection must surface with the kernel's own code and leave
+/// the run untouched.
+#[test]
+fn a_non_cardinality_rejection_passes_through_with_the_kernels_own_code() {
+    let mut coordinator = accepted_coordinator(RunLimits::empty());
+    let sources = test_sources();
+
+    // `AfterModel` is not admissible while the run is still at `BeforeRun`.
+    let error = block_on(settle_facade_stage(
+        &mut coordinator,
+        None,
+        &sources,
+        &test_profile(),
+        env(1_100, &[2], &[], &[], &[], &[], &[], 102),
+        StageSettled {
+            cursor: StageCursor {
+                cycle: 0,
+                stage: Stage::AfterModel,
+            },
+            outcome: ReducerStageOutcome::Continue,
+        },
+    ))
+    .expect_err("a wrong-phase settlement must be rejected");
+
+    assert!(
+        matches!(
+            &error,
+            RunHandleError::Coordinator(crate::coordinator::CommitCoordinatorError::Decision {
+                code: "stage_cursor_mismatch"
+            })
+        ),
+        "the kernel's own rejection must surface untouched: {error:?}"
+    );
+    assert!(coordinator.state().terminal().is_none());
+    assert_eq!(
+        coordinator.state().phase(),
+        Some(RunPhase::BeforeRun),
+        "a rejected settlement must not advance the run"
+    );
+}
+
+/// A facade bag the kernel rejects on cardinality for a reason other than a
+/// limit crossing must surface the facade's own rejection. The retry still
+/// fires (the runtime does not copy `decide_limit`'s predicate), but when the
+/// limit-crossing bag is rejected on cardinality too, the first error is the
+/// diagnosis — the limit bag was never the one that was wrong. This is what
+/// makes it safe for `is_cardinality_rejection` to keep both kernel codes.
+///
+/// The facade bag is *under*-minted so the two rejections carry different
+/// codes: `BeforeRun`/`Continue` needs `(1, 0, 0, 0, 0, 0)`, an empty record
+/// list is `allocated_ids_exhausted`, and the `(2, 2, …)` limit bag against
+/// that same tuple is over-allocation, `unused_allocated_ids`.
+#[test]
+fn an_under_minted_facade_bag_surfaces_its_own_rejection_not_the_limit_bags() {
+    let mut coordinator = accepted_coordinator(RunLimits::empty());
+    let sources = test_sources();
+
+    let error = block_on(settle_facade_stage(
+        &mut coordinator,
+        None,
+        &sources,
+        &test_profile(),
+        env(1_100, &[], &[], &[], &[], &[], &[], 102),
+        before_run_settled(),
+    ))
+    .expect_err("an under-minted facade bag must be rejected");
+
+    assert!(
+        matches!(
+            &error,
+            RunHandleError::Coordinator(crate::coordinator::CommitCoordinatorError::Decision {
+                code: "allocated_ids_exhausted"
+            })
+        ),
+        "the facade bag's own rejection must surface, not the limit bag's: {error:?}"
+    );
+    assert!(coordinator.state().terminal().is_none());
+    assert_eq!(
+        coordinator.state().phase(),
+        Some(RunPhase::BeforeRun),
+        "a rejected settlement must not advance the run"
+    );
+}
+
 /// `BeforeModel` now folds, so its passthrough is no longer a stage-level
 /// exclusion — it is the ordinary identity/inactive path, and it must still
 /// reuse the facade's pre-minted ids byte for byte.
@@ -160,7 +245,7 @@ fn before_model_passthrough_still_reuses_the_facade_ids() {
 }
 
 /// `Fail` is the *other* outcome the kernel admits at `BeforeModel`
-/// (`decide.rs:1165-1177`), and it carries no draft. Folding it is
+/// (`stage_id_requirements`), and it carries no draft. Folding it is
 /// impossible, so it must land exactly as it would with no middleware
 /// installed — otherwise registering a component at the stage, even one
 /// that only observes, would stop a deliberate stage failure from
@@ -183,7 +268,7 @@ fn a_fail_settled_at_before_model_passes_through_the_chain() {
         &sources,
         &test_profile(),
         // `Fail` at a non-BeforeFinalize stage needs one record and
-        // nothing else (`decide.rs:1165-1177`).
+        // nothing else (`stage_id_requirements`).
         env(1_300, &[5], &[], &[], &[], &[], &[], 104),
         StageSettled {
             cursor: StageCursor {

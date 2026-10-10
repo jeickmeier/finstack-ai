@@ -124,14 +124,15 @@ pub(crate) async fn submit_command<C: Clock, R: RandomSource>(
 ///
 /// # Passthrough
 ///
-/// Returns `coordinator.submit(env, KernelInput::StageSettled(settled))`
-/// when `driver` is `None`, when the driver has no component registered at
+/// Returns `submit_settled(coordinator, sources, env, settled)` when `driver`
+/// is `None`, when the driver has no component registered at
 /// `settled.cursor.stage`, when this choke point does not fold that stage,
 /// when the base outcome is not one the stage can fold on top of (see
 /// [`foldable_base`]), or when the chain's fold is the identity. In all five
-/// cases the facade's `env.now` is kept. Its pre-minted id bags are reused
-/// unless `Kernel::decide` rejects them on cardinality because `decide_limit`
-/// intercepted — then [`submit_settled`] substitutes the limit-crossing bag.
+/// cases the facade's `env` — its `now` and its pre-minted id bags — is
+/// submitted as is. Only if the kernel rejects that bag on cardinality because
+/// `decide_limit` intercepted does [`submit_settled`] retry with the
+/// limit-crossing bag.
 ///
 /// # Re-allocation
 ///
@@ -286,8 +287,8 @@ async fn apply_context_providers<C: Clock, R: RandomSource>(
 /// of.
 ///
 /// Only `BeforeModel` narrows here, and it must. The kernel admits exactly two
-/// outcomes at that cursor — `ModelRequestPrepared` (`decide.rs:1134-1141`) and
-/// `Fail` (`decide.rs:1165-1177`) — and only the first carries the
+/// outcomes at that cursor — `ModelRequestPrepared` and `Fail`, per
+/// `stage_id_requirements` (`reducer/decide/stage.rs`) — and only the first carries the
 /// [`ModelRequestDraft`] that *is* the whole payload of
 /// `StageInput::BeforeModel`. Without this gate a `Fail` settled at
 /// `BeforeModel` would reach [`before_model_input`], which has no draft to
@@ -308,7 +309,7 @@ async fn apply_context_providers<C: Clock, R: RandomSource>(
 /// `PrepareContext` keeps a smaller version of the same problem. `stage_input`
 /// is fine there — a non-`ContextPrepared` base falls back to `state.messages`
 /// rather than failing. The gap is one function later, in [`apply_fold`]: a
-/// `Fail` base at `PrepareContext` (kernel-admissible, `decide.rs:1165-1177`)
+/// `Fail` base at `PrepareContext` (kernel-admissible per `stage_id_requirements`)
 /// combined with an *additive* component produces a non-identity fold that
 /// matches neither the `ContextPrepared` nor the `ModelRequestPrepared` arm, so
 /// it falls to `_ => Err(MIDDLEWARE_STAGE_UNLANDABLE)` and the deliberate `Fail`

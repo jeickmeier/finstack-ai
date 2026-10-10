@@ -87,11 +87,11 @@ fn acceptance_with_deadline(
     .expect("acceptance")
 }
 
-fn accept_input(limits: RunLimits) -> KernelInput {
+fn accept_input(limits: RunLimits, effective_deadline: Option<Timestamp>) -> KernelInput {
     KernelInput::AcceptRun(AcceptRun {
         session_id: id::<SessionTag>(1),
         lane_id: id::<LaneTag>(2),
-        accepted: acceptance(limits),
+        accepted: acceptance_with_deadline(limits, effective_deadline),
     })
 }
 
@@ -323,7 +323,7 @@ fn accepted_on(store: Arc<MemoryStore>) -> CommitCoordinator {
     let mut coordinator = CommitCoordinator::new(store);
     block_on(coordinator.submit(
         env(1_000, &[1], &[1], &[], &[], &[], &[], 101),
-        accept_input(RunLimits::empty()),
+        accept_input(RunLimits::empty(), None),
     ))
     .expect("accept");
     coordinator
@@ -505,11 +505,7 @@ fn accepted_coordinator_with_deadline(
     let mut coordinator = CommitCoordinator::new(Arc::new(MemoryStore::new()));
     block_on(coordinator.submit(
         env(1_000, &[1], &[1], &[], &[], &[], &[], 101),
-        KernelInput::AcceptRun(AcceptRun {
-            session_id: id::<SessionTag>(1),
-            lane_id: id::<LaneTag>(2),
-            accepted: acceptance_with_deadline(limits, effective_deadline),
-        }),
+        accept_input(limits, effective_deadline),
     ))
     .expect("accept");
     coordinator
@@ -543,7 +539,7 @@ fn accepted_coordinator_with_dispatcher(limits: RunLimits) -> CommitCoordinator 
     coordinator.install_dispatcher(Arc::new(NoopDispatcher));
     block_on(coordinator.submit(
         env(1_000, &[1], &[1], &[], &[], &[], &[], 101),
-        accept_input(limits),
+        accept_input(limits, None),
     ))
     .expect("accept");
     coordinator

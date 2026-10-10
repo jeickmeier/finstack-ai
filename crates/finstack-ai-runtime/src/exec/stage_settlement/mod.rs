@@ -15,12 +15,16 @@
 //! the cursor's stage, or the base outcome is not one that stage can fold on top
 //! of (see [`driver::foldable_base`]), or the chain's fold is the identity, the
 //! facade's `env` and `input` are submitted **byte for byte unchanged** — the
-//! facade's own pre-minted record/event/effect ids included — unless
-//! `decide_limit` intercepts and the kernel demands a different exact id bag.
-//! Then the settlement substitutes that bag so a crossed deadline still lands.
-//! The feature is opt-in per agent: an agent with no middleware must produce a
-//! journal identical to the one it produced before this module existed when no
-//! limit has been crossed, and no settlement the kernel admits may stop landing
+//! facade's own pre-minted record/event/effect ids included.
+//!
+//! One kernel behaviour applies to every settlement through this choke point,
+//! middleware or not: when `decide_limit` intercepts, the kernel demands a
+//! fixed id bag the facade could not have minted, so [`submit::submit_settled`]
+//! retries with that bag and a crossed deadline still lands. An agent with no
+//! middleware therefore produces a journal identical to the one it produced
+//! before this module existed, except that an already-elapsed deadline now
+//! commits `deadline_exceeded` where it used to fail with
+//! `allocated_ids_exhausted`. No settlement the kernel admits may stop landing
 //! merely because a component was registered.
 //!
 //! # Stage coverage

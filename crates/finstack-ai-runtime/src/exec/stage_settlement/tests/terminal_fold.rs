@@ -179,9 +179,10 @@ fn the_tool_batch_chain_is_skipped_entirely_when_no_component_is_registered() {
 
 /// The stage table and `decide_limit` demand *mutually exclusive* id bags
 /// once a limit is crossed, because `validate_allocated_ids`
-/// (`allocated_ids.rs:97-107`) rejects both under- and over-allocation.
-/// This pins that exclusivity directly against the kernel, so the two-shot
-/// probe in `submit_settled` cannot be "simplified" into one lookup.
+/// (`reducer/allocated_ids.rs`) rejects both under- and over-allocation.
+/// This pins that exclusivity directly against the kernel, so the
+/// submit-then-retry in `submit_settled` cannot be "simplified" into one
+/// lookup.
 #[test]
 fn the_stage_table_and_the_limit_requirement_are_mutually_exclusive() {
     let sources = test_sources();
@@ -260,7 +261,9 @@ fn the_stage_table_and_the_limit_requirement_are_mutually_exclusive() {
 /// the submitted `ContextPrepared` and intercepts, so the stage table's
 /// `(2, 0, 0, 1, 0, 0)` is rejected and the fallback bag has to carry the
 /// settlement. Without the fallback this returns
-/// `Coordinator(Decision { code: "unused_allocated_ids" })`.
+/// `Coordinator(Decision { code: "allocated_ids_exhausted" })`: the stage bag
+/// is short of the limit bag's two events, and `validate_allocated_ids`
+/// checks under-allocation before over-allocation.
 #[test]
 fn a_fold_that_crosses_a_limit_still_lands_through_the_choke_point() {
     let mut coordinator = accepted_coordinator(RunLimits {

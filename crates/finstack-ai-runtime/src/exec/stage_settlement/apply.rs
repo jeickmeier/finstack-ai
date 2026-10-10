@@ -217,14 +217,15 @@ pub(super) fn apply_model_draft<C: Clock, R: RandomSource>(
 ///
 /// Ids for the appended messages come from `sources`, not from `AllocatedIds`:
 /// the kernel requires **zero** message ids for `ContextPrepared`
-/// (`decide.rs:1131-1133`, tuple `(2, 0, 0, 1, 0, 0)`), exactly as the facade's
+/// (`stage_id_requirements` in `reducer/decide/stage.rs`, tuple
+/// `(2, 0, 0, 1, 0, 0)`), exactly as the facade's
 /// own `Agent::context_messages` mints them outside the id bag.
 ///
 /// # Errors
 ///
 /// Returns [`MIDDLEWARE_STAGE_BOUNDS_EXCEEDED`] when the rebuilt array would
-/// exceed the kernel's `SEMANTIC_ARRAY_MAX_ITEMS` bound (`decide.rs:1195-1202`
-/// rejects it), or `middleware_stage_payload_invalid` when the replacement
+/// exceed the kernel's `SEMANTIC_ARRAY_MAX_ITEMS` bound (`validate_stage_input`
+/// in `reducer/decide/stage.rs` rejects it), or `middleware_stage_payload_invalid` when the replacement
 /// payload is not a message array or an item cannot become a valid message.
 pub(crate) fn apply_context_prepared<C: Clock, R: RandomSource>(
     fold: &StageFold,

@@ -238,7 +238,8 @@ async fn submit_tool_batch_opening<C: Clock, R: RandomSource>(
 /// Settle the cursor as `Fail` when the `BeforeToolBatch` chain fails the
 /// stage, so no batch opens.
 ///
-/// `Fail` is admissible at `BeforeToolBatch` (`decide.rs:1165-1177`) and
+/// `Fail` is admissible at `BeforeToolBatch` (`stage_id_requirements` in
+/// `reducer/decide/stage.rs`) and
 /// normalizes the stage as failed, driving the run to `BeforeFinalize` with
 /// the component's own descriptor as the terminal candidate. Allocation goes
 /// through [`submit_folded`], not [`stage_allocation`] directly, because a
@@ -323,10 +324,10 @@ pub(super) fn assert_plan_coverage(
 /// The outcome `fail_closed_on_run_deadline` submits at `Stage::BeforeToolBatch`.
 ///
 /// The kernel admits `ReducerStageOutcome::Continue` only at
-/// `BeforeRun`/`AfterModel`/`AfterToolBatch`
-/// (`finstack-ai-kernel/src/reducer/decide.rs:1107-1111`); `BeforeToolBatch` is
-/// not one of them. `Fail(_)`, by contrast, is admitted at every stage except
-/// `BeforeFinalize`'s own dedicated arm (`decide.rs:1165-1177`), which is
+/// `BeforeRun`/`AfterModel`/`AfterToolBatch` (`stage_id_requirements` in
+/// `reducer/decide/stage.rs`); `BeforeToolBatch` is not one of them. `Fail(_)`,
+/// by contrast, is admitted at every stage except `BeforeFinalize`'s own
+/// dedicated arm in the same table, which is
 /// exactly the fail-closed semantics this path needs: normalize the aggregate
 /// stage as failed and let the reducer drive the run toward termination,
 /// rather than pretending the (unopened) tool batch may continue.
@@ -366,11 +367,11 @@ async fn fail_closed_on_run_deadline<C: Clock, R: RandomSource>(
     // Deliberately NOT `stage_allocation`: this function's only caller
     // (`prepare_tool_batch_if_ready`) invokes it exactly when
     // `now >= accepted.effective_deadline()`, using the same `now`. Under that
-    // exact condition, `decide_limit` (`decide.rs:469-497`, guarded on
-    // `env.now >= deadline` at `decide.rs:660-661`) intercepts *every*
-    // non-`AcceptRun`/`InteractionSettled` input before `decide_stage` — and
-    // therefore `stage_id_requirements` — ever runs, and it always demands
-    // `IdRequirements::new(2, 2, 0, 0, 0, 0)` (`decide.rs:684`: one
+    // exact condition, `decide_limit` (`reducer/decide/limit.rs`, guarded on
+    // `env.now >= deadline`) intercepts *every*
+    // non-`AcceptRun`/`InteractionSettled`/`CancelRequested` input before
+    // `decide_stage` — and therefore `stage_id_requirements` — ever runs, and
+    // it always demands `IdRequirements::new(2, 2, 0, 0, 0, 0)` (one
     // `LimitReached` record + one `RunFailed` record, one event each, whatever
     // the submitted stage outcome is). Allocating via `stage_allocation`
     // instead (which computes `(1, 0, 0, 0, 0, 0)` for `Fail` at
@@ -391,8 +392,8 @@ async fn fail_closed_on_run_deadline<C: Clock, R: RandomSource>(
 /// Allocate the exact [`AllocatedIds`] the kernel requires for `outcome` at
 /// `cursor`.
 ///
-/// Mirrors `stage_id_requirements`
-/// (`finstack-ai-kernel/src/reducer/decide.rs:1101-1183`) arm for arm, so an
+/// Mirrors `stage_id_requirements` (`reducer/decide/stage.rs`) arm for arm,
+/// in the same order, so an
 /// inadmissible `(stage, outcome)` pair is rejected here — at allocation time —
 /// instead of later at `coordinator.classify`/`submit` with a less specific
 /// kernel error. `ReducerStageOutcome::ToolBatchPrepared` bypasses the tuple
@@ -405,18 +406,19 @@ async fn fail_closed_on_run_deadline<C: Clock, R: RandomSource>(
 /// **This function mirrors `stage_id_requirements` only.**
 /// `stage_id_requirements` — and therefore this function's whole table,
 /// `ToolBatchPrepared` included — is unreachable for *any* `StageSettled`
-/// submission whenever `decide_limit` (`decide.rs:469-709`) returns a
+/// submission whenever `decide_limit` (`reducer/decide/limit.rs`) returns a
 /// decision instead of `None`. That is not specific to a deadline breach:
 /// `decide_limit` first *increments* run-level usage from the very outcome
-/// being submitted (`decide.rs:547-609` — `ContextPrepared` grows
-/// `context_bytes`, `ModelRequestPrepared` grows `model_requests`,
-/// `ToolBatchPrepared` grows `tool_calls`/`max_parallel_tools`, `Retry` grows
-/// `retries`, and any effect/external completion grows token/cost usage), then
-/// tests `deadline_crossing.or(first_limit_crossing(accepted, &usage))`
-/// (`decide.rs:680`) — i.e. the run's wall-clock deadline *or* any configured
-/// ceiling on turns, model requests, tool calls, parallel tools, retries,
-/// wall time, or context bytes. Whichever fires, the kernel requires exactly
-/// `IdRequirements::new(2, 2, 0, 0, 0, 0)` (`decide.rs:684`) regardless of the
+/// being submitted (`ContextPrepared` grows `context_bytes`,
+/// `ModelRequestPrepared` grows `model_requests`, `ToolBatchPrepared` grows
+/// `tool_calls`/`max_parallel_tools`, `Retry` grows `retries`, and any
+/// effect/external completion grows token/cost usage through
+/// `project_or_fail`), then tests
+/// `deadline_crossing.or(first_limit_crossing(accepted, &usage))` — i.e. the
+/// run's wall-clock deadline *or* any configured ceiling on turns, model
+/// requests, tool calls, parallel tools, retries, wall time, or context bytes.
+/// Whichever fires, the kernel requires exactly
+/// `IdRequirements::new(2, 2, 0, 0, 0, 0)` regardless of the
 /// submitted stage or outcome — the same fixed shape
 /// `fail_closed_on_run_deadline` allocates directly (see its own comment),
 /// not through this function. A caller that always allocates from this table
@@ -432,7 +434,7 @@ pub(crate) fn stage_allocation<C: Clock, R: RandomSource>(
         return allocate_tool_opening(calls, sources);
     }
     match outcome {
-        // decide.rs:1107-1130 (plus the AfterModel JSON-schema guard).
+        // Includes the kernel's AfterModel JSON-schema guard.
         ReducerStageOutcome::Continue
             if matches!(
                 cursor.stage,
@@ -456,11 +458,9 @@ pub(crate) fn stage_allocation<C: Clock, R: RandomSource>(
             }
             stage_ids(1, 0, 0, 0, 0, 0, sources)
         }
-        // decide.rs:1131-1133.
         ReducerStageOutcome::ContextPrepared { .. } if cursor.stage == Stage::PrepareContext => {
             stage_ids(2, 0, 0, 1, 0, 0, sources)
         }
-        // decide.rs:1134-1141.
         ReducerStageOutcome::ModelRequestPrepared {
             output_contract, ..
         } if cursor.stage == Stage::BeforeModel => {
@@ -471,8 +471,8 @@ pub(crate) fn stage_allocation<C: Clock, R: RandomSource>(
             }
             stage_ids(2, 1, 1, 0, 1, 0, sources)
         }
-        // decide.rs:1142-1145 (terminal_body_from_candidate's own precondition:
-        // a terminal candidate must exist).
+        // `terminal_body_from_candidate`'s own precondition: a terminal
+        // candidate must exist.
         ReducerStageOutcome::FinalizeAccepted if cursor.stage == Stage::BeforeFinalize => {
             if state.terminal_candidate().is_none() {
                 return Err(RunHandleError::ToolSettlement {
@@ -481,7 +481,6 @@ pub(crate) fn stage_allocation<C: Clock, R: RandomSource>(
             }
             stage_ids(2, 1, 0, 0, 0, 0, sources)
         }
-        // decide.rs:1146-1158.
         ReducerStageOutcome::ContinueModel { .. }
             if cursor.stage == Stage::BeforeFinalize
                 && matches!(
@@ -497,15 +496,12 @@ pub(crate) fn stage_allocation<C: Clock, R: RandomSource>(
                 })?;
             stage_ids(1, 0, 0, 0, 0, 0, sources)
         }
-        // decide.rs:1159-1161.
         ReducerStageOutcome::Fail(_) if cursor.stage == Stage::BeforeFinalize => {
             stage_ids(2, 1, 0, 0, 0, 0, sources)
         }
-        // decide.rs:1162-1164.
         ReducerStageOutcome::Retry(_) if cursor.stage == Stage::BeforeFinalize => {
             stage_ids(3, 1, 1, 0, 0, 0, sources)
         }
-        // decide.rs:1165-1177.
         ReducerStageOutcome::Fail(_)
             if matches!(
                 cursor.stage,
@@ -519,7 +515,7 @@ pub(crate) fn stage_allocation<C: Clock, R: RandomSource>(
         {
             stage_ids(1, 0, 0, 0, 0, 0, sources)
         }
-        // decide.rs:1178-1181.
+        // The kernel's fallback arm: `InvalidPhaseInput`.
         _ => Err(RunHandleError::ToolSettlement {
             code: "stage_allocation_outcome_not_admitted",
         }),
@@ -528,7 +524,7 @@ pub(crate) fn stage_allocation<C: Clock, R: RandomSource>(
 
 /// Generate an [`AllocatedIds`] bag of the given cardinalities, in the six-tuple
 /// order `(records, events, effects, turns, model_requests, messages)` used by
-/// `IdRequirements::new` (`finstack-ai-kernel/src/reducer/allocated_ids.rs:22-29`).
+/// `IdRequirements::new` (`reducer/allocated_ids.rs`).
 pub(super) fn stage_ids<C: Clock, R: RandomSource>(
     records: usize,
     events: usize,
