@@ -22,7 +22,7 @@ use futures_util::stream;
 use serde::Deserialize;
 
 use crate::identity::{codex_agent_ref, codex_route_ref};
-use crate::invoker::CodexChildInvoker;
+use crate::invoker::{CodexChildInvoker, MAX_PROMPT_BYTES};
 use crate::state::CodexRunStatus;
 use crate::{CODEX_CHILD_NOT_FOUND, CODEX_INVALID_ARGUMENTS, CodexChildError};
 
@@ -159,6 +159,12 @@ async fn start_child(
         return Ok(error_result(
             CODEX_INVALID_ARGUMENTS,
             "prompt must not be blank",
+        ));
+    }
+    if arguments.prompt.len() > MAX_PROMPT_BYTES {
+        return Ok(error_result(
+            CODEX_INVALID_ARGUMENTS,
+            "prompt exceeds 256 KiB",
         ));
     }
     let input: Arc<[ContentBlock]> = Arc::from([ContentBlock::Text(
