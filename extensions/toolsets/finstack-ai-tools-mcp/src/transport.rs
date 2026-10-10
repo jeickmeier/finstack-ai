@@ -1,8 +1,6 @@
 //! MCP transports: scripted (tests), stdio, and streamable HTTP.
 
-use std::collections::BTreeSet;
-#[cfg(test)]
-use std::collections::VecDeque;
+use std::collections::{BTreeSet, VecDeque};
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -10,9 +8,9 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::Engine;
+use futures_util::StreamExt;
 use futures_util::future::BoxFuture;
 use reqwest::Url;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
@@ -20,18 +18,34 @@ use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWrite
 use tokio::process::{Child, Command};
 
 use crate::protocol::{Meta, PROTOCOL_VERSION, jsonrpc_request};
-use finstack_ai_kernel::Timestamp;
 use finstack_ai_net_guard::NetGuardError;
 use finstack_ai_net_guard::{BodyReadInterrupt, read_body_bounded_interruptible};
-use finstack_ai_runtime::ports::model::CancellationSignal;
+use finstack_ai_runtime::ids::{Clock, SystemClock};
+use finstack_ai_runtime::ports::model::RunCallContext;
 
 use crate::{
     MCP_LIMIT_EXCEEDED, MCP_PROTOCOL_VIOLATION, MCP_SERVER_NOT_ALLOWLISTED, MCP_TIMEOUT,
-    MCP_TRANSPORT_ERROR, McpError,
+    MCP_TRANSPORT_ERROR, MCP_TRANSPORT_POISONED, McpError,
 };
 
 const MAX_LINE_BYTES: u64 = 1024 * 1024;
 const MAX_NOTIFICATIONS_PER_ROUND_TRIP: usize = 32;
+/// Server-initiated JSON-RPC requests tolerated inside one round trip
+/// before the stream is treated as a protocol violation.
+const MAX_SERVER_REQUESTS_PER_ROUND_TRIP: usize = 32;
+/// Queued notification methods retained across round trips until
+/// [`McpTransport::take_notifications`] drains them; the oldest entry is
+/// dropped once the queue is full.
+const MAX_QUEUED_NOTIFICATIONS: usize = 256;
+/// JSON-RPC `method not found`, returned to a server that sends the client
+/// a request it does not implement.
+const JSONRPC_METHOD_NOT_FOUND: i64 = -32601;
+/// Longest server-supplied method name echoed into a
+/// `client/request_rejected:<method>` marker that reaches the host observer.
+const MAX_REJECTED_METHOD_CHARS: usize = 128;
+/// Prefix of the notification-queue marker recorded when a server-initiated
+/// request was answered with `method not found`.
+pub(crate) const REQUEST_REJECTED_PREFIX: &str = "client/request_rejected:";
 /// Default HTTP response-body cap for an `HttpConfig` that does not set one
 /// explicitly.
 const DEFAULT_MAX_RESPONSE_BYTES: usize = 8 * 1_048_576;
@@ -45,59 +59,80 @@ const INITIALIZATION_TIMEOUT: Duration = Duration::from_secs(30);
 /// even when the caller supplied no deadline.
 const DEFAULT_STDIO_READ_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Cancellation and deadline source for one transport round trip.
+///
+/// A run-scoped request delegates to the runtime's
+/// [`RunCallContext`] helpers (`is_interrupted`, `wait_deadline`,
+/// `interrupted`) so the semantic deadline and the effect-local cancellation
+/// signal are honoured exactly as every other port does. Construct-time
+/// catalog enumeration has no run in scope and keeps a thin synthetic budget
+/// of `INITIALIZATION_TIMEOUT` measured on the tokio clock; it cannot be
+/// cancelled.
 #[derive(Clone)]
-pub(crate) struct RequestControl {
-    cancellation: CancellationSignal,
-    deadline: Option<Timestamp>,
+pub(crate) enum RequestControl {
+    Run(Box<RunCallContext>),
+    Initialization { expires_at: tokio::time::Instant },
 }
 
 impl RequestControl {
-    pub(crate) fn new(cancellation: CancellationSignal, deadline: Option<Timestamp>) -> Self {
-        Self {
-            cancellation,
-            deadline,
-        }
+    pub(crate) fn from_run(run: &RunCallContext) -> Self {
+        Self::Run(Box::new(run.clone()))
     }
 
     fn initialization() -> Self {
-        let now_ms = now_unix_ms();
-        let timeout_ms = i64::try_from(INITIALIZATION_TIMEOUT.as_millis()).unwrap_or(i64::MAX);
-        Self {
-            cancellation: CancellationSignal::new(),
-            deadline: Timestamp::from_unix_ms(now_ms.saturating_add(timeout_ms)).ok(),
+        Self::Initialization {
+            expires_at: tokio::time::Instant::now() + INITIALIZATION_TIMEOUT,
         }
     }
 
+    /// Whether the request should stop now. A clock that cannot tell the
+    /// time fails closed (treated as elapsed).
     fn is_interrupted(&self) -> bool {
-        self.cancellation.is_cancelled()
-            || self
-                .deadline
-                .is_some_and(|deadline| deadline.as_unix_ms() <= now_unix_ms())
+        match self {
+            Self::Run(run) => SystemClock
+                .now()
+                .map_or(true, |now| run.is_interrupted(now)),
+            Self::Initialization { expires_at } => tokio::time::Instant::now() >= *expires_at,
+        }
     }
 
+    /// Resolve once the deadline elapses; pends forever without one.
     async fn wait_deadline(&self) {
-        let Some(deadline) = self.deadline else {
-            std::future::pending::<()>().await;
-            return;
-        };
-        let remaining = deadline.as_unix_ms().saturating_sub(now_unix_ms()).max(0);
-        tokio::time::sleep(Duration::from_millis(u64::try_from(remaining).unwrap_or(0))).await;
+        match self {
+            Self::Run(run) => run.wait_deadline().await,
+            Self::Initialization { expires_at } => tokio::time::sleep_until(*expires_at).await,
+        }
     }
-}
 
-fn now_unix_ms() -> i64 {
-    i64::try_from(
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |duration| duration.as_millis()),
-    )
-    .unwrap_or(i64::MAX)
+    /// Resolve when the request is cancelled or its deadline elapses.
+    async fn interrupted(&self) {
+        match self {
+            Self::Run(run) => run.interrupted().await,
+            Self::Initialization { expires_at } => tokio::time::sleep_until(*expires_at).await,
+        }
+    }
+
+    /// Resolve on cancellation only; pends forever for the initialization
+    /// budget, which has no cancellation signal.
+    async fn cancelled(&self) {
+        match self {
+            Self::Run(run) => run.cancellation.cancelled().await,
+            Self::Initialization { .. } => std::future::pending::<()>().await,
+        }
+    }
 }
 
 fn timeout_error() -> McpError {
     McpError::stable(
         MCP_TIMEOUT,
         "MCP request was cancelled or exceeded its deadline",
+    )
+}
+
+fn poisoned_error() -> McpError {
+    McpError::stable(
+        MCP_TRANSPORT_POISONED,
+        "stdio transport is poisoned and must be reconstructed",
     )
 }
 
@@ -137,6 +172,31 @@ pub(crate) trait McpTransport: Send + Sync {
     fn take_notifications(&self) -> Vec<String> {
         Vec::new()
     }
+
+    /// Whether the transport has lost request/response alignment and can
+    /// never answer again. A poisoned transport must be rebuilt from its
+    /// configuration; see `McpToolset::reconstruct`. Default is never.
+    fn is_poisoned(&self) -> bool {
+        false
+    }
+}
+
+/// Append one method name to a bounded notification queue, dropping the
+/// oldest entry once `MAX_QUEUED_NOTIFICATIONS` is reached.
+fn push_notification(queue: &Mutex<VecDeque<String>>, method: String) {
+    if let Ok(mut queued) = queue.lock() {
+        if queued.len() >= MAX_QUEUED_NOTIFICATIONS {
+            queued.pop_front();
+        }
+        queued.push_back(method);
+    }
+}
+
+fn drain_notifications(queue: &Mutex<VecDeque<String>>) -> Vec<String> {
+    queue
+        .lock()
+        .map(|mut queued| queued.drain(..).collect())
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -338,15 +398,47 @@ struct StdioState {
     child: StdioChild,
     stdin: Box<dyn AsyncWrite + Send + Unpin>,
     stdout: BufReader<Box<dyn AsyncRead + Send + Unpin>>,
+    /// Set once the child has been killed and reaped by the poison path, so
+    /// `Drop` never signals a pid the platform may already have reused.
+    terminated: bool,
 }
 
 /// Newline-framed stdio transport. T1; not a sandbox.
+///
+/// Dropping the transport synchronously terminates the server process tree
+/// (the whole process group on Unix, the Job Object when confined) so a
+/// server that forked helpers never outlives its client.
 pub(crate) struct StdioTransport {
     state: tokio::sync::Mutex<StdioState>,
     next_id: AtomicU64,
-    notifications: Mutex<Vec<String>>,
+    notifications: Mutex<VecDeque<String>>,
     poisoned: AtomicBool,
     read_timeout: Duration,
+}
+
+impl Drop for StdioTransport {
+    fn drop(&mut self) {
+        let state = self.state.get_mut();
+        if state.terminated {
+            return;
+        }
+        match &mut state.child {
+            StdioChild::Unconfined(child) => {
+                if let Some(process_id) = child.id() {
+                    let _ = finstack_ai_runtime::confinement::terminate_process_tree(process_id);
+                }
+                // `kill_on_drop` still covers the direct child on platforms
+                // where the group signal is unavailable, and tokio reaps it.
+                let _ = child.start_kill();
+            }
+            StdioChild::Confined(child) => {
+                let _ = child.kill();
+                // Non-blocking reap; a killed child that has not exited yet
+                // is left for the platform. Drop never waits.
+                let _ = child.try_wait();
+            }
+        }
+    }
 }
 
 impl StdioTransport {
@@ -382,6 +474,7 @@ impl StdioTransport {
                 });
             }
             StdioState {
+                terminated: false,
                 child: StdioChild::Confined(child),
                 stdin: Box::new(tokio::fs::File::from_std(stdin)),
                 stdout: BufReader::new(Box::new(tokio::fs::File::from_std(stdout))),
@@ -415,6 +508,7 @@ impl StdioTransport {
                 });
             }
             StdioState {
+                terminated: false,
                 child: StdioChild::Unconfined(child),
                 stdin: Box::new(stdin),
                 stdout: BufReader::new(Box::new(stdout)),
@@ -423,9 +517,22 @@ impl StdioTransport {
         Ok(Self {
             state: tokio::sync::Mutex::new(state),
             next_id: AtomicU64::new(1),
-            notifications: Mutex::new(Vec::new()),
+            notifications: Mutex::new(VecDeque::new()),
             poisoned: AtomicBool::new(false),
             read_timeout: config.read_timeout,
+        })
+    }
+
+    /// JSON-RPC error reply for a server-initiated request the client does
+    /// not implement.
+    fn method_not_supported_reply(id: &serde_json::Value) -> serde_json::Value {
+        serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "error": {
+                "code": JSONRPC_METHOD_NOT_FOUND,
+                "message": "method not supported by client",
+            },
         })
     }
 
@@ -457,14 +564,11 @@ impl StdioTransport {
         params: serde_json::Value,
         control: RequestControl,
     ) -> Result<serde_json::Value, McpError> {
-        if self.poisoned.load(Ordering::SeqCst) || control.is_interrupted() {
-            if control.is_interrupted() {
-                return Err(timeout_error());
-            }
-            return Err(McpError::stable(
-                MCP_PROTOCOL_VIOLATION,
-                "stdio transport is poisoned",
-            ));
+        if control.is_interrupted() {
+            return Err(timeout_error());
+        }
+        if self.poisoned.load(Ordering::SeqCst) {
+            return Err(poisoned_error());
         }
         let params = with_meta(params);
         let message = jsonrpc_request(&id, method, &params);
@@ -485,8 +589,39 @@ impl StdioTransport {
             loop {
                 let frame = read_limited_line(&mut state.stdout).await?;
                 let value = decode_frame(&frame)?;
-                if let Some(result) = dispatch.push(&value)? {
-                    return Ok(result);
+                match dispatch.push(&value)? {
+                    Dispatched::Result(result) => return Ok(result),
+                    Dispatched::Skip => {}
+                    Dispatched::ServerRequest {
+                        id: server_id,
+                        method: server_method,
+                    } => {
+                        // A well-formed server-initiated request is answered
+                        // inline with `method not found` while the state
+                        // lock is still held, so the reply cannot interleave
+                        // with another client request, and the read loop
+                        // keeps waiting for the pending response.
+                        let reply =
+                            Self::encode_line(&Self::method_not_supported_reply(&server_id))?;
+                        state
+                            .stdin
+                            .write_all(reply.as_bytes())
+                            .await
+                            .map_err(|error| stdio_io(&error))?;
+                        state
+                            .stdin
+                            .flush()
+                            .await
+                            .map_err(|error| stdio_io(&error))?;
+                        let bounded = server_method
+                            .chars()
+                            .take(MAX_REJECTED_METHOD_CHARS)
+                            .collect::<String>();
+                        push_notification(
+                            &self.notifications,
+                            format!("{REQUEST_REJECTED_PREFIX}{bounded}"),
+                        );
+                    }
                 }
             }
         };
@@ -494,8 +629,7 @@ impl StdioTransport {
         // the transport's own read timeout, so cancelling a run still wins.
         let result = tokio::select! {
             biased;
-            () = control.cancellation.cancelled() => Err(timeout_error()),
-            () = control.wait_deadline() => Err(timeout_error()),
+            () = control.interrupted() => Err(timeout_error()),
             timed = tokio::time::timeout(self.read_timeout, io) => {
                 timed.unwrap_or_else(|_elapsed| {
                     Err(McpError::stable(
@@ -550,6 +684,10 @@ fn stdio_io(error: &std::io::Error) -> McpError {
 }
 
 async fn terminate_stdio_state(state: &mut StdioState) {
+    if state.terminated {
+        return;
+    }
+    state.terminated = true;
     let _ = state.stdin.shutdown().await;
     match &mut state.child {
         StdioChild::Unconfined(child) => {
@@ -589,10 +727,11 @@ impl McpTransport for StdioTransport {
     }
 
     fn take_notifications(&self) -> Vec<String> {
-        self.notifications
-            .lock()
-            .map(|mut queued| std::mem::take(&mut *queued))
-            .unwrap_or_default()
+        drain_notifications(&self.notifications)
+    }
+
+    fn is_poisoned(&self) -> bool {
+        self.poisoned.load(Ordering::SeqCst)
     }
 }
 
@@ -656,7 +795,7 @@ pub(crate) struct HttpTransport {
     client: reqwest::Client,
     max_response_bytes: usize,
     next_id: AtomicU64,
-    notifications: Mutex<Vec<String>>,
+    notifications: Mutex<VecDeque<String>>,
 }
 
 impl HttpTransport {
@@ -688,7 +827,7 @@ impl HttpTransport {
             client,
             max_response_bytes: config.max_response_bytes,
             next_id: AtomicU64::new(1),
-            notifications: Mutex::new(Vec::new()),
+            notifications: Mutex::new(VecDeque::new()),
         })
     }
 
@@ -741,8 +880,7 @@ impl HttpTransport {
             .send();
         let response = tokio::select! {
             biased;
-            () = control.cancellation.cancelled() => return Err(timeout_error()),
-            () = control.wait_deadline() => return Err(timeout_error()),
+            () = control.interrupted() => return Err(timeout_error()),
             result = send => result.map_err(|error| {
                 McpError::stable(MCP_TRANSPORT_ERROR, format!("http post failed: {error}"))
             })?,
@@ -752,16 +890,23 @@ impl HttpTransport {
             .get(reqwest::header::CONTENT_TYPE)
             .and_then(|value| value.to_str().ok())
             .is_some_and(|value| value.starts_with("text/event-stream"));
-        let text = read_bounded_body(response, self.max_response_bytes, &control).await?;
         if is_event_stream {
-            return parse_sse_jsonrpc(&text, &id, &self.notifications);
+            return read_sse_until_response(
+                response,
+                self.max_response_bytes,
+                &control,
+                &id,
+                &self.notifications,
+            )
+            .await;
         }
+        let text = read_bounded_body(response, self.max_response_bytes, &control).await?;
         let value = decode_frame(&text)?;
         match FrameDispatch::new(&id, &self.notifications).push(&value)? {
-            Some(result) => Ok(result),
-            None => Err(McpError::stable(
+            Dispatched::Result(result) => Ok(result),
+            Dispatched::Skip | Dispatched::ServerRequest { .. } => Err(McpError::stable(
                 MCP_PROTOCOL_VIOLATION,
-                "http response contained only notifications",
+                "http response did not contain the pending result",
             )),
         }
     }
@@ -791,10 +936,7 @@ impl McpTransport for HttpTransport {
     }
 
     fn take_notifications(&self) -> Vec<String> {
-        self.notifications
-            .lock()
-            .map(|mut queued| std::mem::take(&mut *queued))
-            .unwrap_or_default()
+        drain_notifications(&self.notifications)
     }
 }
 
@@ -844,24 +986,49 @@ fn jsonrpc_id(value: &serde_json::Value) -> Option<&serde_json::Value> {
     }
 }
 
+/// Outcome of classifying one inbound JSON-RPC frame against the pending
+/// request id.
+#[derive(Debug)]
+enum Dispatched {
+    /// The response to the pending request (`result` member).
+    Result(serde_json::Value),
+    /// A well-formed server-initiated request (`id` and `method`, foreign
+    /// id). The transport decides how to answer it; the frame never poisons.
+    ServerRequest {
+        id: serde_json::Value,
+        method: String,
+    },
+    /// A notification that was queued; keep reading.
+    Skip,
+}
+
 struct FrameDispatch<'a> {
     expected_id: &'a serde_json::Value,
-    notifications: &'a Mutex<Vec<String>>,
+    notifications: &'a Mutex<VecDeque<String>>,
     notification_count: usize,
+    server_request_count: usize,
 }
 
 impl<'a> FrameDispatch<'a> {
-    fn new(expected_id: &'a serde_json::Value, notifications: &'a Mutex<Vec<String>>) -> Self {
+    fn new(expected_id: &'a serde_json::Value, notifications: &'a Mutex<VecDeque<String>>) -> Self {
         Self {
             expected_id,
             notifications,
             notification_count: 0,
+            server_request_count: 0,
         }
     }
 
-    fn push(&mut self, value: &serde_json::Value) -> Result<Option<serde_json::Value>, McpError> {
+    /// Classify one frame. A frame carrying the pending id is always the
+    /// response; a frame with a foreign id is a server request when it names
+    /// a method and a protocol violation otherwise. Both per-round-trip caps
+    /// (notifications, server requests) are protocol violations when crossed.
+    fn push(&mut self, value: &serde_json::Value) -> Result<Dispatched, McpError> {
         let method = value.get("method").and_then(serde_json::Value::as_str);
         match (jsonrpc_id(value), method) {
+            (Some(id), _) if id == self.expected_id => {
+                interpret_result(value).map(Dispatched::Result)
+            }
             (None, Some(method)) => {
                 self.notification_count = self.notification_count.saturating_add(1);
                 if self.notification_count > MAX_NOTIFICATIONS_PER_ROUND_TRIP {
@@ -870,12 +1037,22 @@ impl<'a> FrameDispatch<'a> {
                         "notification count exceeds the round-trip cap",
                     ));
                 }
-                if let Ok(mut queued) = self.notifications.lock() {
-                    queued.push(method.to_owned());
-                }
-                Ok(None)
+                push_notification(self.notifications, method.to_owned());
+                Ok(Dispatched::Skip)
             }
-            (Some(id), _) if id == self.expected_id => interpret_result(value).map(Some),
+            (Some(id), Some(method)) => {
+                self.server_request_count = self.server_request_count.saturating_add(1);
+                if self.server_request_count > MAX_SERVER_REQUESTS_PER_ROUND_TRIP {
+                    return Err(McpError::stable(
+                        MCP_PROTOCOL_VIOLATION,
+                        "server request count exceeds the round-trip cap",
+                    ));
+                }
+                Ok(Dispatched::ServerRequest {
+                    id: id.clone(),
+                    method: method.to_owned(),
+                })
+            }
             _ => Err(McpError::stable(
                 MCP_PROTOCOL_VIOLATION,
                 "jsonrpc frame id does not match the pending request",
@@ -884,34 +1061,162 @@ impl<'a> FrameDispatch<'a> {
     }
 }
 
+/// Incremental SSE decoder that dispatches each complete event's `data`
+/// payload as one JSON-RPC frame and stops at the pending response.
+///
+/// Events end at a blank line (`\n\n` or `\r\n\r\n`); a trailing partial
+/// event is flushed by [`Self::finish`] at end of stream. Server-initiated
+/// requests are skipped (HTTP cannot answer them inline) and notifications
+/// are queued.
+struct SseFrameReader<'a> {
+    buffer: Vec<u8>,
+    /// Bytes of `buffer` already known to hold no event boundary, so each
+    /// chunk is scanned once rather than rescanning the whole buffer.
+    scanned: usize,
+    dispatch: FrameDispatch<'a>,
+    saw_data: bool,
+}
+
+impl<'a> SseFrameReader<'a> {
+    fn new(expected_id: &'a serde_json::Value, notifications: &'a Mutex<VecDeque<String>>) -> Self {
+        Self {
+            buffer: Vec::new(),
+            scanned: 0,
+            dispatch: FrameDispatch::new(expected_id, notifications),
+            saw_data: false,
+        }
+    }
+
+    /// Append one chunk and dispatch every event it completes.
+    ///
+    /// Returns the pending response as soon as its frame is parsed; the
+    /// remainder of the stream is then irrelevant and the caller may drop it.
+    fn feed(&mut self, chunk: &[u8]) -> Result<Option<serde_json::Value>, McpError> {
+        self.buffer.extend_from_slice(chunk);
+        // A separator may straddle the previous chunk end; back up by one
+        // less than the longest separator so it is still found.
+        let mut from = self.scanned.saturating_sub(3);
+        while let Some((end, separator_len)) = sse_event_boundary(&self.buffer, from) {
+            let event = self
+                .buffer
+                .drain(..end.saturating_add(separator_len))
+                .collect::<Vec<u8>>();
+            from = 0;
+            if let Some(result) = self.dispatch_event(event.get(..end).unwrap_or(&[]))? {
+                return Ok(Some(result));
+            }
+        }
+        self.scanned = self.buffer.len();
+        Ok(None)
+    }
+
+    /// Flush the trailing partial event at end of stream and report why no
+    /// response was found.
+    fn finish(mut self) -> Result<serde_json::Value, McpError> {
+        let trailing = std::mem::take(&mut self.buffer);
+        if let Some(result) = self.dispatch_event(&trailing)? {
+            return Ok(result);
+        }
+        if !self.saw_data {
+            return Err(McpError::stable(
+                MCP_TRANSPORT_ERROR,
+                "sse stream contained no data event",
+            ));
+        }
+        Err(McpError::stable(
+            MCP_PROTOCOL_VIOLATION,
+            "sse stream contained no matching response",
+        ))
+    }
+
+    fn dispatch_event(&mut self, event: &[u8]) -> Result<Option<serde_json::Value>, McpError> {
+        let text = std::str::from_utf8(event).map_err(|_| {
+            McpError::stable(MCP_PROTOCOL_VIOLATION, "http body is not valid utf-8")
+        })?;
+        let Some(data) = sse_event_data(text) else {
+            return Ok(None);
+        };
+        self.saw_data = true;
+        let value = decode_frame(&data)?;
+        match self.dispatch.push(&value)? {
+            Dispatched::Result(result) => Ok(Some(result)),
+            Dispatched::Skip | Dispatched::ServerRequest { .. } => Ok(None),
+        }
+    }
+}
+
+/// Byte offset and separator length of the first complete SSE event in
+/// `buffer`, searching from `from` onwards.
+fn sse_event_boundary(buffer: &[u8], from: usize) -> Option<(usize, usize)> {
+    let tail = buffer.get(from..).unwrap_or(&[]);
+    let lf = find_subslice(tail, b"\n\n").map(|at| (from.saturating_add(at), 2));
+    let crlf = find_subslice(tail, b"\r\n\r\n").map(|at| (from.saturating_add(at), 4));
+    match (lf, crlf) {
+        (Some(a), Some(b)) => Some(if a.0 <= b.0 { a } else { b }),
+        (Some(a), None) => Some(a),
+        (None, Some(b)) => Some(b),
+        (None, None) => None,
+    }
+}
+
+fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
+}
+
+/// Parse a fully buffered SSE body. Test helper over [`SseFrameReader`].
+#[cfg(test)]
 fn parse_sse_jsonrpc(
     text: &str,
     expected_id: &serde_json::Value,
-    notifications: &Mutex<Vec<String>>,
+    notifications: &Mutex<VecDeque<String>>,
 ) -> Result<serde_json::Value, McpError> {
-    let mut dispatch = FrameDispatch::new(expected_id, notifications);
-    let mut saw_data = false;
-    let normalized = text.replace("\r\n", "\n");
-    for event in normalized.split("\n\n") {
-        let Some(data) = sse_event_data(event) else {
-            continue;
+    let mut reader = SseFrameReader::new(expected_id, notifications);
+    if let Some(result) = reader.feed(text.as_bytes())? {
+        return Ok(result);
+    }
+    reader.finish()
+}
+
+/// Stream an SSE response under `cap` bytes and the request's cancellation
+/// and deadline, returning as soon as the pending response is parsed.
+///
+/// A server that keeps the stream open after answering (the usual
+/// streamable-HTTP behaviour) therefore never stalls the round trip; the
+/// stream is dropped and the connection closed on return. Exceeding the cap
+/// is [`MCP_LIMIT_EXCEEDED`], never a truncation. Interrupt semantics match
+/// `finstack_ai_net_guard::read_body_bounded_interruptible`, which this path
+/// cannot reuse because it only yields the body at end of stream.
+async fn read_sse_until_response(
+    response: reqwest::Response,
+    cap: usize,
+    control: &RequestControl,
+    expected_id: &serde_json::Value,
+    notifications: &Mutex<VecDeque<String>>,
+) -> Result<serde_json::Value, McpError> {
+    let mut reader = SseFrameReader::new(expected_id, notifications);
+    let mut stream = response.bytes_stream();
+    let mut received = 0_usize;
+    loop {
+        let next = tokio::select! {
+            biased;
+            () = control.cancelled() => return Err(timeout_error()),
+            () = control.wait_deadline() => return Err(timeout_error()),
+            chunk = stream.next() => chunk,
         };
-        saw_data = true;
-        let value = decode_frame(&data)?;
-        if let Some(result) = dispatch.push(&value)? {
+        let Some(chunk) = next else {
+            return reader.finish();
+        };
+        let chunk = chunk.map_err(|_| map_net_guard_error(NetGuardError::TransportFailed))?;
+        received = received.saturating_add(chunk.len());
+        if received > cap {
+            return Err(map_net_guard_error(NetGuardError::LimitExceeded));
+        }
+        if let Some(result) = reader.feed(&chunk)? {
             return Ok(result);
         }
     }
-    if !saw_data {
-        return Err(McpError::stable(
-            MCP_TRANSPORT_ERROR,
-            "sse stream contained no data event",
-        ));
-    }
-    Err(McpError::stable(
-        MCP_PROTOCOL_VIOLATION,
-        "sse stream contained no matching response",
-    ))
 }
 
 fn sse_event_data(event: &str) -> Option<String> {
@@ -935,14 +1240,10 @@ async fn read_bounded_body(
     cap: usize,
     control: &RequestControl,
 ) -> Result<String, McpError> {
-    let cancellation = control.cancellation.clone();
-    let deadline = control.clone();
     let body = read_body_bounded_interruptible(
         response,
         cap,
-        BodyReadInterrupt::new(async move { cancellation.cancelled().await }, async move {
-            deadline.wait_deadline().await;
-        }),
+        BodyReadInterrupt::new(control.cancelled(), control.wait_deadline()),
     )
     .await
     .map_err(map_net_guard_error)?;
@@ -1072,49 +1373,108 @@ mod tests {
         assert_eq!(headers.get("Mcp-Name").unwrap(), "get_weather");
     }
 
+    fn expect_result(dispatched: Dispatched) -> serde_json::Value {
+        match dispatched {
+            Dispatched::Result(value) => value,
+            other => panic!("expected a result, got {other:?}"),
+        }
+    }
+
     #[test]
     fn notification_before_response_pairs_and_leaves_the_next_request_aligned() {
-        let notifications = Mutex::new(Vec::new());
+        let notifications = Mutex::new(VecDeque::new());
         let expected = serde_json::json!(1);
         let mut dispatch = FrameDispatch::new(&expected, &notifications);
-        assert!(
+        assert!(matches!(
             dispatch
                 .push(&serde_json::json!({
                     "jsonrpc": "2.0",
                     "method": "notifications/tools/list_changed"
                 }))
-                .expect("notification")
-                .is_none()
+                .expect("notification"),
+            Dispatched::Skip
+        ));
+        let result = expect_result(
+            dispatch
+                .push(&serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "result": {"ok": true}
+                }))
+                .expect("result"),
         );
-        let result = dispatch
-            .push(&serde_json::json!({
-                "jsonrpc": "2.0",
-                "id": 1,
-                "result": {"ok": true}
-            }))
-            .expect("result")
-            .expect("paired");
         assert_eq!(result["ok"], serde_json::json!(true));
         assert_eq!(
-            notifications.lock().expect("lock").as_slice(),
+            drain_notifications(&notifications),
             ["notifications/tools/list_changed"]
         );
         let next = serde_json::json!(2);
         let mut next_dispatch = FrameDispatch::new(&next, &notifications);
-        let next_result = next_dispatch
-            .push(&serde_json::json!({
-                "jsonrpc": "2.0",
-                "id": 2,
-                "result": {"ok": false}
-            }))
-            .expect("next")
-            .expect("paired");
+        let next_result = expect_result(
+            next_dispatch
+                .push(&serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "result": {"ok": false}
+                }))
+                .expect("next"),
+        );
         assert_eq!(next_result["ok"], serde_json::json!(false));
     }
 
     #[test]
+    fn foreign_id_request_is_dispatched_as_a_server_request() {
+        let notifications = Mutex::new(VecDeque::new());
+        let expected = serde_json::json!(1);
+        let mut dispatch = FrameDispatch::new(&expected, &notifications);
+        let dispatched = dispatch
+            .push(&serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": "srv-1",
+                "method": "sampling/createMessage",
+                "params": {}
+            }))
+            .expect("a well-formed server request never fails dispatch");
+        match dispatched {
+            Dispatched::ServerRequest { id, method } => {
+                assert_eq!(id, serde_json::json!("srv-1"));
+                assert_eq!(method, "sampling/createMessage");
+            }
+            other => panic!("expected a server request, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn server_requests_are_capped_per_round_trip() {
+        let notifications = Mutex::new(VecDeque::new());
+        let expected = serde_json::json!(1);
+        let mut dispatch = FrameDispatch::new(&expected, &notifications);
+        let request = serde_json::json!({"jsonrpc": "2.0", "id": "srv", "method": "ping"});
+        for _ in 0..MAX_SERVER_REQUESTS_PER_ROUND_TRIP {
+            dispatch.push(&request).expect("under the cap");
+        }
+        let error = dispatch.push(&request).expect_err("over the cap");
+        assert_eq!(error.code(), MCP_PROTOCOL_VIOLATION);
+    }
+
+    #[test]
+    fn notification_queue_is_capped() {
+        let notifications = Mutex::new(VecDeque::new());
+        for index in 0..(MAX_QUEUED_NOTIFICATIONS + 8) {
+            push_notification(&notifications, format!("notifications/n{index}"));
+        }
+        let drained = drain_notifications(&notifications);
+        assert_eq!(drained.len(), MAX_QUEUED_NOTIFICATIONS);
+        assert_eq!(drained[0], "notifications/n8", "oldest entries are dropped");
+        assert_eq!(
+            drained[MAX_QUEUED_NOTIFICATIONS - 1],
+            format!("notifications/n{}", MAX_QUEUED_NOTIFICATIONS + 7)
+        );
+    }
+
+    #[test]
     fn foreign_id_is_a_protocol_violation() {
-        let notifications = Mutex::new(Vec::new());
+        let notifications = Mutex::new(VecDeque::new());
         let expected = serde_json::json!(1);
         let mut dispatch = FrameDispatch::new(&expected, &notifications);
         let error = dispatch
@@ -1192,7 +1552,7 @@ mod tests {
 
     #[test]
     fn sse_events_are_dispatched_separately() {
-        let notifications = Mutex::new(Vec::new());
+        let notifications = Mutex::new(VecDeque::new());
         let expected = serde_json::json!(7);
         let text = concat!(
             "event: message\n",
@@ -1205,14 +1565,14 @@ mod tests {
         let result = parse_sse_jsonrpc(text, &expected, &notifications).expect("sse");
         assert_eq!(result["pong"], serde_json::json!(true));
         assert_eq!(
-            notifications.lock().expect("lock").as_slice(),
+            drain_notifications(&notifications),
             ["notifications/tools/list_changed"]
         );
     }
 
     #[test]
     fn sse_crlf_events_are_dispatched_separately() {
-        let notifications = Mutex::new(Vec::new());
+        let notifications = Mutex::new(VecDeque::new());
         let expected = serde_json::json!(7);
         let text = concat!(
             "event: message\r\n",
@@ -1225,8 +1585,41 @@ mod tests {
         let result = parse_sse_jsonrpc(text, &expected, &notifications).expect("sse");
         assert_eq!(result["pong"], serde_json::json!(true));
         assert_eq!(
-            notifications.lock().expect("lock").as_slice(),
+            drain_notifications(&notifications),
             ["notifications/tools/list_changed"]
+        );
+    }
+
+    /// Feeding the stream one byte at a time splits every separator across
+    /// chunks; the reader must still find each event exactly once.
+    #[test]
+    fn sse_reader_finds_boundaries_split_across_chunks() {
+        let notifications = Mutex::new(VecDeque::new());
+        let expected = serde_json::json!(3);
+        let text = concat!(
+            "data: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/prompts/list_changed\"}\r\n",
+            "\r\n",
+            "data: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/tools/list_changed\"}\n",
+            "\n",
+            "data: {\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{\"done\":true}}\n",
+            "\n",
+            "data: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/never_reached\"}\n\n"
+        );
+        let mut reader = SseFrameReader::new(&expected, &notifications);
+        let mut result = None;
+        for byte in text.as_bytes() {
+            if let Some(value) = reader.feed(std::slice::from_ref(byte)).expect("feed") {
+                result = Some(value);
+                break;
+            }
+        }
+        assert_eq!(result.expect("matched")["done"], serde_json::json!(true));
+        assert_eq!(
+            drain_notifications(&notifications),
+            [
+                "notifications/prompts/list_changed",
+                "notifications/tools/list_changed"
+            ]
         );
     }
 
@@ -1319,6 +1712,107 @@ mod tests {
                 .is_ok();
         assert!(!followed, "the 302 redirect must not be followed");
         target_server.abort();
+    }
+
+    /// The server answers, then keeps the SSE stream open. The round trip
+    /// must return as soon as the matching response frame is parsed instead
+    /// of waiting for end of stream.
+    #[tokio::test]
+    async fn sse_read_stops_at_matching_response() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("accept");
+            let mut buf = vec![0_u8; 8_192];
+            let _ = stream.read(&mut buf).await.expect("read request");
+            let head =
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n";
+            stream.write_all(head.as_bytes()).await.expect("head");
+            let events = concat!(
+                "event: message\n",
+                "data: {\"jsonrpc\":\"2.0\",\"id\":\"srv\",\"method\":\"roots/list\"}\n",
+                "\n",
+                "event: message\n",
+                "data: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/tools/list_changed\"}\n",
+                "\n",
+                "event: message\n",
+                "data: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"resultType\":\"complete\",\"tools\":[]}}\n",
+                "\n",
+            );
+            stream.write_all(events.as_bytes()).await.expect("events");
+            stream.flush().await.expect("flush");
+            // Hold the stream open well past the assertion window.
+            tokio::time::sleep(Duration::from_secs(10)).await;
+            let _ = stream.shutdown().await;
+        });
+
+        let config = HttpConfig::try_new(format!("http://{addr}")).expect("config");
+        let transport = HttpTransport::try_new(&config).expect("transport");
+        let value = tokio::time::timeout(
+            Duration::from_secs(2),
+            transport.request("tools/list", serde_json::json!({})),
+        )
+        .await
+        .expect("returns before the server closes the stream")
+        .expect("matching response");
+        assert_eq!(value["resultType"], "complete");
+        assert_eq!(
+            transport.take_notifications(),
+            ["notifications/tools/list_changed"],
+            "server requests are skipped on http; notifications are queued"
+        );
+        server.abort();
+    }
+
+    /// Process state for `pid` as reported by `ps`, or `None` once the
+    /// process is gone or has been reaped to a zombie.
+    #[cfg(unix)]
+    fn live_process_state(pid: &str) -> Option<String> {
+        let output = std::process::Command::new("ps")
+            .args(["-o", "stat=", "-p", pid])
+            .output()
+            .ok()?;
+        let state = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+        if state.is_empty() || state.starts_with('Z') {
+            None
+        } else {
+            Some(state)
+        }
+    }
+
+    /// Dropping the transport must take the whole process group with it:
+    /// the server forks a `sleep` grandchild whose pid it reports on stdout.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn stdio_drop_terminates_process_group() {
+        let config = StdioConfig::new(
+            "/bin/sh",
+            vec!["-c".to_owned(), "sleep 60 & echo $!; wait".to_owned()],
+        );
+        let transport = StdioTransport::try_spawn(&config).expect("spawns");
+        let grandchild = {
+            let mut state = transport.state.lock().await;
+            read_limited_line(&mut state.stdout)
+                .await
+                .expect("the server reports the grandchild pid")
+                .trim()
+                .to_owned()
+        };
+        assert!(
+            live_process_state(&grandchild).is_some(),
+            "the grandchild is alive before drop"
+        );
+        drop(transport);
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while live_process_state(&grandchild).is_some() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "grandchild {grandchild} survived the transport drop"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
     }
 
     #[test]

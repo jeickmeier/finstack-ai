@@ -1503,3 +1503,257 @@ fn allow_url_requires_a_literal_loopback_ip_for_plaintext_http() {
         assert!(McpConfig::default().allow_url(url).is_ok());
     }
 }
+
+#[test]
+fn inline_result_bytes_is_clamped() {
+    let ceiling = u64::try_from(RAW_JSON_MAX_BYTES).expect("ceiling fits");
+    assert_eq!(
+        McpConfig::default()
+            .with_inline_result_bytes(u64::MAX)
+            .inline_result_bytes(),
+        ceiling,
+        "ceiling is the RawJson limit"
+    );
+    assert_eq!(
+        McpConfig::default()
+            .with_inline_result_bytes(0)
+            .inline_result_bytes(),
+        1,
+        "zero is clamped to one byte"
+    );
+    assert_eq!(
+        McpConfig::default()
+            .with_inline_result_bytes(4096)
+            .inline_result_bytes(),
+        4096
+    );
+}
+
+#[tokio::test]
+async fn notifications_are_drained_without_observer() {
+    let transport = Arc::new(
+        ScriptedTransport::new(vec![serde_json::json!({
+            "resultType":"complete",
+            "tools":[{"name":"echo","inputSchema":{"type":"object"}}]
+        })])
+        .with_pending_notifications(vec!["notifications/tools/list_changed".to_owned()]),
+    );
+    let toolset = McpToolset::connect(
+        Arc::clone(&transport) as Arc<dyn crate::transport::McpTransport>,
+        McpConfig::default(),
+        None,
+    )
+    .await
+    .expect("connects");
+    assert_eq!(toolset.tools().len(), 1);
+    assert!(
+        transport.take_notifications().is_empty(),
+        "connect must drain the queue even when no observer is bound"
+    );
+}
+
+/// A server-initiated JSON-RPC request (foreign id plus `method`) arriving
+/// while a client request is pending is answered inline with `-32601`, the
+/// rejection is queued for observers, and the pending response is still
+/// paired so the next round trip stays aligned.
+#[cfg(unix)]
+#[tokio::test]
+async fn stdio_server_request_gets_method_not_found_and_stream_stays_aligned() {
+    let script = concat!(
+        "read -r _request\n",
+        "printf '{\"jsonrpc\":\"2.0\",\"id\":\"srv-1\",\"method\":\"roots/list\",\"params\":{}}\\n'\n",
+        "read -r reply\n",
+        "printf '{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"resultType\":\"complete\",\"reply\":%s}}\\n' \"$reply\"\n",
+        "read -r _request\n",
+        "printf '{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"resultType\":\"complete\",\"tools\":[]}}\\n'\n",
+    );
+    let config = StdioConfig::new("/bin/sh", vec!["-c".to_owned(), script.to_owned()]);
+    let transport = crate::transport::StdioTransport::try_spawn(&config).expect("spawns");
+    let value = transport
+        .request("tools/list", serde_json::json!({}))
+        .await
+        .expect("the pending response is still paired after a server request");
+    assert_eq!(value["reply"]["id"], serde_json::json!("srv-1"));
+    assert_eq!(value["reply"]["error"]["code"], serde_json::json!(-32601));
+    assert_eq!(
+        transport.take_notifications(),
+        ["client/request_rejected:roots/list"]
+    );
+    assert!(!transport.is_poisoned());
+    let next = transport
+        .request("tools/list", serde_json::json!({}))
+        .await
+        .expect("the second round trip stays aligned");
+    assert_eq!(next["resultType"], "complete");
+}
+
+/// A real sampling request carries a server-assigned id; until the host
+/// drives that round trip (tracked follow-up) it is rejected like any other
+/// server request and never poisons the transport.
+#[cfg(unix)]
+#[tokio::test]
+async fn sampling_request_with_server_id_is_rejected_without_poisoning() {
+    let script = concat!(
+        "read -r _request\n",
+        "printf '{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"sampling/createMessage\",\"params\":{\"messages\":[]}}\\n'\n",
+        "read -r reply\n",
+        "printf '{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"resultType\":\"complete\",\"reply\":%s}}\\n' \"$reply\"\n",
+        "read -r _request\n",
+        "printf '{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"resultType\":\"complete\",\"tools\":[]}}\\n'\n",
+    );
+    let config = StdioConfig::new("/bin/sh", vec!["-c".to_owned(), script.to_owned()]);
+    let transport = crate::transport::StdioTransport::try_spawn(&config).expect("spawns");
+    let value = transport
+        .request("tools/list", serde_json::json!({}))
+        .await
+        .expect("sampling request is answered inline, not treated as the result");
+    assert_eq!(value["reply"]["id"], serde_json::json!(7));
+    assert_eq!(value["reply"]["error"]["code"], serde_json::json!(-32601));
+    assert_eq!(
+        transport.take_notifications(),
+        ["client/request_rejected:sampling/createMessage"]
+    );
+    assert!(
+        !transport.is_poisoned(),
+        "a well-formed server request never poisons"
+    );
+    transport
+        .request("tools/list", serde_json::json!({}))
+        .await
+        .expect("transport stays usable");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn poisoned_transport_uses_distinct_code() {
+    let script = "read -r _request\nprintf 'this is not a jsonrpc frame\\n'\n";
+    let config = StdioConfig::new("/bin/sh", vec!["-c".to_owned(), script.to_owned()]);
+    let transport = crate::transport::StdioTransport::try_spawn(&config).expect("spawns");
+    let malformed = transport
+        .request("tools/list", serde_json::json!({}))
+        .await
+        .expect_err("a malformed frame is a protocol violation");
+    assert_eq!(malformed.code(), MCP_PROTOCOL_VIOLATION);
+    assert!(transport.is_poisoned());
+    let poisoned = transport
+        .request("tools/list", serde_json::json!({}))
+        .await
+        .expect_err("later requests fail on the poisoned transport");
+    assert_eq!(poisoned.code(), MCP_TRANSPORT_POISONED);
+    assert_ne!(poisoned.code(), MCP_PROTOCOL_VIOLATION);
+    let tool_error: ToolError = poisoned.into();
+    assert_eq!(tool_error.code(), MCP_TRANSPORT_POISONED);
+    assert_eq!(tool_error.category(), ErrorCategory::Tool);
+}
+
+/// The fixture server answers `tools/list` and `prompts/list`, then exits on
+/// its first life (poisoning the transport on the next call). Every later
+/// spawn, detected through a marker file, also answers `tools/call`, so a
+/// successful call after `reconstruct` proves a fresh process was spawned
+/// from the retained `StdioConfig`.
+#[cfg(unix)]
+#[tokio::test]
+async fn reconstruct_after_poison_recovers() {
+    let scratch = std::env::temp_dir().join(format!(
+        "finstack-mcp-respawn-{}-{}",
+        std::process::id(),
+        finstack_ai_kernel::EffectId::from_bytes([9; 16])
+    ));
+    std::fs::create_dir_all(&scratch).expect("scratch dir");
+    let script = concat!(
+        "marker=\"$1/respawned\"\n",
+        "reply() {\n",
+        "  id=$(printf '%s' \"$2\" | sed -E 's/^\\{\"id\":(\"[^\"]*\"|[0-9]+),.*/\\1/')\n",
+        "  printf '{\"jsonrpc\":\"2.0\",\"id\":%s,%s}\\n' \"$id\" \"$1\"\n",
+        "}\n",
+        "read -r req\n",
+        "reply '\"result\":{\"resultType\":\"complete\",\"tools\":[{\"name\":\"echo\",\"inputSchema\":{\"type\":\"object\"}}]}' \"$req\"\n",
+        "read -r req\n",
+        "reply '\"error\":{\"code\":-32601,\"message\":\"Method not found\"}' \"$req\"\n",
+        "if [ -e \"$marker\" ]; then\n",
+        "  read -r req\n",
+        "  reply '\"result\":{\"resultType\":\"complete\",\"content\":[{\"type\":\"text\",\"text\":\"after-respawn\"}],\"isError\":false}' \"$req\"\n",
+        "else\n",
+        "  touch \"$marker\"\n",
+        "  exit 0\n",
+        "fi\n",
+    );
+    let config = McpConfig::default()
+        .allow_command("/bin/sh")
+        .stdio(StdioConfig::new(
+            "/bin/sh",
+            vec![
+                "-c".to_owned(),
+                script.to_owned(),
+                "sh".to_owned(),
+                scratch.display().to_string(),
+            ],
+        ))
+        .expect("allowlisted");
+    let live = McpToolsetFactory::new(config)
+        .construct()
+        .await
+        .expect("first spawn enumerates the catalog");
+    let error = call(&live, "echo", serde_json::json!({}))
+        .await
+        .expect_err("the first server exits before tools/call");
+    assert_eq!(error.code(), MCP_TRANSPORT_ERROR);
+    assert!(live.transport.is_poisoned(), "the transport is poisoned");
+    let again = call(&live, "echo", serde_json::json!({}))
+        .await
+        .expect_err("poisoned");
+    assert_eq!(again.code(), MCP_TRANSPORT_POISONED);
+
+    let rebuilt = live
+        .reconstruct()
+        .await
+        .expect("reconstruct respawns from the retained config")
+        .expect("same catalog");
+    let mut stream = rebuilt
+        .call(context(), validated(&live, "echo", &serde_json::json!({})))
+        .await
+        .expect("the respawned server answers tools/call");
+    let item = stream.next().await.expect("item").expect("ok");
+    match item {
+        ToolStreamItem::Completed(result) => {
+            assert!(result.output.as_str().contains("after-respawn"));
+        }
+        other => panic!("unexpected {other:?}"),
+    }
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
+/// The rejection marker recorded for a server-initiated request reaches the
+/// host's `McpListChangedObserver` through the ordinary drain.
+#[cfg(unix)]
+#[tokio::test]
+async fn server_request_rejection_is_observed() {
+    let script = concat!(
+        "read -r _request\n",
+        "printf '{\"jsonrpc\":\"2.0\",\"id\":\"srv-1\",\"method\":\"roots/list\",\"params\":{}}\\n'\n",
+        "read -r _reply\n",
+        "printf '{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"resultType\":\"complete\",",
+        "\"tools\":[{\"name\":\"echo\",\"inputSchema\":{\"type\":\"object\"}}]}}\\n'\n",
+        "read -r _request\n",
+        "printf '{\"jsonrpc\":\"2.0\",\"id\":2,",
+        "\"error\":{\"code\":-32601,\"message\":\"Method not found\"}}\\n'\n",
+    );
+    let observer = Arc::new(CaptureListChanged(std::sync::Mutex::new(Vec::new())));
+    let config = McpConfig::default()
+        .allow_command("/bin/sh")
+        .stdio(StdioConfig::new(
+            "/bin/sh",
+            vec!["-c".to_owned(), script.to_owned()],
+        ))
+        .expect("allowlisted");
+    let toolset = McpToolsetFactory::new(config)
+        .with_list_changed_observer(Arc::clone(&observer) as Arc<dyn McpListChangedObserver>)
+        .construct()
+        .await
+        .expect("catalog freeze survives the server request");
+    assert_eq!(toolset.tools().len(), 1);
+    assert_eq!(
+        observer.0.lock().expect("lock").as_slice(),
+        ["client/request_rejected:roots/list"]
+    );
+}

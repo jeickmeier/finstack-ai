@@ -218,7 +218,7 @@ impl ContextProvider for McpContextProvider {
             .map(|names| names.clone())
             .unwrap_or_default();
         let max_bytes = self.config.inline_result_bytes();
-        let control = RequestControl::new(ctx.run.cancellation.clone(), ctx.run.deadline);
+        let control = RequestControl::from_run(&ctx.run);
         Box::pin(async move {
             collect_frozen(
                 transport.as_ref(),
@@ -232,11 +232,16 @@ impl ContextProvider for McpContextProvider {
         })
     }
 
+    /// Re-enumerate resources on the live transport, or on a fresh one
+    /// respawned from the retained server configuration when the current
+    /// transport is poisoned.
     fn reconstruct(&self) -> PortFuture<Result<Option<Arc<dyn ContextProvider>>, ContextError>> {
-        let transport = Arc::clone(&self.transport);
+        let current = Arc::clone(&self.transport);
         let config = self.config.clone();
         let list_changed = self.list_changed.clone();
         Box::pin(async move {
+            let transport = crate::reopen_if_poisoned(&config, &current)
+                .map_err(|error| context_error_from_mcp(&error))?;
             let provider = McpContextProvider::connect(transport, &config, list_changed)
                 .await
                 .map_err(|error| context_error_from_mcp(&error))?;
@@ -508,7 +513,9 @@ fn context_error(
 fn context_error_from_mcp(error: &McpError) -> ContextError {
     let category = match error.code() {
         crate::MCP_LIMIT_EXCEEDED | crate::MCP_ARTIFACT_REQUIRED => ErrorCategory::Limit,
-        crate::MCP_TRANSPORT_ERROR | crate::MCP_SERVER_NOT_ALLOWLISTED => ErrorCategory::Context,
+        crate::MCP_TRANSPORT_ERROR
+        | crate::MCP_TRANSPORT_POISONED
+        | crate::MCP_SERVER_NOT_ALLOWLISTED => ErrorCategory::Context,
         _ => ErrorCategory::Validation,
     };
     ContextError::try_new(error.code(), category, error.message(), Metadata::empty())
