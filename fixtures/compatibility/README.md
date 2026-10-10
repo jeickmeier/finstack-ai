@@ -32,6 +32,7 @@ fixtures/compatibility/<family>/migrations/v<from>-to-v<to>--<slug>.{before,afte
 | Golden traces | [`golden-trace/`](golden-trace/) |
 | Benchmark reports | [`benchmark-report/`](benchmark-report/) |
 | Plugin lockfile | [`plugin-lock/`](plugin-lock/) |
+| Artifact envelopes | [`artifact/`](artifact/) |
 
 Reserved README-only directories are not passing conformance evidence.
 Active corpora under `golden-trace/` and `benchmark-report/` are executable
