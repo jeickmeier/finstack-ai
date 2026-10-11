@@ -34,9 +34,10 @@ pub struct FilesystemPreopen {
     /// Host directory. Tests use a tempdir; never inherit `$HOME`.
     /// Validated fail-closed by [`validate_preopen_host_path`].
     pub host_path: PathBuf,
-    /// Read permission on the preopen.
+    /// Read permission on the preopen. Required; a preopen without read is rejected.
     pub read: bool,
-    /// Write permission on the preopen.
+    /// Write permission on the preopen. Write implies read under Wasmtime's
+    /// read-only / read-write preopen model.
     pub write: bool,
 }
 

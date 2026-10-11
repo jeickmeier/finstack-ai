@@ -13,7 +13,7 @@ use wasmtime_wasi::clocks::{WasiClocks, WasiClocksView};
 use wasmtime_wasi::filesystem::{WasiFilesystem, WasiFilesystemView};
 use wasmtime_wasi::random::WasiRandom;
 use wasmtime_wasi::sockets::{WasiSockets, WasiSocketsView};
-use wasmtime_wasi::{DirPerms, FilePerms, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
+use wasmtime_wasi::{FsPerms, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 
 use crate::bindings::toolset::finstack::ai_host::blobs;
 use crate::bindings::toolset::finstack::ai_host::logging::{self, Level};
@@ -466,25 +466,20 @@ fn wasi_ctx(
     if can_link("filesystem", granted, resources) {
         for preopen in &resources.filesystem {
             validate_preopen_host_path(&preopen.host_path)?;
-            let dir_perms = match (preopen.read, preopen.write) {
-                (true, true) => DirPerms::READ | DirPerms::MUTATE,
-                (true, false) => DirPerms::READ,
-                (false, true) => DirPerms::MUTATE,
-                (false, false) => DirPerms::empty(),
-            };
-            let file_perms = match (preopen.read, preopen.write) {
-                (true, true) => FilePerms::READ | FilePerms::WRITE,
-                (true, false) => FilePerms::READ,
-                (false, true) => FilePerms::WRITE,
-                (false, false) => FilePerms::empty(),
+            // Wasmtime 48 replaced separate directory and file bits with
+            // read-only or read-write. Write-only and empty preopens cannot
+            // be expressed without granting read, so they fail closed.
+            let perms = match (preopen.read, preopen.write) {
+                (true, true) => FsPerms::ReadWrite,
+                (true, false) => FsPerms::ReadOnly,
+                (false, _) => {
+                    return Err(PluginHostError::ConfigInvalid(
+                        "filesystem preopen must grant read",
+                    ));
+                }
             };
             builder
-                .preopened_dir(
-                    &preopen.host_path,
-                    &preopen.guest_path,
-                    dir_perms,
-                    file_perms,
-                )
+                .preopened_dir(&preopen.host_path, &preopen.guest_path, perms)
                 .map_err(|error| PluginHostError::InstantiateFailed(format!("preopen: {error}")))?;
         }
     }
@@ -838,6 +833,30 @@ mod tests {
                 panic!("{name} must fail without a grant");
             };
             assert_eq!(error.code(), "plugin_instantiate_failed");
+        }
+    }
+
+    #[test]
+    fn preopen_without_read_is_rejected() {
+        use crate::grants::{FilesystemPreopen, GrantResources};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut granted = BTreeSet::new();
+        granted.insert("filesystem".to_owned());
+        for write in [false, true] {
+            let resources = GrantResources {
+                filesystem: vec![FilesystemPreopen {
+                    guest_path: "/data".to_owned(),
+                    host_path: dir.path().to_path_buf(),
+                    read: false,
+                    write,
+                }],
+                ..GrantResources::default()
+            };
+            let Err(error) = super::wasi_ctx(&granted, &resources) else {
+                panic!("preopen without read must be rejected");
+            };
+            assert_eq!(error.code(), "plugin_registration_invalid");
         }
     }
 

@@ -136,7 +136,8 @@ finstack-ai = { path = "crates/finstack-ai", version = "2.0.0", default-features
 finstack-ai-eval = { path = "crates/finstack-ai-eval", version = "2.0.0", default-features = false }
 finstack-ai-protocol = { path = "crates/finstack-ai-protocol", version = "2.0.0" }
 finstack-ai-server = { path = "crates/finstack-ai-server", version = "2.0.0" }
-rustls = { version = "0.23.31", default-features = false, features = ["std", "ring"] }
+# 0.23.45 clears RUSTSEC-2026-0285 (TLS 1.3 handshake records).
+rustls = { version = "0.23.45", default-features = false, features = ["std", "ring"] }
 tokio-rustls = { version = "0.26.2", default-features = false, features = ["ring"] }
 finstack-ai-test = { path = "crates/finstack-ai-test", version = "2.0.0" }
 finstack-ai-store-common = { path = "extensions/stores/finstack-ai-store-common", version = "2.0.0" }
@@ -215,12 +216,13 @@ finstack-ai-plugin-host = { path = "plugins/finstack-ai-plugin-host", version = 
 finstack-ai-guest-sdk = { path = "plugins/finstack-ai-guest-sdk", version = "2.0.0" }
 # Guest-only; do not add to kernel/runtime/SDK/host. Pin matches fixture guests.
 wit-bindgen = { version = "0.57.1", default-features = false, features = ["macros", "realloc"] }
-# Newest crates.io release whose MSRV is ≤ 1.97.1. Do not enable the implicit
-# filesystem `cache` feature (TM-08 /  host-owned compile cache).
-wasmtime = { version = "47.0.4", default-features = false, features = ["runtime", "component-model", "async", "cranelift", "std"] }
+# Newest patched 48 release whose MSRV (1.95) is ≤ 1.97.1. 47.0.4 is rejected
+# by cargo-deny (RUSTSEC-2026-0314 through RUSTSEC-2026-0327). Do not enable
+# the implicit filesystem `cache` feature (TM-08 / host-owned compile cache).
+wasmtime = { version = "48.0.5", default-features = false, features = ["runtime", "component-model", "async", "cranelift", "std"] }
 # Same line as wasmtime. Host-only; deny-by-default WASI context. Do not enable
 # ambient inherit helpers as crate features ( / SEC-INV-006).
-wasmtime-wasi = { version = "47.0.4", default-features = false }
+wasmtime-wasi = { version = "48.0.5", default-features = false }
 ed25519-dalek = { version = "2.2.0", default-features = false, features = ["std"] }
 serde = { version = "1.0.229", features = ["derive", "rc"] }
 serde_json = { version = "1.0.151", features = ["raw_value"] }

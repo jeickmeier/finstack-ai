@@ -377,14 +377,26 @@ if [ -n "$py_libdir" ]; then
   export LD_LIBRARY_PATH="${py_libdir}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
   export DYLD_LIBRARY_PATH="${py_libdir}${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
 fi
-uv run --no-sync pytest -q scripts/ci/test_merge_lcov.py
+uv run --no-sync pytest -q \
+  scripts/ci/test_merge_lcov.py \
+  scripts/ci/test_python_link_dir.py \
+  scripts/release/test_starter_rc.py
 # `callback-fixture` registers `_callback_port_conformance`. Without it the
 # six-port callback conformance suite skips itself silently on every run.
 uv run --no-project --with maturin==1.14.1 \
   env VIRTUAL_ENV="$VIRTUAL_ENV" PYO3_PYTHON="$PYO3_PYTHON" \
   maturin develop --uv --locked --manifest-path bindings/finstack-ai-python/Cargo.toml \
   --features extension-module,callback-fixture
-cargo test -p finstack-ai-python --lib --locked
+# rust-lld resolves -lpython3.14 to libpython3.14.so. Standalone CPython
+# often ships only libpython3.14.so.1.0; add that alias to the link path.
+python_link_dir="$(uv run --no-sync python scripts/ci/python_link_dir.py)"
+if [ -n "$python_link_dir" ]; then
+  export LIBRARY_PATH="${python_link_dir}${LIBRARY_PATH:+:$LIBRARY_PATH}"
+  RUSTFLAGS="${RUSTFLAGS:-} -L native=${python_link_dir}" \
+    cargo test -p finstack-ai-python --lib --locked
+else
+  cargo test -p finstack-ai-python --lib --locked
+fi
 uv run --no-sync pytest -q
 mise run test-search-python
 uv run --no-sync python scripts/ci/test_recipes.py python

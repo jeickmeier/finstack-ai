@@ -242,7 +242,8 @@ impl PluginHost {
     pub fn try_new(config: PluginHostConfig) -> Result<Self, PluginHostError> {
         let mut wasm_config = Config::new();
         #[allow(deprecated)]
-        // Wasmtime 47 treats `async_support` as a no-op.
+        // `async_support` is retained and ignored; the cache fingerprint still
+        // records `async=true`.
         wasm_config.async_support(true);
         wasm_config.epoch_interruption(true);
         wasm_config.consume_fuel(true);

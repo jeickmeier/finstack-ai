@@ -112,6 +112,27 @@ def rewrite_members(text: str, members: list[str]) -> str:
     return re.sub(r"members = \[[^\]]*\]", block, text, count=1, flags=re.S)
 
 
+_DEPENDENCIES = re.compile(
+    r"^\[dependencies\]\n.*?(?=^\[|\Z)",
+    re.MULTILINE | re.DOTALL,
+)
+
+
+def dependencies_block(manifest: Path) -> str:
+    """Return the `[dependencies]` table from an example manifest.
+
+    The staged RC crate copies that example's sources, so its dependency
+    table has to stay identical. A second handwritten list drifted to the
+    removed `finstack-ai-context-memory` name and nightly lockfile generation
+    failed.
+    """
+    text = manifest.read_text(encoding="utf-8")
+    match = _DEPENDENCIES.search(text)
+    if match is None:
+        raise SystemExit(f"{manifest} has no [dependencies] table")
+    return match.group(0).rstrip() + "\n"
+
+
 def write_rc_example(dest: Path, name: str, source: Path, extra: str) -> None:
     dest.mkdir(parents=True)
     shutil.copytree(source / "src", dest / "src")
@@ -154,36 +175,19 @@ def rust_starters(stage: Path) -> None:
     licenses = REPO_ROOT / "licenses"
     if licenses.is_dir():
         shutil.copytree(licenses, stage / "licenses")
+    minimal = REPO_ROOT / "examples" / "rust-minimal"
     write_rc_example(
         stage / "examples" / "rc-rust-minimal",
         "finstack-ai-native-examples",
-        REPO_ROOT / "examples" / "rust-minimal",
-        """[dependencies]
-finstack-ai = { workspace = true, features = ["native-tokio"] }
-finstack-ai-provider-ollama = { workspace = true }
-finstack-ai-store-memory = { workspace = true }
-finstack-ai-tools-calculator = { workspace = true }
-finstack-ai-tools-filesystem = { workspace = true }
-finstack-ai-tools-shell = { workspace = true }
-finstack-ai-context-repository = { workspace = true }
-finstack-ai-context-memory = { workspace = true }
-finstack-ai-middleware-compaction = { workspace = true }
-finstack-ai-middleware-verify = { workspace = true }
-tokio = { workspace = true, features = ["io-util", "net", "rt-multi-thread"] }
-""",
+        minimal,
+        dependencies_block(minimal / "Cargo.toml"),
     )
+    durable = REPO_ROOT / "examples" / "durable-interaction"
     write_rc_example(
         stage / "examples" / "rc-durable-interaction",
         "finstack-ai-example-durable-interaction",
-        REPO_ROOT / "examples" / "durable-interaction",
-        """[dependencies]
-finstack-ai-kernel = { workspace = true }
-finstack-ai-runtime = { workspace = true, default-features = false, features = ["native-tokio"] }
-finstack-ai-store-sqlite = { workspace = true }
-finstack-ai-test = { workspace = true }
-tempfile = { workspace = true }
-tokio = { workspace = true, features = ["rt", "macros", "time"] }
-""",
+        durable,
+        dependencies_block(durable / "Cargo.toml"),
     )
     run(
         [
