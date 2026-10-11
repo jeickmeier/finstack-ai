@@ -92,8 +92,8 @@ unpublished.
   kernel decisions, and undecodable payloads dead-letter immediately; other
   failures back off under `max_response_attempts` (default 8).
 - `finstack-ai` (`durable-host`): `DurableHost::tick` fails with
-  `durable_descriptor_missing` when a scheduled row has no recovery
-  descriptor, before any dispatch, now that parked rows are driven only on a
+  `durable_descriptor_missing` when a scheduled row of a kind it serves has no
+  recovery descriptor, before any dispatch, now that parked rows are driven only on a
   response or deadline.
 - `finstack-ai-workflow-media-pipeline`: render tables are versioned through
   a `finstack_workflow_media_pipeline_schema` singleton (v1, existing files
