@@ -24,6 +24,10 @@ unpublished.
   `100.64.0.0/10`, `192.0.0.0/24`, and `240.0.0.0/4` and un-embeds NAT64
   (`64:ff9b::/96`) and 6to4 (`2002::/16`) destinations. Teredo and
   `198.18.0.0/15` are deliberately not blocked.
+- `Agent::linked` gateway endpoints may be an origin or the wire protocol's
+  canonical request path (`/v1/responses`, `/v1/messages`, `/api/chat`;
+  `gemini_generate_content` takes an origin only); any other path is a
+  configuration error instead of being silently replaced.
 - `finstack-ai-provider-wire` gains `native` (Tokio/reqwest streaming driver
   `BoundedRequest`, `StreamProtocol`/`StreamAssembler`, `DataSseParser`/
   `NamedSseParser`) and `vendored-tls` features plus shared request-phase error
