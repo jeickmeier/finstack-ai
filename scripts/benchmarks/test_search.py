@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from search import approved_binary, benchmark_argv
+from search import approved_binary, approved_output, benchmark_argv
 
 
 def test_approved_binary_accepts_search_scale_under_target(tmp_path: Path) -> None:
@@ -37,6 +37,26 @@ def test_approved_binary_rejects_paths_outside_target(tmp_path: Path) -> None:
 
     with pytest.raises(SystemExit, match="search_scale"):
         approved_binary(binary, tmp_path / "target")
+
+
+def test_approved_output_accepts_json_under_target(tmp_path: Path) -> None:
+    target = tmp_path / "target"
+    output = target / "nested" / "search-first.json"
+
+    assert approved_output(output, target) == output.resolve()
+
+
+@pytest.mark.parametrize(
+    "relative",
+    ["../escape.json", "../../etc/passwd.json", "report.txt", ""],
+)
+def test_approved_output_rejects_escapes_and_non_json(
+    tmp_path: Path, relative: str
+) -> None:
+    target = tmp_path / "target"
+
+    with pytest.raises(SystemExit, match="target/"):
+        approved_output(target / relative, target)
 
 
 def test_benchmark_argv_uses_typed_fields(tmp_path: Path) -> None:

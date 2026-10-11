@@ -29,6 +29,7 @@ _OPTION = re.compile(
 _BINARY_ERROR = (
     "benchmark binary must be an existing file named search_scale under target/"
 )
+_OUTPUT_ERROR = "benchmark output must be a .json file under target/"
 
 
 def approved_binary(candidate: Path, target_root: Path = TARGET_DIR) -> Path:
@@ -54,6 +55,30 @@ def approved_binary(candidate: Path, target_root: Path = TARGET_DIR) -> Path:
     if not approved.is_file():
         raise SystemExit(_BINARY_ERROR)
     return approved
+
+
+def approved_output(candidate: Path, target_root: Path = TARGET_DIR) -> Path:
+    """Return a ``.json`` report path rebuilt under ``target_root``.
+
+    Each path segment is restricted to the same character class as the binary
+    path so a caller-supplied output cannot write outside the build directory.
+    """
+    resolved = Path(candidate).expanduser().resolve()
+    root = Path(target_root).expanduser().resolve()
+    try:
+        relative = resolved.relative_to(root)
+    except ValueError as error:
+        raise SystemExit(_OUTPUT_ERROR) from error
+    if (
+        not relative.parts
+        or relative.suffix != ".json"
+        or any(
+            part in {".", ".."} or _BINARY_PART.fullmatch(part) is None
+            for part in relative.parts
+        )
+    ):
+        raise SystemExit(_OUTPUT_ERROR)
+    return root.joinpath(*relative.parts)
 
 
 def _allow(pattern: re.Pattern[str], value: str, label: str) -> str:
@@ -225,6 +250,7 @@ def main() -> None:
     if args.reuse and args.corpus_dir is None:
         parser.error("--reuse requires --corpus-dir")
     binary = approved_binary(args.binary)
+    output_path = approved_output(args.output)
     with tempfile.TemporaryDirectory(prefix="finstack-search-bench-") as temporary:
         root = args.corpus_dir or Path(temporary)
 
@@ -265,11 +291,11 @@ def main() -> None:
             "full": full,
             "memory_isolated": memory,
         }
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(json.dumps(output, indent=2) + "\n")
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(json.dumps(output, indent=2) + "\n")
         print(
             "Search benchmark: "
-            f"{args.output}; peak RSS {full['peak_rss_bytes']:,} bytes, "
+            f"{output_path}; peak RSS {full['peak_rss_bytes']:,} bytes, "
             f"memory-only {memory['peak_rss_bytes']:,} bytes"
         )
 

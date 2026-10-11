@@ -1,8 +1,13 @@
 /// <reference path="./harness.d.ts" />
 
 import { expect, test } from "@playwright/test";
-import { execSync } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { release } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,6 +24,39 @@ const WASM_OVERHEAD_TARGET_PERCENT = 200;
 const PAIRED_SAMPLES = 9;
 const CROSSING_PAYLOAD_BYTES = 64 * 1024;
 const CROSSING_ITERATIONS = 256;
+
+/** Reads HEAD from the git directory so the report never spawns a PATH-resolved binary. */
+function headCommit(): string {
+  const dotGit = resolve(REPO_ROOT, ".git");
+  const gitDir = statSync(dotGit).isFile()
+    ? resolve(
+        REPO_ROOT,
+        readFileSync(dotGit, "utf8").trim().replace(/^gitdir: /, ""),
+      )
+    : dotGit;
+  const commonDirFile = resolve(gitDir, "commondir");
+  const commonDir = existsSync(commonDirFile)
+    ? resolve(gitDir, readFileSync(commonDirFile, "utf8").trim())
+    : gitDir;
+  const head = readFileSync(resolve(gitDir, "HEAD"), "utf8").trim();
+  if (!head.startsWith("ref: ")) {
+    return head.slice(0, 12);
+  }
+  const ref = head.slice("ref: ".length);
+  for (const dir of [gitDir, commonDir]) {
+    const loose = resolve(dir, ref);
+    if (existsSync(loose)) {
+      return readFileSync(loose, "utf8").trim().slice(0, 12);
+    }
+  }
+  const packed = readFileSync(resolve(commonDir, "packed-refs"), "utf8")
+    .split("\n")
+    .find((line) => line.endsWith(` ${ref}`));
+  if (packed === undefined) {
+    throw new Error(`cannot resolve ${ref} for the benchmark report`);
+  }
+  return packed.slice(0, 12);
+}
 
 test("records isolated WASM/JS crossing warning measurements", async ({
   page,
@@ -167,10 +205,7 @@ test("records isolated WASM/JS crossing warning measurements", async ({
 
   const ns = (ms: number) => Math.round(ms * 1_000_000);
   const wasm = readFileSync(WASM_PATH);
-  const commit = execSync("git rev-parse --short=12 HEAD", {
-    cwd: REPO_ROOT,
-    encoding: "utf8",
-  }).trim();
+  const commit = headCommit();
   const report = {
     format_version: 1,
     workload: "wasm-js-crossing-v1",

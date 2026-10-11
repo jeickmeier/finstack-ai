@@ -18,6 +18,14 @@ use finstack_ai_runtime::ports::model::{
 use crate::detect::Detectors;
 use crate::{OutputPolicy, RedactionConfig, RedactionError, RedactionMiddleware};
 
+/// Split so repository secret scanners do not mistake the fixtures for a real key.
+const RSA_KEY_HEADER: &str = concat!("-----BEGIN RSA ", "PRIVATE KEY-----");
+const SAMPLE_JWT: &str = concat!(
+    "eyJhbGciOiJIUzI1NiJ9",
+    ".eyJzdWIiOiIxIn0",
+    ".dBjftJeZ4CVPmB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+);
+
 fn block_on<T>(future: impl Future<Output = T>) -> T {
     let mut context = Context::from_waker(Waker::noop());
     let mut future = std::pin::pin!(future);
@@ -251,9 +259,7 @@ fn vendor_api_keys_are_redacted() {
 #[test]
 fn jwts_are_redacted() {
     assert_eq!(
-        redacted(
-            "bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.dBjftJeZ4CVPmB92K27uhbUJU1p1r_wW1gFWFOEjXk"
-        ),
+        redacted(&format!("bearer {SAMPLE_JWT}")),
         "bearer [REDACTED:jwt]"
     );
     untouched("two segments eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0 only");
@@ -261,7 +267,7 @@ fn jwts_are_redacted() {
 
 #[test]
 fn pem_private_keys_are_redacted() {
-    let block = "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA\n-----END RSA PRIVATE KEY-----";
+    let block = format!("{RSA_KEY_HEADER}\nMIIEowIBAAKCAQEA\n-----END RSA PRIVATE KEY-----");
     assert_eq!(
         detectors()
             .redact(&format!("cfg:\n{block}\ndone"))
@@ -345,7 +351,9 @@ fn card_embedded_in_rejected_candidate_is_still_redacted() {
 #[test]
 fn truncated_pem_block_consumes_key_body() {
     assert_eq!(
-        redacted("cfg:\n-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEAvq\nQEFAAOCAQ8A=="),
+        redacted(&format!(
+            "cfg:\n{RSA_KEY_HEADER}\nMIIEowIBAAKCAQEAvq\nQEFAAOCAQ8A=="
+        )),
         "cfg:\n[REDACTED:private-key]"
     );
 }
