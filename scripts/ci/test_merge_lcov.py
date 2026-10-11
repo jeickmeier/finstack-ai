@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import shutil
 import sys
 from pathlib import Path
 
@@ -77,19 +78,41 @@ def test_main_writes_one_merged_report(tmp_path: Path) -> None:
     root = tmp_path / "repo"
     source = root / "crates" / "kernel" / "src"
     source.mkdir(parents=True)
-    report = tmp_path / "native.info"
+    jail = _MODULE.REPO_ROOT / "target" / "lcov-merge-test"
+    report = jail / "native.info"
+    output = jail / "out" / "lcov.info"
+    shutil.rmtree(jail, ignore_errors=True)
+    jail.mkdir(parents=True)
     report.write_text(
         f"SF:{source / 'lib.rs'}\nDA:1,1\nend_of_record\n",
         encoding="utf-8",
     )
-    output = tmp_path / "out" / "lcov.info"
+    try:
+        assert (
+            _MODULE.main([str(report), "--output", str(output), "--root", str(root)])
+            == 0
+        )
+        rendered = output.read_text(encoding="utf-8")
+        assert "SF:crates/kernel/src/lib.rs" in rendered
+    finally:
+        shutil.rmtree(jail, ignore_errors=True)
 
-    assert (
-        _MODULE.main([str(report), "--output", str(output), "--root", str(root)]) == 0
-    )
 
-    rendered = output.read_text(encoding="utf-8")
-    assert "SF:crates/kernel/src/lib.rs" in rendered
+def test_coverage_path_rejects_paths_outside_target(tmp_path: Path) -> None:
+    try:
+        _MODULE.coverage_path(tmp_path / "lcov.info")
+    except SystemExit as error:
+        assert "outside" in str(error)
+    else:
+        raise AssertionError("path outside target/ must fail")
+
+    escaped = _MODULE.REPO_ROOT / "target" / ".." / "Cargo.toml"
+    try:
+        _MODULE.coverage_path(escaped)
+    except SystemExit as error:
+        assert "outside" in str(error)
+    else:
+        raise AssertionError("target/.. must fail")
 
 
 def test_main_requires_an_output_path() -> None:

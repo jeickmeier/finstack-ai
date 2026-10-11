@@ -177,6 +177,20 @@ def report_destination(args: argparse.Namespace) -> Path:
     return output
 
 
+def coverage_path(path: Path) -> Path:
+    """Resolve ``path`` and rebuild it under ``target/``.
+
+    Callers pass report and output locations on the command line. Rebuilding
+    the path from the fixed ``target/`` directory rejects absolute paths and
+    ``..`` segments that would read or write outside that directory.
+    """
+    root = (REPO_ROOT / "target").resolve()
+    resolved = Path(path).expanduser().resolve()
+    if resolved == root or not resolved.is_relative_to(root):
+        raise SystemExit(f"{resolved} is outside {root}")
+    return root / resolved.relative_to(root)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("reports", nargs="+", type=Path)
@@ -188,9 +202,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--root", type=Path, default=REPO_ROOT)
     args = parser.parse_args(argv)
-    destination = report_destination(args)
-    root = args.root.resolve()
-    texts = [path.read_text(encoding="utf-8") for path in args.reports]
+    destination = coverage_path(report_destination(args))
+    reports = [coverage_path(path) for path in args.reports]
+    root = Path(args.root).expanduser().resolve()
+    texts = [path.read_text(encoding="utf-8") for path in reports]
     rendered = merge_reports(texts, root)
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(rendered, encoding="utf-8")
