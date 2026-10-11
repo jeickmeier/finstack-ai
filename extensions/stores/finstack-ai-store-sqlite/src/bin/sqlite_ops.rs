@@ -225,7 +225,9 @@ fn diagnose(db: Option<String>, session: Option<String>) -> Result<(), String> {
 fn migrate(db: Option<String>) -> Result<(), String> {
     let path = PathBuf::from(db.ok_or("migrate <db>")?);
     let before = user_version(&path)?;
-    if before != 0 && before != SCHEMA_USER_VERSION {
+    // Every version from an empty file up to the current schema migrates
+    // forward on open; anything newer or unknown fails closed.
+    if !(0..=SCHEMA_USER_VERSION).contains(&before) {
         return Err(format!("sqlite_schema_unsupported:{before}"));
     }
     let _store = open_store(path.clone())?;

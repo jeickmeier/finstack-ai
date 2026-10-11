@@ -27,6 +27,8 @@ struct WireChunk {
     prompt_eval_count: Option<u64>,
     #[serde(default)]
     eval_count: Option<u64>,
+    #[serde(default)]
+    done_reason: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -46,6 +48,10 @@ struct WireToolCall {
 
 #[derive(Deserialize)]
 struct WireFunctionCall {
+    /// Ollama's explicit tool-call slot; absent on older servers and on
+    /// single-shot chunks, where the slot is derived from emission order.
+    #[serde(default)]
+    index: Option<u32>,
     name: Option<String>,
     arguments: Option<Value>,
 }
@@ -56,12 +62,56 @@ struct ToolAssembly {
 }
 
 /// Prior assistant replay used to preserve thinking across turns.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+///
+/// Serialized inside the `assistant_replay` array of the Ollama continuation
+/// envelope; both fields default when absent so an older envelope still parses.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 pub struct OllamaReplayEntry {
     /// Thinking text from a prior assistant turn.
+    #[serde(default)]
     pub thinking: String,
     /// Optional content digest from a prior assistant turn.
+    #[serde(default)]
     pub digest: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ContinuationEnvelope {
+    provider: String,
+    version: u32,
+    assistant_replay: Vec<OllamaReplayEntry>,
+}
+
+/// Decode an Ollama continuation envelope into its replay entries.
+///
+/// Returns `None` when the state is not a well-formed envelope or was issued
+/// by a different provider or envelope version, so a leaf silently starts a
+/// fresh conversation instead of replaying foreign state. Matching the
+/// entries against the outgoing assistant turns stays with the leaf.
+///
+/// ```
+/// use finstack_ai_kernel::RawJson;
+/// use finstack_ai_provider_wire::parse_ollama_continuation;
+///
+/// let state = RawJson::parse(
+///     r#"{"provider":"ollama.api_chat","version":1,"assistant_replay":[{"thinking":"t"}]}"#,
+/// )
+/// .expect("state");
+/// let entries = parse_ollama_continuation(&state).expect("envelope");
+/// assert_eq!(entries[0].thinking, "t");
+/// assert_eq!(entries[0].digest, None);
+///
+/// let foreign = RawJson::parse(r#"{"provider":"other","version":1,"assistant_replay":[]}"#)
+///     .expect("state");
+/// assert!(parse_ollama_continuation(&foreign).is_none());
+/// ```
+#[must_use]
+pub fn parse_ollama_continuation(state: &RawJson) -> Option<Vec<OllamaReplayEntry>> {
+    let envelope: ContinuationEnvelope = serde_json::from_slice(state.as_bytes()).ok()?;
+    if envelope.provider != CONTINUATION_PROVIDER || envelope.version != CONTINUATION_VERSION {
+        return None;
+    }
+    Some(envelope.assistant_replay)
 }
 
 /// Incremental Ollama chat assembler.
@@ -74,6 +124,13 @@ pub struct OllamaChatAssembly {
     structured: bool,
     /// Whether `done: true` has been observed.
     pub done: bool,
+    /// The `done_reason` reported alongside the terminal chunk, when any.
+    done_reason: Option<String>,
+    /// Next implicit tool-call slot for chunks whose calls omit `index`.
+    ///
+    /// Ollama emits each tool call at most once, so calls without an explicit
+    /// `index` on a later chunk must not collapse onto slot zero again.
+    next_tool_index: u32,
     matched_replay: Option<Vec<OllamaReplayEntry>>,
 }
 
@@ -93,6 +150,8 @@ impl OllamaChatAssembly {
             usage: Usage::empty(),
             structured,
             done: false,
+            done_reason: None,
+            next_tool_index: 0,
             matched_replay,
         }
     }
@@ -121,12 +180,33 @@ impl OllamaChatAssembly {
                     text: Arc::from(thinking.as_str()),
                 }));
             }
-            for (index, tool) in (0_u32..).zip(message.tool_calls) {
-                items.extend(self.consume_tool(index, tool)?);
+            let base = self.next_tool_index;
+            let mut highest_index = None;
+            for (offset, tool) in (0_u32..).zip(message.tool_calls) {
+                let function = tool
+                    .function
+                    .ok_or_else(|| StreamNormError::response("tool call omitted its function"))?;
+                let index = match function.index {
+                    Some(index) => index,
+                    None => base
+                        .checked_add(offset)
+                        .ok_or_else(|| StreamNormError::response("tool-call index overflowed"))?,
+                };
+                highest_index = Some(highest_index.map_or(index, |seen: u32| seen.max(index)));
+                items.extend(self.consume_tool(index, function)?);
+            }
+            if let Some(highest) = highest_index {
+                let next = highest
+                    .checked_add(1)
+                    .ok_or_else(|| StreamNormError::response("tool-call index overflowed"))?;
+                self.next_tool_index = self.next_tool_index.max(next);
             }
         }
         if chunk.prompt_eval_count.is_some() || chunk.eval_count.is_some() {
             items.extend(self.apply_usage(chunk.prompt_eval_count, chunk.eval_count)?);
+        }
+        if let Some(reason) = chunk.done_reason {
+            self.done_reason = Some(reason);
         }
         if chunk.done {
             self.done = true;
@@ -138,11 +218,19 @@ impl OllamaChatAssembly {
     ///
     /// # Errors
     ///
-    /// Returns [`StreamNormError`] when the stream never completed or the payload is invalid.
+    /// Returns [`StreamNormError`] when the stream never completed or the
+    /// payload is invalid, and a [`StreamNormKind::Incomplete`](crate::StreamNormKind::Incomplete)
+    /// failure when Ollama reported `done_reason: "length"` (the generation
+    /// hit its output-token ceiling before finishing).
     pub fn finish(self) -> Result<ModelResponse, StreamNormError> {
         if !self.done {
             return Err(StreamNormError::stream(
                 "NDJSON stream ended before done:true",
+            ));
+        }
+        if self.done_reason.as_deref() == Some("length") {
+            return Err(StreamNormError::incomplete(
+                "generation stopped at the output-token ceiling",
             ));
         }
         let assistant_content: Arc<[ContentBlock]> = if self.structured && !self.text.is_empty() {
@@ -183,7 +271,7 @@ impl OllamaChatAssembly {
         let mut replay = self.matched_replay.unwrap_or_default();
         replay.push(OllamaReplayEntry {
             thinking: self.thinking,
-            digest: Some(response_content_digest(&self.text, &digest_tools)?),
+            digest: Some(ollama_content_digest(&self.text, &digest_tools)?),
         });
         let continuation_state = encode_continuation(&replay)?;
         let provider_ids =
@@ -202,11 +290,8 @@ impl OllamaChatAssembly {
     fn consume_tool(
         &mut self,
         index: u32,
-        tool: WireToolCall,
+        function: WireFunctionCall,
     ) -> Result<Vec<ModelStreamItem>, StreamNormError> {
-        let function = tool
-            .function
-            .ok_or_else(|| StreamNormError::response("tool call omitted its function"))?;
         let name = function
             .name
             .filter(|value| !value.is_empty())
@@ -273,7 +358,19 @@ fn encode_arguments(arguments: Option<Value>) -> Result<String, StreamNormError>
     }
 }
 
-fn response_content_digest(
+/// Digest of one assistant turn's visible content for continuation matching.
+///
+/// `text` is the concatenated text and JSON block content; each tool call is
+/// its `(name, canonical arguments JSON)` pair in emission order. The digest
+/// is the kernel digest of the canonical JSON
+/// `{"text":..., "tool_calls":[{"arguments":..., "name":...}, ...]}`, so the
+/// assembler and the request translator compute byte-identical values.
+///
+/// # Errors
+///
+/// Returns a [`StreamNormKind::Response`](crate::StreamNormKind::Response)
+/// failure when the digest document cannot be encoded as canonical JSON.
+pub fn ollama_content_digest(
     text: &str,
     tool_calls: &[(String, String)],
 ) -> Result<String, StreamNormError> {
@@ -316,6 +413,182 @@ fn encode_continuation(entries: &[OllamaReplayEntry]) -> Result<Option<RawJson>,
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ollama_replay_entry_roundtrips() {
+        let entries = vec![
+            OllamaReplayEntry {
+                thinking: "first".to_owned(),
+                digest: Some("abc".to_owned()),
+            },
+            OllamaReplayEntry {
+                thinking: String::new(),
+                digest: None,
+            },
+        ];
+        let state = encode_continuation(&entries).unwrap().unwrap();
+        assert_eq!(parse_ollama_continuation(&state).unwrap(), entries);
+
+        // Absent fields default like the leaf's `ReplayEntry`.
+        let sparse =
+            RawJson::parse(r#"{"provider":"ollama.api_chat","version":1,"assistant_replay":[{}]}"#)
+                .unwrap();
+        assert_eq!(
+            parse_ollama_continuation(&sparse).unwrap(),
+            vec![OllamaReplayEntry::default()]
+        );
+
+        // Provider and version mismatches are rejected rather than replayed.
+        for state in [
+            r#"{"provider":"other","version":1,"assistant_replay":[]}"#,
+            r#"{"provider":"ollama.api_chat","version":2,"assistant_replay":[]}"#,
+            r#"{"provider":"ollama.api_chat","version":1}"#,
+            "[]",
+        ] {
+            assert!(parse_ollama_continuation(&RawJson::parse(state).unwrap()).is_none());
+        }
+    }
+
+    #[test]
+    fn ollama_content_digest_matches_response_digest() {
+        // The leaf's `content_digest` form: tool calls as `Value` objects.
+        fn leaf_content_digest(text: &str, tool_calls: &[Value]) -> String {
+            let value = json!({
+                "text": text,
+                "tool_calls": tool_calls,
+            });
+            let bytes = serde_json::to_vec(&value).unwrap();
+            RawJson::parse(&bytes).unwrap().digest().to_hex()
+        }
+
+        let text = "Here is the \"result\": \u{e9}";
+        let tool_calls = [
+            (
+                "lookup".to_owned(),
+                r#"{"query":"weather in Paris","units":"metric"}"#.to_owned(),
+            ),
+            ("noop".to_owned(), "{}".to_owned()),
+        ];
+        let leaf_calls = tool_calls
+            .iter()
+            .map(|(name, arguments)| json!({ "name": name, "arguments": arguments }))
+            .collect::<Vec<_>>();
+
+        let shared = ollama_content_digest(text, &tool_calls).unwrap();
+        assert_eq!(shared, leaf_content_digest(text, &leaf_calls));
+        assert_eq!(shared, ollama_content_digest(text, &tool_calls).unwrap());
+
+        let empty = ollama_content_digest("", &[]).unwrap();
+        assert_eq!(empty, leaf_content_digest("", &[]));
+        assert_ne!(empty, shared);
+    }
+
+    #[test]
+    fn finish_records_the_shared_digest_in_the_continuation() {
+        let mut assembly = OllamaChatAssembly::new("request-1".to_owned(), false, None);
+        assembly
+            .consume(r#"{"message":{"content":"hi","thinking":"why","tool_calls":[{"function":{"name":"lookup","arguments":{"q":"x"}}}]},"done":true}"#)
+            .unwrap();
+        let response = assembly.finish().unwrap();
+        let state = response.continuation_state.unwrap();
+        let entries = parse_ollama_continuation(&state).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].thinking, "why");
+        let expected =
+            ollama_content_digest("hi", &[("lookup".to_owned(), r#"{"q":"x"}"#.to_owned())])
+                .unwrap();
+        assert_eq!(entries[0].digest.as_deref(), Some(expected.as_str()));
+    }
+
+    fn tool_delta_index(item: &ModelStreamItem) -> u32 {
+        match item {
+            ModelStreamItem::ToolCallDelta(delta) => delta.index,
+            other => panic!("expected tool-call delta, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tool_calls_across_chunks_get_distinct_indices() {
+        let mut assembly = OllamaChatAssembly::new("request-1".to_owned(), false, None);
+        let items = assembly
+            .consume(r#"{"message":{"content":"","tool_calls":[{"function":{"name":"a","arguments":{}}}]},"done":false}"#)
+            .unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(tool_delta_index(&items[0]), 0);
+        let items = assembly
+            .consume(r#"{"message":{"content":"","tool_calls":[{"function":{"name":"b","arguments":{"k":1}}}]},"done":false}"#)
+            .unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(tool_delta_index(&items[0]), 1);
+        assembly
+            .consume(r#"{"message":{"content":""},"done":true}"#)
+            .unwrap();
+        let response = assembly.finish().unwrap();
+        assert_eq!(response.tool_calls.len(), 2);
+        assert_eq!(response.tool_calls[0].name.as_ref(), "a");
+        assert_eq!(response.tool_calls[0].arguments.as_str(), "{}");
+        assert_eq!(response.tool_calls[1].name.as_ref(), "b");
+        assert_eq!(response.tool_calls[1].arguments.as_str(), r#"{"k":1}"#);
+    }
+
+    #[test]
+    fn explicit_function_index_is_honored() {
+        let mut assembly = OllamaChatAssembly::new("request-1".to_owned(), false, None);
+        let items = assembly
+            .consume(r#"{"message":{"content":"","tool_calls":[{"function":{"index":1,"name":"b","arguments":{}}}]},"done":false}"#)
+            .unwrap();
+        assert_eq!(tool_delta_index(&items[0]), 1);
+        let items = assembly
+            .consume(r#"{"message":{"content":"","tool_calls":[{"function":{"index":0,"name":"a","arguments":{}}}]},"done":true}"#)
+            .unwrap();
+        assert_eq!(tool_delta_index(&items[0]), 0);
+        let response = assembly.finish().unwrap();
+        assert_eq!(response.tool_calls.len(), 2);
+        assert_eq!(response.tool_calls[0].name.as_ref(), "a");
+        assert_eq!(response.tool_calls[1].name.as_ref(), "b");
+
+        // A repeated explicit slot with identical content is the same call,
+        // and an implicit call after explicit slots lands on the next free slot.
+        let mut assembly = OllamaChatAssembly::new("request-2".to_owned(), false, None);
+        assembly
+            .consume(r#"{"message":{"content":"","tool_calls":[{"function":{"index":3,"name":"c","arguments":{}}}]},"done":false}"#)
+            .unwrap();
+        let items = assembly
+            .consume(r#"{"message":{"content":"","tool_calls":[{"function":{"index":3,"name":"c","arguments":{}}}]},"done":false}"#)
+            .unwrap();
+        assert!(items.is_empty());
+        let items = assembly
+            .consume(r#"{"message":{"content":"","tool_calls":[{"function":{"name":"d","arguments":{}}}]},"done":false}"#)
+            .unwrap();
+        assert_eq!(tool_delta_index(&items[0]), 4);
+    }
+
+    #[test]
+    fn done_reason_length_is_incomplete() {
+        let mut assembly = OllamaChatAssembly::new("request-1".to_owned(), false, None);
+        assembly
+            .consume(r#"{"message":{"content":"partial"},"done":true,"done_reason":"length"}"#)
+            .unwrap();
+        let error = assembly.finish().expect_err("truncated generation");
+        assert_eq!(error.kind, crate::StreamNormKind::Incomplete);
+        assert!(!error.retryable);
+
+        // Structured output is reported as truncated rather than as invalid JSON.
+        let mut assembly = OllamaChatAssembly::new("request-2".to_owned(), true, None);
+        assembly
+            .consume(r#"{"message":{"content":"{\"answer\":"},"done":true,"done_reason":"length"}"#)
+            .unwrap();
+        assert_eq!(
+            assembly.finish().expect_err("truncated structured").kind,
+            crate::StreamNormKind::Incomplete
+        );
+
+        let mut assembly = OllamaChatAssembly::new("request-3".to_owned(), false, None);
+        assembly
+            .consume(r#"{"message":{"content":"full"},"done":true,"done_reason":"stop"}"#)
+            .unwrap();
+        assert!(assembly.finish().is_ok());
+    }
 
     #[test]
     fn assembles_text_and_done() {

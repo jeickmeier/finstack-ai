@@ -13,6 +13,7 @@ struct Source {
     dropped: Arc<AtomicUsize>,
     hangs: bool,
     fails: bool,
+    rejects: bool,
 }
 
 impl Source {
@@ -23,6 +24,7 @@ impl Source {
             dropped: Arc::new(AtomicUsize::new(0)),
             hangs: false,
             fails: false,
+            rejects: false,
         }
     }
 }
@@ -45,6 +47,10 @@ impl SearchSource for Source {
     fn authorize(&self, scope: &SearchScope, query: &SearchQuery) -> Result<(), SearchError> {
         if scope.tenant.as_ref() != "tenant" || !query.journal.sessions.is_empty() {
             return Err(SearchError::SearchScopeDenied);
+        }
+        // Admits the construction probe, refuses multi-term requests.
+        if self.rejects && query.text.contains(' ') {
+            return Err(SearchError::invalid("fixture_query"));
         }
         Ok(())
     }
@@ -163,4 +169,31 @@ async fn dropping_federation_future_drops_awaited_source_calls() {
     assert_eq!(source.calls.load(Ordering::SeqCst), 1);
     drop(query);
     assert_eq!(source.dropped.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn rejecting_source_becomes_failed_leg_not_request_abort() {
+    let ready = Arc::new(Source::new("a"));
+    let mut rejecting = Source::new("b");
+    rejecting.rejects = true;
+    let rejecting = Arc::new(rejecting);
+    let engine = engine(vec![ready.clone(), rejecting.clone()]);
+    let response = engine
+        .search(SearchRequest::text("two words"))
+        .await
+        .unwrap();
+    assert_eq!(response.outcomes[0].status, SourceStatus::Completed);
+    assert_eq!(response.outcomes[1].status, SourceStatus::Unavailable);
+    assert_eq!(
+        response.outcomes[1].reasons,
+        vec![Arc::<str>::from("search_invalid")]
+    );
+    assert_eq!(ready.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(rejecting.calls.load(Ordering::SeqCst), 0);
+    let mut only = SearchRequest::text("two words");
+    only.sources = Some(vec!["b".into()]);
+    assert!(
+        matches!(engine.search(only).await, Err(SearchError::SearchNoSuccessfulSources { outcomes }) if outcomes[0].reasons[0].as_ref() == "search_invalid")
+    );
+    assert_eq!(rejecting.calls.load(Ordering::SeqCst), 0);
 }

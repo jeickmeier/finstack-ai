@@ -1,14 +1,49 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use finstack_ai_kernel::{
     EventTag, Id, IdTag, LaneTag, QueueDepthWarning, RUN_EVENT_KIND_VERSION,
     RUN_EVENT_SCHEMA_VERSION, RunEventBody, RunTag, SessionTag, Timestamp,
 };
 use finstack_ai_kernel::{RunEvent, Sensitivity};
-use finstack_ai_runtime::ports::observer::Observer;
+use finstack_ai_runtime::ports::observer::{Observer, ObserverPayloadMode};
 use finstack_ai_test::check_observer_conformance;
+use opentelemetry_sdk::error::OTelSdkResult;
+use opentelemetry_sdk::trace::{SdkTracerProvider, SimpleSpanProcessor, SpanData, SpanExporter};
 
 use super::OtelObserver;
+
+/// One exported span: name plus attribute keys.
+type ExportedSpan = (String, Vec<String>);
+
+/// Minimal in-memory exporter: records each exported span's name and
+/// attribute keys. Kept local so the crate does not need the SDK's
+/// `testing` feature (which pulls in metrics, logs, and tokio).
+#[derive(Debug, Clone, Default)]
+struct RecordingExporter {
+    spans: Arc<Mutex<Vec<ExportedSpan>>>,
+}
+
+impl SpanExporter for RecordingExporter {
+    fn export(
+        &self,
+        batch: Vec<SpanData>,
+    ) -> impl std::future::Future<Output = OTelSdkResult> + Send {
+        let spans = Arc::clone(&self.spans);
+        async move {
+            if let Ok(mut recorded) = spans.lock() {
+                for span in batch {
+                    let keys = span
+                        .attributes
+                        .iter()
+                        .map(|attribute| attribute.key.to_string())
+                        .collect();
+                    recorded.push((span.name.into_owned(), keys));
+                }
+            }
+            Ok(())
+        }
+    }
+}
 
 const CANARY: &str = "CANARY_SECRET_VALUE";
 
@@ -103,4 +138,47 @@ async fn captured_spans_stay_within_the_queue_capacity() {
     }
     let spans = observer.snapshot().expect("snapshot");
     assert!(spans.len() <= 2);
+}
+
+#[tokio::test]
+async fn operator_provider_receives_spans() {
+    let recorder = RecordingExporter::default();
+    let provider = SdkTracerProvider::builder()
+        .with_span_processor(SimpleSpanProcessor::new(recorder.clone()))
+        .build();
+    let observer = OtelObserver::try_new_with_provider(ObserverPayloadMode::Redacted, 8, provider)
+        .expect("otel");
+    observer
+        .observe(Arc::from([
+            event(Sensitivity::Public),
+            event(Sensitivity::Secret),
+        ]))
+        .await
+        .expect("observe");
+
+    // The simple processor exports on span end; no explicit flush is needed.
+    let exported = recorder.spans.lock().expect("exported").clone();
+    assert_eq!(exported.len(), 2);
+    assert!(exported.iter().all(|(name, _)| name == "finstack.run"));
+    assert!(
+        exported
+            .iter()
+            .all(|(_, keys)| keys.iter().any(|key| key == "finstack.session_id"))
+    );
+    // Redacted mode exports the secret event's identifiers only.
+    let (_, secret_keys) = &exported[1];
+    assert!(secret_keys.iter().all(|key| key != "finstack.body"));
+    assert!(!format!("{exported:?}").contains(CANARY));
+    assert_eq!(observer.snapshot().expect("snapshot").len(), 2);
+
+    observer.force_flush();
+    assert_eq!(recorder.spans.lock().expect("exported").len(), 2);
+}
+
+#[test]
+fn try_new_with_provider_rejects_invalid_capacity() {
+    let provider = SdkTracerProvider::builder().build();
+    assert!(
+        OtelObserver::try_new_with_provider(ObserverPayloadMode::Redacted, 0, provider).is_err()
+    );
 }

@@ -138,7 +138,7 @@ async fn prompted_structured_output_keeps_the_schema_tool() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn thinking_normalizes_to_reasoning_and_opaque_signature() {
+async fn thinking_normalizes_to_reasoning_and_continuation_envelope() {
     let (base_url, server) = serve_sse(THINKING_SSE).await;
     let provider = provider(&base_url, true, false);
     let mut stream = provider
@@ -159,17 +159,54 @@ async fn thinking_normalizes_to_reasoning_and_opaque_signature() {
     assert_eq!(reasoning, "consider this");
     assert_eq!(text, "hello");
     let completed = completed.expect("terminal");
+    assert_eq!(completed.assistant_content.len(), 1);
     assert!(matches!(
         completed.assistant_content[0],
-        ContentBlock::Opaque(_)
-    ));
-    assert!(matches!(
-        completed.assistant_content[1],
         ContentBlock::Text(_)
     ));
+    let continuation = completed
+        .continuation_state
+        .as_ref()
+        .expect("signed thinking yields a continuation envelope");
+    let envelope: serde_json::Value =
+        serde_json::from_str(continuation.as_str()).expect("envelope JSON");
+    assert_eq!(envelope["provider"], "anthropic.messages");
+    assert_eq!(envelope["version"], 1);
+    assert_eq!(envelope["replay_blocks"][0]["type"], "thinking");
+    assert_eq!(envelope["replay_blocks"][0]["thinking"], "consider this");
+    assert_eq!(envelope["replay_blocks"][0]["signature"], "sig-fixture");
     let captured = server.await.expect("server task");
     assert!(captured.contains("\"thinking\""));
     assert!(!format!("{completed:?}").contains("sk-ant"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn http_error_carries_status_metadata() {
+    let (base_url, server) = serve_response(
+        "503 Service Unavailable",
+        "application/json",
+        HTTP_429.as_bytes().to_vec(),
+        false,
+    )
+    .await;
+    let result = provider(&base_url, false, false)
+        .request(request(draft(OutputSpec::PlainText, Arc::from([]))))
+        .await;
+    let Err(error) = result else {
+        panic!("503 must fail");
+    };
+    assert_eq!(error.code(), "anthropic_http_error");
+    assert!(error.retryable());
+    assert_eq!(
+        error.message(),
+        "Anthropic messages endpoint returned HTTP 503"
+    );
+    assert_eq!(
+        error.metadata().as_raw_json().as_str(),
+        r#"{"http_status":503}"#
+    );
+    assert!(!format!("{error:?}").contains("provider-body-secret-canary"));
+    server.abort();
 }
 
 #[tokio::test(flavor = "multi_thread")]

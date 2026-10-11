@@ -76,9 +76,15 @@ impl DocumentSearchSource {
         {
             result.status = SourceStatus::Unavailable;
         }
+        // Liveness reads artifact bytes, so only the candidates that can still
+        // enter the bounded result are checked; the rest stay unexamined.
         let mut checked = BTreeMap::new();
         let mut unavailable = 0;
         for candidate in retrieved.candidates {
+            if result.hits.len() == limit {
+                result.truncate("document_result_limit");
+                break;
+            }
             self.validate_input(&candidate.input)?;
             let alive = if let Some(alive) = checked.get(&candidate.document_key) {
                 *alive
@@ -111,10 +117,6 @@ impl DocumentSearchSource {
             };
             if !alive {
                 continue;
-            }
-            if result.hits.len() == limit {
-                result.truncate("document_result_limit");
-                break;
             }
             result.hits.push(self.hit(candidate)?);
         }
@@ -307,11 +309,7 @@ fn retrieve(
         }
         _ => return Err(SearchError::SearchUnsupported),
     };
-    for rank in ranked {
-        result
-            .candidates
-            .push(load_candidate(db, rank.rowid, rank.score)?);
-    }
+    result.candidates = load_candidates(db, &ranked)?;
     Ok(result)
 }
 
@@ -504,8 +502,38 @@ fn vector_search(
     Ok(ranked)
 }
 
-fn load_candidate(db: &Connection, rowid: i64, score: u32) -> Result<Candidate, SearchError> {
-    let (document_key,input,report,ordinal,start,end,heading,text,digest): (String,String,String,u32,u32,u32,Option<String>,String,String) = db.query_row("SELECT c.document_key,d.input_json,d.report_json,c.ordinal,c.start_char,c.end_char,c.heading,c.text,c.content_digest FROM chunks c JOIN documents d ON d.document_key=c.document_key WHERE c.rowid=?1",[rowid],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?,r.get(7)?,r.get(8)?))).map_err(sql_error)?;
+const CANDIDATE_COLUMNS: &str = "SELECT c.rowid,c.document_key,d.input_json,d.report_json,c.ordinal,c.start_char,c.end_char,c.heading,c.text,c.content_digest FROM chunks c JOIN documents d ON d.document_key=c.document_key";
+
+type CandidateRow = (
+    i64,
+    String,
+    String,
+    String,
+    u32,
+    u32,
+    u32,
+    Option<String>,
+    String,
+    String,
+);
+
+fn decode_candidate(row: &rusqlite::Row<'_>) -> rusqlite::Result<CandidateRow> {
+    Ok((
+        row.get(0)?,
+        row.get(1)?,
+        row.get(2)?,
+        row.get(3)?,
+        row.get(4)?,
+        row.get(5)?,
+        row.get(6)?,
+        row.get(7)?,
+        row.get(8)?,
+        row.get(9)?,
+    ))
+}
+
+fn candidate(row: CandidateRow, score: u32) -> Result<Candidate, SearchError> {
+    let (_, document_key, input, report, ordinal, start, end, heading, text, digest) = row;
     let _: DocumentIndexReport =
         serde_json::from_str(&report).map_err(|_| SearchError::invalid("document_receipt"))?;
     Ok(Candidate {
@@ -521,4 +549,46 @@ fn load_candidate(db: &Connection, rowid: i64, score: u32) -> Result<Candidate, 
             .map_err(|_| SearchError::invalid("document_chunk_digest"))?,
         score,
     })
+}
+
+fn load_candidate(db: &Connection, rowid: i64, score: u32) -> Result<Candidate, SearchError> {
+    let row = db
+        .query_row(
+            &format!("{CANDIDATE_COLUMNS} WHERE c.rowid=?1"),
+            [rowid],
+            decode_candidate,
+        )
+        .map_err(sql_error)?;
+    candidate(row, score)
+}
+
+/// Load every ranked chunk in one statement, then restore rank order.
+fn load_candidates(db: &Connection, ranked: &[Ranked]) -> Result<Vec<Candidate>, SearchError> {
+    if ranked.is_empty() {
+        return Ok(Vec::new());
+    }
+    let ids = serde_json::to_string(&ranked.iter().map(|rank| rank.rowid).collect::<Vec<_>>())
+        .map_err(|_| SearchError::invalid("document_candidates"))?;
+    let mut statement = db
+        .prepare(&format!(
+            "{CANDIDATE_COLUMNS} WHERE c.rowid IN (SELECT value FROM json_each(?1))"
+        ))
+        .map_err(sql_error)?;
+    let rows = statement
+        .query_map([ids], decode_candidate)
+        .map_err(sql_error)?;
+    let mut loaded = BTreeMap::new();
+    for row in rows {
+        let row = row.map_err(sql_error)?;
+        loaded.insert(row.0, row);
+    }
+    ranked
+        .iter()
+        .map(|rank| {
+            let row = loaded
+                .remove(&rank.rowid)
+                .ok_or(SearchError::SearchUnavailable)?;
+            candidate(row, rank.score)
+        })
+        .collect()
 }

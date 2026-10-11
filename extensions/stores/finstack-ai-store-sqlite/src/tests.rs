@@ -1,28 +1,33 @@
 use std::future::Future;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Barrier};
 use std::task::{Context, Poll, Waker};
 use std::thread;
 
 use finstack_ai_kernel::{
     AcceptRun, AllocatedIds, AppendRequest, BudgetPropagation, CancellationPropagation,
-    DeadlinePropagation, Digest, KernelInput, LaneCreated, LaneTag, Metadata, PrincipalPropagation,
-    PrincipalRef, RECORD_FORMAT_VERSION, RECORD_KIND_VERSION, RecordBody, RecordDraft, RecordTag,
-    RunAccepted, RunLimits, RunPropagationPolicy, RunRelation, RunSecurityContext, RunTag,
-    SessionCreated, SessionTag, Timestamp, TransitionEnv,
+    DeadlinePropagation, Digest, KernelInput, KernelState, LaneCreated, LaneTag, Metadata,
+    PrincipalPropagation, PrincipalRef, RECORD_FORMAT_VERSION, RECORD_KIND_VERSION, RecordBody,
+    RecordDraft, RecordTag, RunAccepted, RunLimits, RunPropagationPolicy, RunRelation,
+    RunSecurityContext, RunTag, SessionCreated, SessionTag, Timestamp, TransitionEnv, UNIX_EPOCH,
 };
 use finstack_ai_protocol::{envelope_checksum, payload_digest, verify_envelope};
 use finstack_ai_runtime::commit::CommitCoordinator;
 use finstack_ai_runtime::ports::journal::{
-    JournalStore, LoadFromRequest, LoadRequest, LoadWindow, OpaqueSnapshot, SCAN_PAGE_MAX_RECORDS,
-    ScanRequest, SnapshotRequest, StateSnapshotRequest, StoreError, WriteMetadataRequest,
+    IdempotencyHorizon, JournalStore, LoadFromRequest, LoadRequest, LoadWindow, OpaqueSnapshot,
+    PruneRequest, SCAN_PAGE_MAX_RECORDS, ScanRequest, SnapshotRequest, StateSnapshotRequest,
+    StoreError, WriteMetadataRequest,
 };
 use finstack_ai_test::store_fixtures::{draft, id, request};
-use finstack_ai_test::{JournalStoreConformanceCase, check_journal_store_conformance};
+use finstack_ai_test::{
+    JournalStoreConformanceCase, PruneBoundaryConformanceCase, check_journal_store_conformance,
+    check_prune_boundary_conformance, compatibility_fixture,
+};
 use rusqlite::{Connection, params};
 use tempfile::TempDir;
 
 use super::*;
+use crate::schema::V1_DDL;
 
 fn block_on<T>(future: impl Future<Output = T>) -> T {
     let mut context = Context::from_waker(Waker::noop());
@@ -537,6 +542,7 @@ fn configured_limits_and_snapshot_cache_are_enforced() {
     assert_eq!(loaded.snapshot, Some(snapshot));
 }
 
+#[cfg(feature = "fault-injection")]
 #[test]
 fn injected_rollback_leaves_no_partial_batch() {
     let dir = TempDir::new().expect("tempdir");
@@ -771,12 +777,13 @@ fn v1_schema_applies_from_user_version_zero() {
         limits: limits(),
         busy_timeout: DEFAULT_BUSY_TIMEOUT,
     })
-    .expect("apply v1");
+    .expect("apply v1 then v2");
     drop(store);
     let connection = Connection::open(&path).expect("reopen");
     let version: i32 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .expect("version");
+    assert_eq!(version, 2);
     assert_eq!(version, SCHEMA_USER_VERSION);
 }
 
@@ -793,4 +800,250 @@ fn append_identity_encoding_is_stable() {
         digest.to_hex(),
         "c7aceba03fb3311d46d5be1e5647be58e9161b52c803c04bc82d13cfd64a1290"
     );
+}
+
+/// Write a schema-v1 journal file by hand: one session holding two batches
+/// (sequences 1-2 and 3-5) and their five records, stamped `user_version = 1`
+/// exactly as a pre-counter binary would have left it. The opaque blobs are
+/// never decoded by open, so placeholders suffice; foreign keys are real.
+fn fabricate_v1_journal(path: &Path) {
+    let connection = Connection::open(path).expect("create v1 file");
+    connection.execute_batch(V1_DDL).expect("v1 ddl");
+    let session = id::<SessionTag>(1);
+    connection
+        .execute(
+            "INSERT INTO sessions (session_id, current_sequence, head_checksum, metadata)
+             VALUES (?1, 5, NULL, ?2)",
+            params![session.as_bytes().as_slice(), Metadata::empty().as_bytes()],
+        )
+        .expect("session row");
+    for (ordinal, first, last) in [(1_u64, 1_i64, 2_i64), (2, 3, 5)] {
+        connection
+            .execute(
+                "INSERT INTO batches
+                 (batch_id, session_id, first_sequence, last_sequence, expected_sequence,
+                  request_cbor)
+                 VALUES (?1, ?2, ?3, ?4, ?3, X'')",
+                params![
+                    id::<finstack_ai_kernel::AppendBatchTag>(ordinal)
+                        .as_bytes()
+                        .as_slice(),
+                    session.as_bytes().as_slice(),
+                    first,
+                    last,
+                ],
+            )
+            .expect("batch row");
+        for sequence in first..=last {
+            connection
+                .execute(
+                    "INSERT INTO records (
+                        session_id, sequence, record_id, batch_id, lane_id, run_id, kind,
+                        format_version, kind_version, payload_cbor, timestamp, committed_at,
+                        payload_digest, previous_checksum, envelope_checksum, derived_event_ids
+                     ) VALUES (?1, ?2, ?3, ?4, ?5, NULL, 'fixture', 1, 1, X'', 0, NULL,
+                               ?6, NULL, ?6, X'')",
+                    params![
+                        session.as_bytes().as_slice(),
+                        sequence,
+                        id::<RecordTag>(u64::try_from(sequence).expect("sequence"))
+                            .as_bytes()
+                            .as_slice(),
+                        id::<finstack_ai_kernel::AppendBatchTag>(ordinal)
+                            .as_bytes()
+                            .as_slice(),
+                        id::<LaneTag>(101).as_bytes().as_slice(),
+                        vec![0_u8; 32],
+                    ],
+                )
+                .expect("record row");
+        }
+    }
+    connection
+        .pragma_update(None, "user_version", 1)
+        .expect("stamp v1");
+}
+
+fn user_version(path: &Path) -> i32 {
+    Connection::open(path)
+        .expect("reopen")
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .expect("user_version")
+}
+
+fn stored_counters(path: &Path, session: u64) -> (i64, i64) {
+    Connection::open(path)
+        .expect("reopen")
+        .query_row(
+            "SELECT batch_count, record_count FROM sessions WHERE session_id = ?1",
+            params![id::<SessionTag>(session).as_bytes().as_slice()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("counters")
+}
+
+#[test]
+fn v1_schema_migrates_to_v2_backfilling_counters() {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().join("v1.sqlite");
+    fabricate_v1_journal(&path);
+    assert_eq!(user_version(&path), 1);
+    let store = SqliteJournalStore::try_open(SqliteStoreConfig {
+        path: path.clone(),
+        durability: SqliteDurability::Durable,
+        limits: limits(),
+        busy_timeout: DEFAULT_BUSY_TIMEOUT,
+    })
+    .expect("open migrates v1 to v2");
+    let rows = block_on(store.list_sessions(8)).expect("list after migration");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].head_sequence, 5);
+    drop(store);
+    assert_eq!(user_version(&path), 2);
+    assert_eq!(user_version(&path), SCHEMA_USER_VERSION);
+    assert_eq!(stored_counters(&path, 1), (2, 5));
+    // The migrated counters are what admission reads: with a two-batch
+    // ceiling the backfilled session is already full.
+    let capped = SqliteJournalStore::try_open(SqliteStoreConfig {
+        path,
+        durability: SqliteDurability::Durable,
+        limits: SqliteStoreLimits {
+            batches_per_session: 2,
+            ..limits()
+        },
+        busy_timeout: DEFAULT_BUSY_TIMEOUT,
+    })
+    .expect("reopen at v2");
+    assert!(matches!(
+        block_on(capped.append(request(3, 1, 6, vec![draft(6, 1)]))),
+        Err(StoreError::LimitExceeded {
+            resource: "batches_per_session",
+            limit: 2
+        })
+    ));
+}
+
+#[test]
+fn migration_fixture_v1_upgrades_to_v2() {
+    let fixture: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(compatibility_fixture(
+            "python-sqlite/v1/migration/valid--open-user-version-1-upgrades-to-2.json",
+        ))
+        .expect("read fixture"),
+    )
+    .expect("parse fixture");
+    assert_eq!(fixture["start_user_version"], 1);
+    assert_eq!(fixture["durability"], "durable");
+    assert_eq!(fixture["expect"], "open_and_create_session");
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().join("journal.sqlite");
+    fabricate_v1_journal(&path);
+    assert_eq!(
+        i64::from(user_version(&path)),
+        fixture["start_user_version"]
+    );
+    let store = file_store(&dir, SqliteDurability::Durable);
+    block_on(store.append(request(9, 2, 1, vec![draft(9, 2)]))).expect("create a session");
+    drop(store);
+    assert_eq!(
+        i64::from(user_version(&path)),
+        fixture["schema_user_version"]
+    );
+    assert_eq!(
+        i64::from(SCHEMA_USER_VERSION),
+        fixture["schema_user_version"]
+    );
+}
+
+/// Snapshot ending exactly on `sequence`, written through the port.
+fn write_aligned_snapshot(store: &SqliteJournalStore, sequence: u64, head_checksum: Digest) {
+    let mut state = KernelState::default();
+    state.set_last_applied_sequence(sequence);
+    block_on(store.write_state_snapshot(StateSnapshotRequest {
+        session_id: id::<SessionTag>(1),
+        state,
+        head_checksum,
+        pending_timer_scheduled_at: None,
+        last_model_continuation: None,
+    }))
+    .expect("aligned snapshot");
+}
+
+#[test]
+fn load_groups_batches_with_one_query() {
+    let store = memory_store();
+    let first = block_on(store.append(request(1, 1, 1, vec![draft(1, 1)]))).expect("one");
+    let second =
+        block_on(store.append(request(2, 1, 2, vec![draft(2, 1), draft(3, 1)]))).expect("two");
+    let third = block_on(store.append(request(3, 1, 4, vec![draft(4, 1)]))).expect("three");
+    let loaded = block_on(store.load(LoadRequest {
+        session_id: id::<SessionTag>(1),
+    }))
+    .expect("load");
+    assert_eq!(
+        loaded.committed_batches.as_ref(),
+        &[first.clone(), second.clone(), third.clone()]
+    );
+    let tail = block_on(store.load_from(LoadFromRequest {
+        session_id: id::<SessionTag>(1),
+        window: LoadWindow::FromSequence {
+            from_sequence: 2,
+            prior_checksum: first.records[0].checksum(),
+        },
+    }))
+    .expect("tail");
+    assert_eq!(tail.committed_batches.as_ref(), &[second, third]);
+}
+
+#[test]
+fn prune_keeps_counters_in_sync() {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().join("journal.sqlite");
+    let store = file_store(&dir, SqliteDurability::Durable);
+    block_on(store.append(request(1, 1, 1, vec![draft(1, 1), draft(2, 1)]))).expect("one");
+    let boundary = block_on(store.append(request(2, 1, 3, vec![draft(3, 1)]))).expect("two");
+    block_on(store.append(request(3, 1, 4, vec![draft(4, 1), draft(5, 1)]))).expect("three");
+    assert_eq!(stored_counters(&path, 1), (3, 5));
+    write_aligned_snapshot(&store, 3, boundary.records[0].checksum());
+    let receipt = block_on(store.prune(PruneRequest {
+        session_id: id::<SessionTag>(1),
+        horizon: IdempotencyHorizon {
+            expire_at: UNIX_EPOCH,
+        },
+    }))
+    .expect("prune");
+    assert_eq!(receipt.pruned_through_sequence, 3);
+    // Records 1-2 and batch 1 are gone; the boundary batch row and its last
+    // record stay, so the counters track the tables exactly.
+    assert_eq!(stored_counters(&path, 1), (2, 3));
+    block_on(store.append(request(4, 1, 6, vec![draft(6, 1)]))).expect("after prune");
+    assert_eq!(stored_counters(&path, 1), (3, 4));
+    let loaded = block_on(store.load(LoadRequest {
+        session_id: id::<SessionTag>(1),
+    }))
+    .expect("load after prune");
+    assert_eq!(loaded.head_sequence, 6);
+    assert_eq!(
+        loaded
+            .committed_batches
+            .iter()
+            .map(|batch| batch.first_sequence)
+            .collect::<Vec<_>>(),
+        vec![4, 6]
+    );
+}
+
+#[test]
+fn prune_boundary_batch_is_omitted_like_the_memory_store() {
+    let store = memory_store();
+    block_on(check_prune_boundary_conformance(
+        &store,
+        PruneBoundaryConformanceCase {
+            prefix: request(1, 1, 1, vec![draft(1, 1), draft(2, 1)]),
+            boundary: request(2, 1, 3, vec![draft(3, 1)]),
+            tail: request(3, 1, 4, vec![draft(4, 1), draft(5, 1)]),
+            snapshot_bytes: limits().snapshot_bytes,
+        },
+    ))
+    .expect("prune boundary conformance");
 }

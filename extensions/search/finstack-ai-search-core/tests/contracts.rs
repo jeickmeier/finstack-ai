@@ -282,3 +282,63 @@ fn unicode_previews_and_source_payload_limits_are_enforced() {
         Err(SearchError::SearchScopeDenied)
     );
 }
+
+#[test]
+fn fuse_is_order_independent_after_single_validation() {
+    let limits = SearchLimits::default();
+    let mut duplicate = hit("memory", "a", 7);
+    duplicate.provenance.locators.push("page:2".into());
+    let legs = vec![
+        leg(
+            "memory",
+            LexicalKind::Keyword,
+            vec![hit("memory", "a", 7), duplicate, hit("memory", "b", 3)],
+        ),
+        leg(
+            "memory",
+            LexicalKind::Bm25,
+            vec![hit("memory", "b", 9), hit("memory", "c", 2)],
+        ),
+        leg("docs", LexicalKind::Keyword, vec![hit("docs", "a", 1)]),
+    ];
+    // Validation happens exactly once, at the leg boundary.
+    for leg in &legs {
+        leg.validate(8, &limits).unwrap();
+    }
+    let expected = fuse(legs.clone(), Fusion::default(), 8, &limits).unwrap();
+    assert_eq!(expected.hits.len(), 4);
+    assert_eq!(
+        expected.hits[0].reference,
+        SourceRef::Memory { id: "b".into() }
+    );
+    let memory_a = expected
+        .hits
+        .iter()
+        .find(|hit| {
+            hit.source.as_ref() == "memory" && hit.reference == SourceRef::Memory { id: "a".into() }
+        })
+        .unwrap();
+    assert_eq!(memory_a.evidence.len(), 2);
+    assert_eq!(memory_a.evidence[0].contribution, 1_000_000_000 / 61);
+    assert_eq!(memory_a.evidence[1].contribution, 0);
+    let mut permutations = vec![
+        vec![legs[2].clone(), legs[0].clone(), legs[1].clone()],
+        vec![legs[1].clone(), legs[2].clone(), legs[0].clone()],
+    ];
+    for permutation in &mut permutations {
+        for leg in permutation.iter_mut() {
+            leg.result.hits.reverse();
+        }
+        assert_eq!(
+            fuse(permutation.clone(), Fusion::default(), 8, &limits).unwrap(),
+            expected
+        );
+    }
+    // Fusion still refuses to unite one reference across scopes.
+    let mut crossed = legs[0].clone();
+    crossed.result.hits[1].provenance.scope.user = Some("bob".into());
+    assert_eq!(
+        fuse(vec![crossed], Fusion::default(), 8, &limits),
+        Err(SearchError::SearchScopeDenied)
+    );
+}

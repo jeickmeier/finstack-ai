@@ -10,7 +10,7 @@ use finstack_ai_runtime::child::{
     child_relation_digest,
 };
 use finstack_ai_runtime::ports::PortFuture;
-use tokio::io::{AsyncBufRead, AsyncBufReadExt};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWriteExt};
 
 use crate::CodexChildError;
 use crate::config::CodexExecConfig;
@@ -19,6 +19,11 @@ use crate::state::{CodexRunReport, CodexRunStatus, RunState};
 
 /// Upper bound on accepted runs held in the in-process table.
 pub(crate) const MAX_ACCEPTED: usize = 1_024;
+/// Upper bound on the joined prompt text handed to one `codex exec` child.
+///
+/// The prompt travels over the child's stdin, so the bound is a resource
+/// cap rather than an argv limit; it is checked before any spawn.
+pub(crate) const MAX_PROMPT_BYTES: usize = 256 * 1_024;
 const MAX_JSONL_LINE_BYTES: usize = 64 * 1_024;
 
 type ChildSlot = Arc<tokio::sync::Mutex<Option<tokio::process::Child>>>;
@@ -44,6 +49,12 @@ pub(crate) struct EvictedRun {
 }
 
 /// `AgentInvoker` leaf that spawns `codex exec --json` with frozen flags.
+///
+/// The prompt is written to the child's stdin (never placed in argv, where
+/// it would be visible to `ps` and subject to the platform argument-length
+/// limit) and is capped at 256 KiB. Each child leads its own process
+/// group so [`AgentInvoker::cancel`] terminates the whole tree, including
+/// any commands Codex itself spawned.
 #[derive(Debug)]
 pub struct CodexChildInvoker {
     pub(crate) config: CodexExecConfig,
@@ -219,12 +230,19 @@ fn prompt_text(input: &[ContentBlock]) -> Result<String, AgentInvokeError> {
     if text.trim().is_empty() {
         return Err(invalid("codex child input has no text"));
     }
+    if text.len() > MAX_PROMPT_BYTES {
+        return Err(invalid("codex child prompt exceeds 256 KiB"));
+    }
     Ok(text)
 }
 
+/// Spawn one `codex exec` child as its own process-group leader.
+///
+/// The positional prompt is omitted, so Codex reads it from stdin; the
+/// prompt bytes are written by the supervisor task after spawn.
 fn spawn_codex(
     config: &CodexExecConfig,
-    prompt: &str,
+    prompt: String,
 ) -> Result<(Arc<Mutex<RunState>>, ChildSlot), AgentInvokeError> {
     let mut command = tokio::process::Command::new(&config.binary);
     command
@@ -240,15 +258,20 @@ fn spawn_codex(
     for arg in &config.extra_args {
         command.arg(arg);
     }
-    command.arg("--").arg(prompt);
     command
-        .stdin(Stdio::null())
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+    finstack_ai_runtime::confinement::configure_process_tree(command.as_std_mut())
+        .map_err(|_| unavailable("codex process tree could not be configured"))?;
     let mut child = command
         .spawn()
         .map_err(|_| unavailable("codex binary failed to start"))?;
+    let stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| unavailable("codex stdin is unavailable"))?;
     let stdout = child
         .stdout
         .take()
@@ -260,12 +283,33 @@ fn spawn_codex(
     let state = Arc::new(Mutex::new(RunState::default()));
     let slot: ChildSlot = Arc::new(tokio::sync::Mutex::new(Some(child)));
     tokio::spawn(supervise(
-        stdout,
-        stderr,
+        ChildPipes {
+            stdin,
+            stdout,
+            stderr,
+        },
+        prompt,
         Arc::clone(&state),
         Arc::clone(&slot),
     ));
     Ok((state, slot))
+}
+
+struct ChildPipes {
+    stdin: tokio::process::ChildStdin,
+    stdout: tokio::process::ChildStdout,
+    stderr: tokio::process::ChildStderr,
+}
+
+/// Deliver the prompt and close stdin so Codex sees EOF.
+///
+/// Bounded by the child's lifetime: once the leader is killed the pipe's
+/// read end closes and the write fails with a broken pipe, which is the
+/// only error this can see and is not worth reporting.
+async fn write_prompt(mut stdin: tokio::process::ChildStdin, prompt: String) {
+    if stdin.write_all(prompt.as_bytes()).await.is_ok() {
+        let _ = stdin.shutdown().await;
+    }
 }
 
 async fn drain_stdout(stdout: tokio::process::ChildStdout, state: &Mutex<RunState>) {
@@ -338,16 +382,19 @@ async fn read_bounded_line<R: AsyncBufRead + Unpin>(
 }
 
 async fn supervise(
-    stdout: tokio::process::ChildStdout,
-    stderr: tokio::process::ChildStderr,
+    pipes: ChildPipes,
+    prompt: String,
     state: Arc<Mutex<RunState>>,
     slot: ChildSlot,
 ) {
-    // Both pipes are drained concurrently: a child that fills the stderr
-    // pipe buffer would otherwise block on write and never finish stdout.
+    // All three pipes are driven concurrently: a child that fills the
+    // stderr pipe buffer would otherwise block on write and never finish
+    // stdout, and a child that writes before reading its prompt must not
+    // deadlock against a prompt larger than the stdin pipe buffer.
     tokio::join!(
-        drain_stdout(stdout, state.as_ref()),
-        drain_stderr(stderr, state.as_ref()),
+        write_prompt(pipes.stdin, prompt),
+        drain_stdout(pipes.stdout, state.as_ref()),
+        drain_stderr(pipes.stderr, state.as_ref()),
     );
     let child = slot.lock().await.take();
     let code = match child {
@@ -447,7 +494,7 @@ impl AgentInvoker for CodexChildInvoker {
                 return Err(unavailable("codex run table is full"));
             }
             drop(evicted_guard);
-            let (state, slot) = spawn_codex(&config, &prompt)?;
+            let (state, slot) = spawn_codex(&config, prompt)?;
             guard.insert(
                 run_id,
                 CodexRun {
@@ -484,9 +531,18 @@ impl AgentInvoker for CodexChildInvoker {
             }
             let mut slot = run.child.lock().await;
             if let Some(child) = slot.as_mut() {
-                child
-                    .start_kill()
-                    .map_err(|_| unavailable("codex child kill request failed"))?;
+                // Kill the whole process group the leader owns, so commands
+                // Codex spawned die with it. Fall back to signalling the
+                // leader alone when the group kill is unavailable (non-Unix)
+                // or the child already exited and has no pid.
+                let group_killed = child.id().is_some_and(|process_id| {
+                    finstack_ai_runtime::confinement::terminate_process_tree(process_id).is_ok()
+                });
+                if !group_killed {
+                    child
+                        .start_kill()
+                        .map_err(|_| unavailable("codex child kill request failed"))?;
+                }
                 if let Ok(mut state) = run.state.lock() {
                     state.mark_cancelled();
                 }

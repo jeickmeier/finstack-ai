@@ -1,5 +1,6 @@
 //! Record, receipt, search, and artifact-action queries.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use rusqlite::{Connection, OptionalExtension, Row, Transaction, TransactionBehavior, params};
@@ -12,6 +13,7 @@ use crate::record::{
     MemoryBody, MemoryId, MemoryProvenance, MemoryRecord, MemoryScope, RetentionPolicy,
 };
 
+use super::super::ranking::{Ranked, TopHits};
 use super::super::{
     EmbeddingSource, MatchEvidence, MemoryArtifactAction, MemoryHit, MemoryListing, MemoryPage,
     MemoryQuery, MemoryStoreError, MemoryStoreLimits, PutOutcome, artifact_transition_actions,
@@ -179,7 +181,10 @@ pub(super) fn sqlite_correct(
     if old_record.tombstoned || old_record.superseded_by.is_some() {
         return Err(MemoryStoreError::NotFound);
     }
-    if *scope != old_record.scope || replacement.scope != old_record.scope {
+    // `old_record.scope` equals `scope` by construction (rows are keyed by
+    // scope digest and decoding verifies it); the replacement must live in
+    // that same scope so the supersession link never crosses scopes.
+    if replacement.scope != old_record.scope {
         return Err(MemoryStoreError::NotFound);
     }
     if record_conflicts(&transaction, &replacement)? {
@@ -428,13 +433,20 @@ fn body_columns(body: &MemoryBody) -> Result<(Option<String>, Option<String>), M
     }
 }
 
-/// Insert (or replace) `record`'s row and FTS entry within `transaction`.
+/// Insert (or replace) `record`'s row, its stored embedding source digest,
+/// and its FTS/keyword entries within `transaction`, dropping every
+/// embedding row the id held and keeping the byte counters exact.
 pub(super) fn write_record(
     transaction: &Transaction<'_>,
     record: &MemoryRecord,
 ) -> Result<(), MemoryStoreError> {
     let scope_digest = scope_key(&record.scope)?;
+    let previous_inline =
+        inline_bytes_of(stored_body(transaction, &scope_digest, record.id.as_str())?);
     let (body_inline, blob_ref_json) = body_columns(&record.body)?;
+    let incoming_inline =
+        i64::try_from(body_inline.as_ref().map_or(0, String::len)).unwrap_or(i64::MAX);
+    let source_digest = embedding_source_digest(&embedding_source_text(record))?.to_hex();
     let sensitivity_text =
         serde_json::to_string(&record.sensitivity).map_err(|_| sqlite_unavailable())?;
     let keywords_json =
@@ -450,8 +462,9 @@ pub(super) fn write_record(
             "INSERT OR REPLACE INTO memory_records
              (scope_digest, id, tenant, user, agent, workspace, body_inline, blob_ref_json, preview,
               sensitivity, keywords_json, provenance_json, created_at, last_confirmed_at,
-              supersedes, superseded_by, retention_json, expires_at, tombstoned)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
+              supersedes, superseded_by, retention_json, expires_at, tombstoned, source_digest)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
+                     ?18, ?19, ?20)",
             params![
                 scope_digest,
                 record.id.as_str(),
@@ -472,20 +485,33 @@ pub(super) fn write_record(
                 retention_json,
                 expires_at,
                 i64::from(record.tombstoned),
+                source_digest,
             ],
         )
         .map_err(|_| sqlite_unavailable())?;
+    adjust_counters(
+        transaction,
+        incoming_inline.saturating_sub(previous_inline),
+        0,
+    )?;
+    // The written content supersedes whatever any space indexed for this id
+    // (e.g. a revived tombstone's stale rows).
+    delete_embedding_rows(transaction, &record.scope, &record.id)?;
+    write_search_index(transaction, &scope_digest, record)
+}
 
+/// Replace `record`'s FTS row and keyword rows within `transaction`.
+fn write_search_index(
+    transaction: &Transaction<'_>,
+    scope_digest: &str,
+    record: &MemoryRecord,
+) -> Result<(), MemoryStoreError> {
     transaction
         .execute(
             "DELETE FROM memory_fts WHERE scope_digest = ?1 AND id = ?2",
             params![scope_digest, record.id.as_str()],
         )
         .map_err(|_| sqlite_unavailable())?;
-    // The written content supersedes whatever any space indexed for this id
-    // (e.g. a revived tombstone's stale rows).
-    delete_embedding_rows(transaction, &record.scope, &record.id)?;
-
     let keywords_text = record
         .keywords
         .iter()
@@ -565,21 +591,130 @@ fn delete_fts_row(
     Ok(())
 }
 
-/// Drop every embedding row of `(scope, id)` across all spaces. Called in
-/// the same transaction as every record death or rewrite so no dead vector
-/// can rank.
+/// Drop every embedding row of `(scope, id)` across all spaces, crediting
+/// their bytes back to the counters. Called in the same transaction as
+/// every record death or rewrite so no dead vector can rank.
 fn delete_embedding_rows(
     transaction: &Transaction<'_>,
     scope: &MemoryScope,
     id: &MemoryId,
 ) -> Result<(), MemoryStoreError> {
+    let scope_digest = scope_key(scope)?;
+    let released: i64 = transaction
+        .query_row(
+            "SELECT COALESCE(SUM(length(vector)), 0) FROM memory_embeddings
+             WHERE scope_digest = ?1 AND id = ?2",
+            params![scope_digest, id.as_str()],
+            |row| row.get(0),
+        )
+        .map_err(|_| sqlite_unavailable())?;
     transaction
         .execute(
             "DELETE FROM memory_embeddings WHERE scope_digest = ?1 AND id = ?2",
-            params![scope_key(scope)?, id.as_str()],
+            params![scope_digest, id.as_str()],
+        )
+        .map_err(|_| sqlite_unavailable())?;
+    adjust_counters(transaction, 0, released.saturating_neg())
+}
+
+/// Apply signed byte deltas to the singleton `memory_counters` row. The
+/// counters cache sums that can never be negative, so the update clamps at
+/// zero rather than letting a corrupted counter poison later capacity checks.
+fn adjust_counters(
+    transaction: &Transaction<'_>,
+    inline_delta: i64,
+    embedding_delta: i64,
+) -> Result<(), MemoryStoreError> {
+    if inline_delta == 0 && embedding_delta == 0 {
+        return Ok(());
+    }
+    transaction
+        .execute(
+            "UPDATE memory_counters
+             SET inline_bytes = MAX(0, inline_bytes + ?1),
+                 embedding_bytes = MAX(0, embedding_bytes + ?2)
+             WHERE singleton = 1",
+            params![inline_delta, embedding_delta],
         )
         .map_err(|_| sqlite_unavailable())?;
     Ok(())
+}
+
+/// Cached `(inline_bytes, embedding_bytes)` totals from `memory_counters`.
+fn read_counters(connection: &Connection) -> Result<(u64, u64), MemoryStoreError> {
+    connection
+        .query_row(
+            "SELECT inline_bytes, embedding_bytes FROM memory_counters WHERE singleton = 1",
+            [],
+            |row| {
+                let inline: i64 = row.get(0)?;
+                let embedding: i64 = row.get(1)?;
+                Ok((
+                    u64::try_from(inline).unwrap_or(0),
+                    u64::try_from(embedding).unwrap_or(0),
+                ))
+            },
+        )
+        .map_err(|_| sqlite_unavailable())
+}
+
+/// The body a stored row holds, as far as the inline-byte counter cares.
+#[derive(Debug, Clone, Copy)]
+enum StoredBody {
+    /// A blob reference: contributes no inline bytes.
+    Blob,
+    /// An inline body of this many UTF-8 bytes.
+    Inline(i64),
+}
+
+/// Inline bytes a possibly-absent stored row contributes to the counter.
+fn inline_bytes_of(body: Option<StoredBody>) -> i64 {
+    match body {
+        Some(StoredBody::Inline(bytes)) => bytes,
+        Some(StoredBody::Blob) | None => 0,
+    }
+}
+
+/// The body of the row at `(scope_digest, id)`, or `None` when no row
+/// exists (live, tombstoned, or superseded alike).
+fn stored_body(
+    connection: &Connection,
+    scope_digest: &str,
+    id: &str,
+) -> Result<Option<StoredBody>, MemoryStoreError> {
+    connection
+        .query_row(
+            "SELECT length(CAST(body_inline AS BLOB)) FROM memory_records
+             WHERE scope_digest = ?1 AND id = ?2",
+            params![scope_digest, id],
+            |row| {
+                let inline: Option<i64> = row.get(0)?;
+                Ok(inline.map_or(StoredBody::Blob, StoredBody::Inline))
+            },
+        )
+        .optional()
+        .map_err(|_| sqlite_unavailable())
+}
+
+/// Test probe: the stored counters next to the sums they cache, as
+/// `((inline_bytes, embedding_bytes), (recomputed_inline, recomputed_embedding))`.
+#[cfg(test)]
+pub(crate) fn counters_audit(
+    connection: &Connection,
+) -> rusqlite::Result<((i64, i64), (i64, i64))> {
+    let stored = connection.query_row(
+        "SELECT inline_bytes, embedding_bytes FROM memory_counters WHERE singleton = 1",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    let recomputed = connection.query_row(
+        "SELECT
+           (SELECT COALESCE(SUM(length(CAST(body_inline AS BLOB))), 0) FROM memory_records),
+           (SELECT COALESCE(SUM(length(vector)), 0) FROM memory_embeddings)",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    Ok((stored, recomputed))
 }
 
 /// Fetch one row by `(scope, id)`, excluding hard-expired rows.
@@ -604,42 +739,24 @@ fn fetch_record(
 /// Report whether writing `incoming` at its id would collide with a row
 /// that must not be replaced.
 ///
-/// A live row in the exact same complete scope collides. A tombstoned row in
-/// that scope does not: that is the same owner re-remembering something they
-/// forgot, and refusing it would strand the id forever because correction
-/// rejects self-supersession.
+/// Rows are keyed by `(scope_digest, id)`, so the lookup is already exact
+/// to the incoming record's complete scope. A live row there collides. A
+/// tombstoned row does not: that is the same owner re-remembering something
+/// they forgot, and refusing it would strand the id forever because
+/// correction rejects self-supersession.
 fn record_conflicts(
     transaction: &Transaction<'_>,
     incoming: &MemoryRecord,
 ) -> Result<bool, MemoryStoreError> {
-    let existing: Option<(bool, MemoryScope)> = transaction
+    let tombstoned: Option<i64> = transaction
         .query_row(
-            "SELECT tombstoned, tenant, user, agent, workspace FROM memory_records
-             WHERE scope_digest = ?1 AND id = ?2",
+            "SELECT tombstoned FROM memory_records WHERE scope_digest = ?1 AND id = ?2",
             params![scope_key(&incoming.scope)?, incoming.id.as_str()],
-            |row| {
-                let tombstoned: i64 = row.get(0)?;
-                let tenant: String = row.get(1)?;
-                let user: Option<String> = row.get(2)?;
-                let agent: Option<String> = row.get(3)?;
-                let workspace: Option<String> = row.get(4)?;
-                Ok((
-                    tombstoned != 0,
-                    MemoryScope {
-                        tenant: Arc::from(tenant),
-                        user: user.map(Arc::from),
-                        agent: agent.map(Arc::from),
-                        workspace: workspace.map(Arc::from),
-                    },
-                ))
-            },
+            |row| row.get(0),
         )
         .optional()
         .map_err(|_| sqlite_unavailable())?;
-    let Some((tombstoned, existing_scope)) = existing else {
-        return Ok(false);
-    };
-    Ok(!(tombstoned && existing_scope == incoming.scope))
+    Ok(tombstoned.is_some_and(|tombstoned| tombstoned == 0))
 }
 
 /// Check whether a key is new or an exact replay of the same operation.
@@ -757,6 +874,22 @@ fn cleanup_expired(
     }
     reserve_artifact_actions(transaction, &actions, limits)?;
     enqueue_artifact_actions(transaction, &actions, now)?;
+    let (released_inline, released_embedding): (i64, i64) = transaction
+        .query_row(
+            "SELECT
+               (SELECT COALESCE(SUM(length(CAST(body_inline AS BLOB))), 0)
+                FROM memory_records
+                WHERE expires_at IS NOT NULL AND expires_at <= ?1),
+               (SELECT COALESCE(SUM(length(vector)), 0)
+                FROM memory_embeddings
+                WHERE (scope_digest, id) IN (
+                  SELECT scope_digest, id FROM memory_records
+                  WHERE expires_at IS NOT NULL AND expires_at <= ?1
+                ))",
+            params![now.as_unix_ms()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|_| sqlite_unavailable())?;
     transaction
         .execute(
             "DELETE FROM memory_fts WHERE (scope_digest, id) IN (
@@ -790,7 +923,11 @@ fn cleanup_expired(
             params![now.as_unix_ms()],
         )
         .map_err(|_| sqlite_unavailable())?;
-    Ok(())
+    adjust_counters(
+        transaction,
+        released_inline.saturating_neg(),
+        released_embedding.saturating_neg(),
+    )
 }
 
 fn reserve_artifact_actions(
@@ -890,11 +1027,12 @@ pub(super) fn acknowledge_artifact_action(
     Ok(())
 }
 
-/// [`MemoryStore::pending_embedding_sources`] over the anti-join: live
-/// records in any scope whose `memory_embeddings` row for the space is
-/// absent **or** carries a source digest that no longer matches the record's
-/// current content. Stable order `(scope_digest, id)`; the batch is capped
-/// by [`MemoryStoreLimits::max_search_results`].
+/// [`MemoryStore::pending_embedding_sources`] over the anti-join, evaluated
+/// entirely in SQL against the stored `source_digest`: live records in any
+/// scope whose `memory_embeddings` row for the space is absent **or**
+/// carries a source digest that no longer matches the record's current
+/// content. Stable order `(scope_digest, id)`; the batch is capped by
+/// [`MemoryStoreLimits::max_search_results`].
 ///
 /// [`MemoryStore::pending_embedding_sources`]: super::super::MemoryStore::pending_embedding_sources
 pub(super) fn pending_embedding_sources(
@@ -908,40 +1046,38 @@ pub(super) fn pending_embedding_sources(
     let limit = limit.min(limits.max_search_results);
     let mut statement = connection
         .prepare(
-            "SELECT r.*, e.source_digest AS indexed_source_digest
-             FROM memory_records r
+            "SELECT r.* FROM memory_records r
              LEFT JOIN memory_embeddings e
                ON e.scope_digest = r.scope_digest AND e.id = r.id AND e.embedder_id = ?1
              WHERE r.tombstoned = 0 AND r.superseded_by IS NULL
                AND (r.expires_at IS NULL OR r.expires_at > ?2)
-             ORDER BY r.scope_digest, r.id",
+               AND (e.id IS NULL OR e.source_digest IS NOT r.source_digest)
+             ORDER BY r.scope_digest, r.id
+             LIMIT ?3",
         )
         .map_err(|_| sqlite_unavailable())?;
     let rows = statement
-        .query_map(params![embedder_id, now.as_unix_ms()], |row| {
-            let record = record_from_row(row)?;
-            let indexed: Option<String> = row.get("indexed_source_digest")?;
-            Ok((record, indexed))
-        })
+        .query_map(
+            params![
+                embedder_id,
+                now.as_unix_ms(),
+                i64::try_from(limit).unwrap_or(i64::MAX)
+            ],
+            |row| {
+                let record = record_from_row(row)?;
+                let source_digest: String = row.get("source_digest")?;
+                Ok((record, source_digest))
+            },
+        )
         .map_err(|_| sqlite_unavailable())?;
-    let mut sources = Vec::new();
+    let mut sources = Vec::with_capacity(limit);
     for row in rows {
-        if sources.len() >= limit {
-            break;
-        }
-        let (record, indexed) = row.map_err(|_| sqlite_unavailable())?;
-        let text = embedding_source_text(&record);
-        let source_digest = embedding_source_digest(&text)?;
-        // Anti-join on current content: a record is pending unless the space
-        // holds a row for it whose stored digest still matches, so a stale
-        // row re-surfaces its record.
-        if indexed.is_some_and(|stored| stored == source_digest.to_hex()) {
-            continue;
-        }
+        let (record, source_digest) = row.map_err(|_| sqlite_unavailable())?;
+        let source_digest = Digest::from_hex(&source_digest).map_err(|_| sqlite_unavailable())?;
         sources.push(EmbeddingSource {
+            text: Arc::from(embedding_source_text(&record)),
             scope: record.scope,
             id: record.id,
-            text: Arc::from(text),
             source_digest,
         });
     }
@@ -1002,62 +1138,85 @@ pub(super) fn store_embedding(
     if embedding_source_digest(&embedding_source_text(&record))? != write.source_digest {
         return transaction.commit().map_err(|_| sqlite_unavailable());
     }
-    let retained: u64 = transaction
+    let scope_digest = scope_key(&write.scope)?;
+    // Replacing a row credits its bytes atomically: the ceiling applies to
+    // the total retained after this write.
+    let replaced: i64 = transaction
         .query_row(
-            "SELECT COALESCE(SUM(length(vector)), 0) FROM memory_embeddings
-         WHERE NOT (scope_digest = ?1 AND id = ?2 AND embedder_id = ?3)",
-            params![
-                scope_key(&write.scope)?,
-                write.id.as_str(),
-                write.embedder_id.as_ref()
-            ],
+            "SELECT length(vector) FROM memory_embeddings
+             WHERE scope_digest = ?1 AND id = ?2 AND embedder_id = ?3",
+            params![scope_digest, write.id.as_str(), write.embedder_id.as_ref()],
             |row| row.get(0),
         )
-        .map_err(|_| sqlite_unavailable())?;
-    if retained.saturating_add((write.vector.dimensions() as u64).saturating_mul(4))
-        > limits.max_embedding_bytes
-    {
+        .optional()
+        .map_err(|_| sqlite_unavailable())?
+        .unwrap_or(0);
+    let (_, embedding_bytes) = read_counters(&transaction)?;
+    let retained = embedding_bytes.saturating_sub(u64::try_from(replaced).unwrap_or(0));
+    let unit_vector = write.vector.unit_normalized();
+    let blob = vector_to_blob(&unit_vector);
+    let incoming = u64::try_from(blob.len()).unwrap_or(u64::MAX);
+    if retained.saturating_add(incoming) > limits.max_embedding_bytes {
         return Err(MemoryStoreError::CapacityExceeded {
             resource: "embedding_bytes",
             limit: limits.max_embedding_bytes,
         });
     }
-    let unit_vector = write.vector.unit_normalized();
     transaction
         .execute(
             "INSERT OR REPLACE INTO memory_embeddings
              (scope_digest, id, embedder_id, dimensions, source_digest, vector, embedded_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
-                scope_key(&write.scope)?,
+                scope_digest,
                 write.id.as_str(),
                 write.embedder_id.as_ref(),
                 i64::try_from(unit_vector.dimensions()).unwrap_or(i64::MAX),
                 write.source_digest.to_hex(),
-                vector_to_blob(&unit_vector),
+                blob,
                 now.as_unix_ms(),
             ],
         )
         .map_err(|_| sqlite_unavailable())?;
+    adjust_counters(
+        &transaction,
+        0,
+        i64::try_from(incoming)
+            .unwrap_or(i64::MAX)
+            .saturating_sub(replaced),
+    )?;
     transaction.commit().map_err(|_| sqlite_unavailable())
 }
 
 /// [`MemoryStore::forget_embedding_space`]: drop every row of one space
-/// (embedder rotation); its records become pending again.
+/// (embedder rotation) and credit its bytes, in one transaction; the
+/// space's records become pending again.
 ///
 /// [`MemoryStore::forget_embedding_space`]: super::super::MemoryStore::forget_embedding_space
 pub(super) fn forget_embedding_space(
-    connection: &Connection,
+    connection: &mut Connection,
     embedder_id: &str,
 ) -> Result<(), MemoryStoreError> {
     validate_embedder_id(embedder_id)?;
-    connection
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(|_| sqlite_unavailable())?;
+    let released: i64 = transaction
+        .query_row(
+            "SELECT COALESCE(SUM(length(vector)), 0) FROM memory_embeddings
+             WHERE embedder_id = ?1",
+            params![embedder_id],
+            |row| row.get(0),
+        )
+        .map_err(|_| sqlite_unavailable())?;
+    transaction
         .execute(
             "DELETE FROM memory_embeddings WHERE embedder_id = ?1",
             params![embedder_id],
         )
         .map_err(|_| sqlite_unavailable())?;
-    Ok(())
+    adjust_counters(&transaction, 0, released.saturating_neg())?;
+    transaction.commit().map_err(|_| sqlite_unavailable())
 }
 
 /// Dimensionality of the space `embedder_id`, fixed by its first stored row
@@ -1132,16 +1291,12 @@ fn reserve_record(
     incoming: &MemoryRecord,
     limits: MemoryStoreLimits,
 ) -> Result<(), MemoryStoreError> {
-    let existing_inline: Option<Option<i64>> = transaction
-        .query_row(
-            "SELECT length(CAST(body_inline AS BLOB)) FROM memory_records
-             WHERE scope_digest = ?1 AND id = ?2",
-            params![scope_key(&incoming.scope)?, incoming.id.as_str()],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(|_| sqlite_unavailable())?;
-    if existing_inline.is_none() {
+    let existing = stored_body(
+        transaction,
+        &scope_key(&incoming.scope)?,
+        incoming.id.as_str(),
+    )?;
+    if existing.is_none() {
         let count: i64 = transaction
             .query_row("SELECT COUNT(*) FROM memory_records", [], |row| row.get(0))
             .map_err(|_| sqlite_unavailable())?;
@@ -1152,14 +1307,9 @@ fn reserve_record(
             });
         }
     }
-    let total: i64 = transaction
-        .query_row(
-            "SELECT COALESCE(SUM(length(CAST(body_inline AS BLOB))), 0) FROM memory_records",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(|_| sqlite_unavailable())?;
-    let old_bytes = existing_inline.flatten().unwrap_or(0);
+    let (inline_bytes, _) = read_counters(transaction)?;
+    let total = i64::try_from(inline_bytes).unwrap_or(i64::MAX);
+    let old_bytes = inline_bytes_of(existing);
     let incoming_bytes = match &incoming.body {
         MemoryBody::Inline(body) => i64::try_from(body.len()).unwrap_or(i64::MAX),
         MemoryBody::Blob { .. } => 0,
@@ -1293,7 +1443,7 @@ fn search_full_text(
                AND r.tombstoned = 0 AND r.superseded_by IS NULL
                AND r.scope_digest = ?2
                AND (r.expires_at IS NULL OR r.expires_at > ?4)
-             ORDER BY bm25(memory_fts)
+             ORDER BY bm25(memory_fts), r.id
              LIMIT ?3",
         )
         .map_err(|_| sqlite_unavailable())?;
@@ -1330,8 +1480,9 @@ fn search_full_text(
 /// [`MemoryQuery::Embedding`] search: brute-force exact ranking over the
 /// scope's live rows in the space — the dot product of unit-normalized
 /// vectors mapped through the shared [`similarity_score`], so the ranking is
-/// byte-identical with [`super::super::InProcessMemoryStore`]'s. Ordering
-/// uses a bounded top-k heap; only the caller's limit is retained.
+/// byte-identical with [`super::super::InProcessMemoryStore`]'s. Only
+/// `(id, vector)` pairs stream through the bounded top-k heap; the winners'
+/// full rows are then fetched in one bounded `IN (...)` lookup.
 fn search_embedding(
     connection: &Connection,
     scope: &MemoryScope,
@@ -1350,9 +1501,10 @@ fn search_embedding(
         });
     }
     let query = vector.unit_normalized();
+    let scope_digest = scope_key(scope)?;
     let mut statement = connection
         .prepare(
-            "SELECT r.*, e.vector AS embedding_blob
+            "SELECT e.id, e.vector
              FROM memory_embeddings e
              JOIN memory_records r
                ON r.scope_digest = e.scope_digest AND r.id = e.id
@@ -1363,17 +1515,18 @@ fn search_embedding(
         .map_err(|_| sqlite_unavailable())?;
     let rows = statement
         .query_map(
-            params![embedder_id, scope_key(scope)?, now.as_unix_ms()],
+            params![embedder_id, scope_digest, now.as_unix_ms()],
             |row| {
-                let record = record_from_row(row)?;
-                let blob: Vec<u8> = row.get("embedding_blob")?;
-                Ok((record, blob))
+                let id: String = row.get(0)?;
+                let blob: Vec<u8> = row.get(1)?;
+                Ok((id, blob))
             },
         )
         .map_err(|_| sqlite_unavailable())?;
-    let mut hits = super::super::ranking::TopHits::new(limit);
+    let mut top = TopHits::new(limit);
     for row in rows {
-        let (record, blob) = row.map_err(|_| sqlite_unavailable())?;
+        let (id, blob) = row.map_err(|_| sqlite_unavailable())?;
+        let id = MemoryId::parse(&id).map_err(|_| sqlite_unavailable())?;
         // Skip an undecodable embedding BLOB so one bad row does not fail search.
         let Some(stored) = vector_from_blob(&blob) else {
             continue;
@@ -1381,13 +1534,64 @@ fn search_embedding(
         let Some(dot) = query.dot(&stored) else {
             continue;
         };
-        hits.push(MemoryHit {
-            record,
+        top.push(ScoredId {
             score: similarity_score(dot),
-            matched: MatchEvidence::Semantic,
+            id,
         });
     }
-    Ok(hits.finish())
+    let winners = top.finish();
+    if winners.is_empty() {
+        return Ok(Vec::new());
+    }
+    // `limit` is bounded by `max_search_results`, far under SQLite's
+    // host-parameter ceiling, so one statement covers every winner.
+    let placeholders = (0..winners.len())
+        .map(|index| format!("?{}", index.saturating_add(2)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut statement = connection
+        .prepare(&format!(
+            "SELECT * FROM memory_records WHERE scope_digest = ?1 AND id IN ({placeholders})"
+        ))
+        .map_err(|_| sqlite_unavailable())?;
+    let mut values: Vec<&str> = Vec::with_capacity(winners.len().saturating_add(1));
+    values.push(scope_digest.as_str());
+    values.extend(winners.iter().map(|winner| winner.id.as_str()));
+    let rows = statement
+        .query_map(rusqlite::params_from_iter(values.iter()), record_from_row)
+        .map_err(|_| sqlite_unavailable())?;
+    let mut records: BTreeMap<MemoryId, MemoryRecord> = BTreeMap::new();
+    for row in rows {
+        let record = row.map_err(|_| sqlite_unavailable())?;
+        records.insert(record.id.clone(), record);
+    }
+    Ok(winners
+        .into_iter()
+        .filter_map(|winner| {
+            records.remove(&winner.id).map(|record| MemoryHit {
+                record,
+                score: winner.score,
+                matched: MatchEvidence::Semantic,
+            })
+        })
+        .collect())
+}
+
+/// A scored record identity without its record: what semantic search ranks
+/// before fetching only the winners' rows.
+struct ScoredId {
+    score: u32,
+    id: MemoryId,
+}
+
+impl Ranked for ScoredId {
+    fn score(&self) -> u32 {
+        self.score
+    }
+
+    fn id(&self) -> &MemoryId {
+        &self.id
+    }
 }
 
 /// Decode a stored little-endian f32 BLOB back into a vector; `None` when

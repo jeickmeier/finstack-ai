@@ -1,4 +1,7 @@
-use super::{NetGuardError, UrlPolicy, parse_and_vet_url, reject_literal_destination};
+use super::{
+    NetGuardError, UrlPolicy, parse_and_vet_url, reject_literal_destination,
+    validate_fixed_endpoint,
+};
 
 #[test]
 fn error_display_names_stable_codes() {
@@ -137,7 +140,16 @@ fn forbidden_destination_covers_private_ranges() {
         "fe80::1",
         "::",
         "ff02::1",
-        "::ffff:10.0.0.1", // IPv4-mapped must canonicalize before checking
+        "::ffff:10.0.0.1",    // IPv4-mapped must canonicalize before checking
+        "100.64.0.1",         // 100.64.0.0/10 CGNAT, low edge
+        "100.127.255.254",    // 100.64.0.0/10 CGNAT, high edge
+        "0.1.2.3",            // 0.0.0.0/8 "this network"
+        "192.0.0.9",          // 192.0.0.0/24 IETF protocol assignments
+        "240.0.0.1",          // 240.0.0.0/4 reserved
+        "64:ff9b::7f00:1",    // NAT64 embedding 127.0.0.1
+        "64:ff9b::a9fe:a9fe", // NAT64 embedding 169.254.169.254
+        "2002:c0a8:101::",    // 6to4 embedding 192.168.1.1
+        "2002:7f00:1::",      // 6to4 embedding 127.0.0.1
     ] {
         assert!(
             is_forbidden_destination(addr.parse::<IpAddr>().unwrap()),
@@ -150,6 +162,74 @@ fn forbidden_destination_covers_private_ranges() {
     assert!(!is_forbidden_destination(
         "2606:2800:220:1::1".parse::<IpAddr>().unwrap()
     ));
+    // Positive controls at the edges of the new ranges: 100.128.0.1 is just
+    // past 100.64.0.0/10, and 2002:5db8:d822:: is 6to4 embedding the public
+    // address 93.184.216.34.
+    assert!(!is_forbidden_destination(
+        "100.128.0.1".parse::<IpAddr>().unwrap()
+    ));
+    assert!(!is_forbidden_destination(
+        "2002:5db8:d822::".parse::<IpAddr>().unwrap()
+    ));
+}
+
+#[test]
+fn fixed_endpoint_rejects_query_userinfo_fragment() {
+    for (bad, reason) in [
+        ("https://api.example.com/v1?key=x", "query_forbidden"),
+        ("https://api.example.com/v1?", "query_forbidden"),
+        ("https://user:pw@api.example.com/v1", "userinfo_forbidden"),
+        ("https://api.example.com/v1#frag", "fragment_forbidden"),
+    ] {
+        assert_eq!(
+            validate_fixed_endpoint(bad, &strict()).err(),
+            Some(NetGuardError::InvalidUrl { reason }),
+            "{bad}"
+        );
+    }
+    let vetted = validate_fixed_endpoint("https://api.example.com/v1", &strict()).expect("clean");
+    assert_eq!(vetted.host, "api.example.com");
+    assert_eq!(vetted.port, 443);
+}
+
+#[test]
+fn fixed_endpoint_allows_plaintext_only_on_loopback() {
+    let permissive = UrlPolicy {
+        allow_loopback_http: true,
+        allow_nonstandard_https_port: false,
+    };
+    let vetted =
+        validate_fixed_endpoint("http://localhost:8080/", &permissive).expect("localhost http");
+    assert!(vetted.is_loopback);
+    let vetted =
+        validate_fixed_endpoint("http://127.0.0.1:11434/", &permissive).expect("loopback http");
+    assert!(vetted.is_loopback);
+    assert_eq!(
+        validate_fixed_endpoint("http://api.example.com/", &permissive).err(),
+        Some(NetGuardError::InvalidUrl {
+            reason: "plaintext_http_forbidden"
+        })
+    );
+    assert_eq!(
+        validate_fixed_endpoint("http://localhost:8080/", &strict()).err(),
+        Some(NetGuardError::InvalidUrl {
+            reason: "plaintext_http_forbidden"
+        })
+    );
+}
+
+#[test]
+fn fixed_endpoint_accepts_private_https_host() {
+    // No private-address deny list: an operator-configured endpoint on a
+    // private network is legitimate, unlike a model-supplied URL.
+    for private in [
+        "https://10.0.0.5/",
+        "https://192.168.1.1/v1",
+        "https://[fd00::1]/",
+    ] {
+        let vetted = validate_fixed_endpoint(private, &strict()).expect(private);
+        assert!(!vetted.is_loopback, "{private}");
+    }
 }
 
 #[tokio::test]

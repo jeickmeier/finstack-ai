@@ -20,10 +20,9 @@ use finstack_ai_store_sqlite::{SqliteDurability, SqliteJournalStore, SqliteStore
 use finstack_ai_workflow_hitl::{
     HitlInboxStore, HitlLifecycle, HitlRouter, InteractionRow, ResolutionInput, SqliteHitlStore,
 };
-use finstack_ai_workflow_local::MemoryCronStore;
 use finstack_ai_workflow_worker::{
-    FireStore, InboxStore, PortsFactory, RecoveryStore, SqliteWorkerStore, TickReport,
-    WakeIndexStore, WakeReason, WakeRow, WorkerBuilder, WorkflowExecution, WorkflowWorker,
+    InboxStore, PortsFactory, RecoveryStore, SqliteWorkerStore, TickReport, WakeIndexStore,
+    WakeReason, WakeRow, WorkerBuilder, WorkflowExecution, WorkflowWorker,
 };
 
 use super::super::prepare::{NativeIds, append_lane_input, create_session_runtime};
@@ -175,9 +174,7 @@ impl DurableHostBuilder {
         let clock = ExternalClock::new(NativeIds::now()?);
         let mut worker = WorkerBuilder::new(
             Arc::clone(&self.journal),
-            Arc::new(MemoryCronStore::new()),
             Arc::clone(&self.adapters) as Arc<dyn WakeIndexStore>,
-            Arc::clone(&self.adapters) as Arc<dyn FireStore>,
             Arc::clone(&self.adapters) as Arc<dyn InboxStore>,
         )
         .drive_timeout(self.drive_timeout)
@@ -510,6 +507,18 @@ impl DurableHost {
             if recovered.state().terminal().is_none() {
                 self.inspect(&locator).await?;
             }
+        }
+        // Parked rows are driven only when a response or deadline arrives, so
+        // a scheduled row whose descriptor vanished must fail here, before any
+        // dispatch could repeat an unfinished external operation. Rows of
+        // kinds this host does not serve belong to another process.
+        let served: Vec<&str> = self.definitions.keys().map(AsRef::as_ref).collect();
+        if !self
+            .adapters
+            .wake_without_recovery(&self.tenant_scope, &served, 1)?
+            .is_empty()
+        {
+            return Err(DurableHostError::new("durable_descriptor_missing"));
         }
         Ok(Box::pin(self.worker.tick()).await?)
     }

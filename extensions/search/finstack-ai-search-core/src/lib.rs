@@ -5,6 +5,10 @@
 //! must validate the query and call [`SearchSource::authorize`] for **all**
 //! selected sources before starting any leg. Scope is host-supplied authority;
 //! query text and retrieved evidence are always untrusted data.
+//!
+//! The optional `sqlite` feature adds [`sqlite`], the owned-database worker
+//! shell shared by the native `SQLite` index crates; the default build stays
+//! free of `rusqlite` and Tokio.
 #![warn(missing_docs)]
 #![forbid(unsafe_code)]
 #![warn(clippy::float_cmp)]
@@ -24,6 +28,8 @@ mod hit;
 mod lexical;
 mod query;
 mod scope;
+#[cfg(feature = "sqlite")]
+pub mod sqlite;
 #[cfg(feature = "test-support")]
 pub mod test_support;
 

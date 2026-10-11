@@ -187,6 +187,9 @@ finstack-ai-middleware-document-ingest = { path = "extensions/middleware/finstac
 finstack-ai-middleware-redaction = { path = "extensions/middleware/finstack-ai-middleware-redaction", version = "2.0.0" }
 # ASCII-only patterns; no unicode-* features needed. Already in-tree transitively.
 regex = { version = "1.13", default-features = false, features = ["std", "perf"] }
+# Multi-pattern ASCII case-insensitive substring scan (tool-policy jailbreak
+# triggers). Already in-tree transitively via regex; pinned to the locked version.
+aho-corasick = { version = "1.1.5", default-features = false, features = ["std", "perf-literal"] }
 finstack-ai-middleware-tool-policy = { path = "extensions/middleware/finstack-ai-middleware-tool-policy", version = "2.0.0" }
 finstack-ai-observer-log = { path = "extensions/observers/finstack-ai-observer-log", version = "2.0.0" }
 finstack-ai-observer-otel = { path = "extensions/observers/finstack-ai-observer-otel", version = "2.0.0" }

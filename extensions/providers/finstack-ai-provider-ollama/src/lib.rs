@@ -23,7 +23,6 @@
 
 mod config;
 mod error;
-mod ndjson;
 mod provider;
 mod request;
 

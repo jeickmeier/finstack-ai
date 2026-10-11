@@ -1,35 +1,26 @@
 //! Native Gemini `generateContent` provider implementation.
 
 use core::fmt;
-use core::pin::Pin;
-use core::task::{Context, Poll};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::sync::{Arc, PoisonError, RwLock};
 
 use finstack_ai_kernel::{ErrorCategory, Metadata, OutputSpec};
-use finstack_ai_provider_wire::{GeminiGenerateContentAssembly, StreamNormError, StreamNormKind};
+use finstack_ai_provider_wire::{
+    BoundedRequest, DataSseParser, GeminiGenerateContentAssembly, catalog_from_models,
+    draft_media_error, request_limit_error, unknown_model_capabilities,
+};
 use finstack_ai_runtime::ports::PortFuture;
 use finstack_ai_runtime::ports::model::{
-    CancellationSignal, InputCapabilities, MediaResolveKind, Model, ModelCapabilities,
-    ModelContextProfile, ModelDescriptor, ModelError, ModelEventStream, ModelName, ModelRequest,
-    ModelStreamItem, ModelTokenEstimate, ResolveDraftMediaError, StructuredOutputCapability,
-    resolve_draft_media,
+    Model, ModelCapabilities, ModelDescriptor, ModelError, ModelEventStream, ModelName,
+    ModelRequest, ModelTokenEstimate, StructuredOutputCapability, resolve_draft_media,
 };
-use futures_util::{Stream, StreamExt};
 use reqwest::redirect::Policy;
-use tokio::sync::mpsc;
 
-use crate::error::{
-    GEMINI_CANCELLED, GEMINI_HTTP_ERROR, GEMINI_RESPONSE_INVALID, GEMINI_STREAM_LIMIT_EXCEEDED,
-    GEMINI_TIMEOUT, GEMINI_TRANSPORT_ERROR, config_error, error, request_error, response_error,
-    stream_error, stream_limit_error,
-};
+use crate::error::{CODES, GEMINI_RESPONSE_INVALID, VENDOR, config_error, error, request_error};
 use crate::request::GenerateContentRequest;
-use crate::sse::GeminiSse;
 use crate::{GeminiConfig, GeminiModelConfig};
 
 const PROVIDER: &str = "gemini";
-const STREAM_CHANNEL_CAPACITY: usize = 32;
 
 /// Reusable native Gemini `generateContent` provider.
 pub struct GeminiProvider {
@@ -62,7 +53,8 @@ impl GeminiProvider {
     ///
     /// # Errors
     ///
-    /// Rejects an empty/duplicate model catalog or invalid transport configuration.
+    /// Rejects an empty/duplicate model catalog, a model whose builder-set
+    /// context profile is invalid, or invalid transport configuration.
     ///
     /// # Examples
     ///
@@ -82,7 +74,7 @@ impl GeminiProvider {
     ) -> Result<Self, ModelError> {
         config.validate()?;
         let headers = config.header_map()?;
-        let by_name = catalog_from_models(models)?;
+        let by_name = catalog(models)?;
         let client = reqwest::Client::builder()
             .default_headers(headers)
             .redirect(Policy::none())
@@ -99,9 +91,10 @@ impl GeminiProvider {
     ///
     /// # Errors
     ///
-    /// Rejects an empty or duplicate catalog.
+    /// Rejects an empty or duplicate catalog, or a model whose context
+    /// profile is invalid.
     pub fn replace_model_catalog(&self, models: Vec<GeminiModelConfig>) -> Result<(), ModelError> {
-        let by_name = catalog_from_models(models)?;
+        let by_name = catalog(models)?;
         *self.models.write().unwrap_or_else(PoisonError::into_inner) = by_name;
         Ok(())
     }
@@ -134,44 +127,16 @@ impl GeminiProvider {
     }
 }
 
-fn catalog_from_models(
+fn catalog(
     models: Vec<GeminiModelConfig>,
 ) -> Result<BTreeMap<ModelName, GeminiModelConfig>, ModelError> {
-    let mut by_name = BTreeMap::new();
-    for model in models {
-        if by_name.insert(model.name().clone(), model).is_some() {
-            return Err(config_error("provider contains a duplicate model name"));
-        }
-    }
-    if by_name.is_empty() {
-        return Err(config_error("provider requires at least one model"));
-    }
-    let descriptor = ModelDescriptor {
-        provider: Arc::from(PROVIDER),
-        models: by_name.keys().cloned().collect::<Vec<_>>().into(),
-        metadata: Metadata::empty(),
-    };
-    descriptor.validate()?;
-    Ok(by_name)
-}
-
-fn map_draft_media(failure: ResolveDraftMediaError) -> ModelError {
-    match failure {
-        ResolveDraftMediaError::MissingResolver => {
-            request_error("media content requires a configured media resolver")
-        }
-        ResolveDraftMediaError::Resolve(inner) => match inner.kind {
-            MediaResolveKind::NotFound => request_error(inner.message),
-            MediaResolveKind::Unavailable => error(
-                GEMINI_TRANSPORT_ERROR,
-                ErrorCategory::Model,
-                true,
-                "Gemini media resolution is unavailable",
-            ),
-            MediaResolveKind::Limit => stream_limit_error(),
-        },
-        ResolveDraftMediaError::Limit => stream_limit_error(),
-    }
+    catalog_from_models(
+        &CODES,
+        PROVIDER,
+        models,
+        GeminiModelConfig::name,
+        GeminiModelConfig::validate,
+    )
 }
 
 impl Model for GeminiProvider {
@@ -187,32 +152,13 @@ impl Model for GeminiProvider {
     fn capabilities(&self, model: &ModelName) -> ModelCapabilities {
         let models = self.models.read().unwrap_or_else(PoisonError::into_inner);
         models.get(model).map_or_else(
-            || ModelCapabilities {
-                input: InputCapabilities {
-                    text: false,
-                    json: false,
-                    images: false,
-                    audio: false,
-                    files: false,
-                },
-                context_profile: ModelContextProfile {
-                    provider: Arc::from(PROVIDER),
-                    model: model.clone(),
-                    hard_input_bytes: 0,
-                    context_window_tokens: 0,
-                    max_output_tokens: 0,
-                    reserved_output_tokens: 0,
-                    provider_overhead_tokens: 0,
-                    estimator: GeminiModelConfig::estimator_ref(),
-                },
-                native_tool_calls: false,
-                parallel_tool_calls: false,
-                structured_output: StructuredOutputCapability::Prompted,
-                reasoning: false,
-                prompt_cache: false,
-                resumable_stream: false,
-                idempotent_requests: false,
-                native_capabilities: BTreeSet::new(),
+            || {
+                unknown_model_capabilities(
+                    PROVIDER,
+                    model,
+                    StructuredOutputCapability::Prompted,
+                    GeminiModelConfig::estimator_ref(),
+                )
             },
             |configured| configured.capabilities(PROVIDER),
         )
@@ -250,17 +196,22 @@ impl Model for GeminiProvider {
         let max_stream_bytes = self.config.max_stream_bytes();
         let resolver = self.config.media_resolver();
         Box::pin(async move {
-            let deadline = tokio::time::Instant::now() + timeout;
-            let cancellation = request.call.run.cancellation.clone();
+            let bounds = BoundedRequest::new(
+                CODES,
+                VENDOR,
+                request.call.run.cancellation.clone(),
+                timeout,
+            );
             let model = model?;
             let endpoint = endpoint?;
-            let resolved = tokio::select! {
-                () = cancellation.cancelled() => return Err(cancelled_error()),
-                () = tokio::time::sleep_until(deadline) => return Err(timeout_error()),
-                resolved = resolve_draft_media(resolver.as_ref(), &request.draft, max_stream_bytes) => {
-                    resolved.map_err(map_draft_media)?
-                }
-            };
+            let resolved = bounds
+                .guard(resolve_draft_media(
+                    resolver.as_ref(),
+                    &request.draft,
+                    max_stream_bytes,
+                ))
+                .await?
+                .map_err(|failure| draft_media_error(&CODES, VENDOR, failure))?;
             let wire = GenerateContentRequest::try_from_draft(
                 &request.draft,
                 &model,
@@ -269,189 +220,26 @@ impl Model for GeminiProvider {
             )?;
             let payload = wire.serialize()?;
             if payload.len() > max_stream_bytes {
-                return Err(request_limit_error());
+                return Err(request_limit_error(&CODES, VENDOR));
             }
             let request_id = request.call.request_id.to_string();
-            let send = client
-                .post(endpoint)
-                .header("x-client-request-id", &request_id)
-                .header(reqwest::header::CONTENT_TYPE, "application/json")
-                .timeout(timeout)
-                .body(payload)
-                .send();
-            let response = tokio::select! {
-                () = cancellation.cancelled() => return Err(cancelled_error()),
-                () = tokio::time::sleep_until(deadline) => return Err(timeout_error()),
-                response = send => response.map_err(|source| transport_error(&source))?,
-            };
-            if !response.status().is_success() {
-                let retryable = matches!(response.status().as_u16(), 408 | 409 | 429 | 500..=599);
-                return Err(error(
-                    GEMINI_HTTP_ERROR,
-                    ErrorCategory::Model,
-                    retryable,
-                    "Gemini endpoint returned an unsuccessful status",
-                ));
-            }
-            let (sender, receiver) = mpsc::channel(STREAM_CHANNEL_CAPACITY);
+            let response = bounds
+                .send(
+                    client
+                        .post(endpoint)
+                        .header("x-client-request-id", &request_id)
+                        .header(reqwest::header::CONTENT_TYPE, "application/json")
+                        .body(payload),
+                    "generateContent endpoint",
+                )
+                .await?;
             let structured = matches!(request.draft.output, OutputSpec::JsonSchema { .. });
-            let task = tokio::spawn(drive_response(
-                response,
-                sender,
-                cancellation,
-                request_id,
-                structured,
-                max_event_bytes,
-                max_stream_bytes,
-                deadline,
-            ));
-            Ok(Box::pin(ReceiverModelStream { receiver, task }) as ModelEventStream)
+            Ok(bounds.spawn(
+                response.bytes_stream(),
+                DataSseParser::new(max_event_bytes, max_stream_bytes).rejecting_named_events(),
+                GeminiGenerateContentAssembly::new(request_id, structured),
+            ))
         })
-    }
-}
-
-struct ReceiverModelStream {
-    receiver: mpsc::Receiver<Result<ModelStreamItem, ModelError>>,
-    task: tokio::task::JoinHandle<()>,
-}
-
-impl Stream for ReceiverModelStream {
-    type Item = Result<ModelStreamItem, ModelError>;
-
-    fn poll_next(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.receiver.poll_recv(context)
-    }
-}
-
-impl Drop for ReceiverModelStream {
-    fn drop(&mut self) {
-        self.task.abort();
-    }
-}
-
-#[expect(
-    clippy::too_many_arguments,
-    reason = "stream driver keeps request identity, limits, cancellation, and deadline together"
-)]
-async fn drive_response(
-    response: reqwest::Response,
-    sender: mpsc::Sender<Result<ModelStreamItem, ModelError>>,
-    cancellation: CancellationSignal,
-    request_id: String,
-    structured: bool,
-    max_event_bytes: usize,
-    max_stream_bytes: usize,
-    deadline: tokio::time::Instant,
-) {
-    let mut body = response.bytes_stream();
-    let mut parser = GeminiSse::new(max_event_bytes, max_stream_bytes);
-    let mut assembly = GeminiGenerateContentAssembly::new(request_id, structured);
-    loop {
-        let chunk = tokio::select! {
-            () = cancellation.cancelled() => {
-                let _ = sender.send(Err(cancelled_error())).await;
-                return;
-            }
-            () = tokio::time::sleep_until(deadline) => {
-                let _ = sender.send(Err(timeout_error())).await;
-                return;
-            }
-            () = sender.closed() => return,
-            chunk = body.next() => chunk,
-        };
-        let Some(chunk) = chunk else {
-            let error = match parser.finish() {
-                Ok(()) => match assembly.finish() {
-                    Ok(()) => stream_error("Gemini SSE stream ended before a terminal chunk"),
-                    Err(error) => map_norm(&error),
-                },
-                Err(error) => error,
-            };
-            let _ = sender.send(Err(error)).await;
-            return;
-        };
-        let chunk = match chunk {
-            Ok(chunk) => chunk,
-            Err(source) => {
-                let _ = sender.send(Err(transport_error(&source))).await;
-                return;
-            }
-        };
-        let payloads = match parser.push(&chunk) {
-            Ok(payloads) => payloads,
-            Err(error) => {
-                let _ = sender.send(Err(error)).await;
-                return;
-            }
-        };
-        for payload in payloads {
-            match assembly.consume(&payload) {
-                Ok(items) => {
-                    let mut completed = false;
-                    for item in items {
-                        completed |= matches!(item, ModelStreamItem::Completed(_));
-                        if sender.send(Ok(item)).await.is_err() {
-                            return;
-                        }
-                    }
-                    if completed {
-                        return;
-                    }
-                }
-                Err(error) => {
-                    let _ = sender.send(Err(map_norm(&error))).await;
-                    return;
-                }
-            }
-        }
-    }
-}
-
-fn map_norm(error: &StreamNormError) -> ModelError {
-    match error.kind {
-        StreamNormKind::Limit => stream_limit_error(),
-        StreamNormKind::Stream => stream_error(error.message),
-        StreamNormKind::Response | StreamNormKind::Incomplete => response_error(error.message),
-    }
-}
-
-fn cancelled_error() -> ModelError {
-    error(
-        GEMINI_CANCELLED,
-        ErrorCategory::Cancellation,
-        false,
-        "Gemini request was cancelled",
-    )
-}
-
-fn timeout_error() -> ModelError {
-    error(
-        GEMINI_TIMEOUT,
-        ErrorCategory::Deadline,
-        true,
-        "Gemini request timed out",
-    )
-}
-
-fn request_limit_error() -> ModelError {
-    error(
-        GEMINI_STREAM_LIMIT_EXCEEDED,
-        ErrorCategory::Limit,
-        false,
-        "Gemini request exceeded the configured byte limit",
-    )
-}
-
-fn transport_error(source: &reqwest::Error) -> ModelError {
-    if source.is_timeout() {
-        timeout_error()
-    } else {
-        error(
-            GEMINI_TRANSPORT_ERROR,
-            ErrorCategory::Model,
-            true,
-            "Gemini transport failed",
-        )
     }
 }
 
@@ -464,13 +252,14 @@ mod tests {
         MessageRole, Metadata, ModelRequestId, OperationLocator, OutputSpec, PrincipalRef,
         ProviderIds, RawJson, RunId, SessionId, Timestamp,
     };
-    use finstack_ai_provider_wire::{GEMINI_THOUGHTS_TOKENS_KEY, GeminiGenerateContentAssembly};
+    use finstack_ai_provider_wire::{
+        DataSseParser, GEMINI_THOUGHTS_TOKENS_KEY, GeminiGenerateContentAssembly, StreamProtocol,
+    };
     use finstack_ai_runtime::ports::model::{
         AuthorizationContext, CancellationSignal, Model, ModelCallContext, ModelName, ModelRequest,
         ModelRequestDraft, ModelRequestLimits, ModelSettings, ModelStreamItem, RunCallContext,
     };
 
-    use crate::sse::GeminiSse;
     use crate::{GeminiConfig, GeminiModelConfig, GeminiProvider};
 
     const CHUNK_TEXT_ONE: &str = r#"{"candidates":[{"content":{"role":"model","parts":[{"text":"Hello "}]},"index":0}],"responseId":"resp-1","modelVersion":"gemini-2.5-pro"}"#;
@@ -480,7 +269,7 @@ mod tests {
     /// Drive recorded SSE bytes through the exact framing + assembly pipeline
     /// the provider's `drive_response` loop uses.
     fn drive_recorded(frames: &[&str], structured: bool) -> Vec<ModelStreamItem> {
-        let mut parser = GeminiSse::new(64 * 1024, 1_048_576);
+        let mut parser = DataSseParser::new(64 * 1024, 1_048_576).rejecting_named_events();
         let mut assembly = GeminiGenerateContentAssembly::new("request-1".to_owned(), structured);
         let mut items = Vec::new();
         for frame in frames {
@@ -489,7 +278,7 @@ mod tests {
                 items.extend(assembly.consume(&payload).expect("assembly chunk"));
             }
         }
-        parser.finish().expect("clean sse eof");
+        assert!(parser.finish().expect("clean sse eof").is_empty());
         assembly.finish().expect("terminal chunk");
         items
     }
@@ -611,6 +400,31 @@ mod tests {
             panic!("media without a configured resolver must fail closed");
         };
         assert_eq!(error.code(), crate::error::GEMINI_REQUEST_INVALID);
+    }
+
+    #[test]
+    fn invalid_builder_values_rejected_at_catalog() {
+        // Reserved + overhead above the window: unreachable through `try_new`,
+        // only through the infallible builders.
+        let oversized_margin = fixture_model()
+            .with_reserved_output_tokens(100_000)
+            .with_provider_overhead_tokens(100_000);
+        let config = GeminiConfig::try_new("http://127.0.0.1:9").expect("config");
+        let Err(error) = GeminiProvider::try_new(config, vec![oversized_margin.clone()]) else {
+            panic!("a model whose margins exceed the window must be rejected");
+        };
+        assert_eq!(error.code(), crate::error::GEMINI_CONFIG_INVALID);
+        assert_eq!(error.message(), "provider model context profile is invalid");
+
+        let zero_reserved = fixture_model().with_reserved_output_tokens(0);
+        let config = GeminiConfig::try_new("http://127.0.0.1:9").expect("config");
+        let provider = GeminiProvider::try_new(config, vec![fixture_model()]).expect("provider");
+        let Err(error) = provider.replace_model_catalog(vec![zero_reserved]) else {
+            panic!("a zero reserved-output margin must be rejected");
+        };
+        assert_eq!(error.code(), crate::error::GEMINI_CONFIG_INVALID);
+        // The catalog is untouched after a rejected replacement.
+        assert_eq!(provider.descriptor().models.len(), 1);
     }
 
     #[test]

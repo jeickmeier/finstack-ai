@@ -1,5 +1,5 @@
-//! The leased worker: one tick claims due cron fires, bridges claimed fires
-//! into started runs, and resumes due parked sessions.
+//! The leased worker: one tick optionally claims due cron fires and bridges
+//! them into started runs, then resumes due parked sessions.
 //!
 //! Every phase isolates per-item failures into [`TickReport::failures`] so a
 //! single poisoned row can never stall the loop. The adapter tables are
@@ -8,25 +8,27 @@
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use finstack_ai_kernel::{
     ExternalEffectCompletionCommand, InteractionRequest, InteractionResolutionCommand,
     OperationLocator, RunSecurityContext, SessionId, Timestamp, UNIX_EPOCH,
 };
+use finstack_ai_runtime::commit::CommitCoordinatorError;
 use finstack_ai_runtime::ids::{Clock, ExternalClock, SystemClock};
-use finstack_ai_runtime::ingress::ExternalRouteOutcome;
+use finstack_ai_runtime::ingress::{ExternalRouteError, ExternalRouteOutcome};
 use finstack_ai_runtime::ports::journal::JournalStore;
 use finstack_ai_runtime::workflow::{
     WorkflowCheckpoint, WorkflowDriverError, WorkflowSession, WorkflowWait, classify_wait,
 };
-use finstack_ai_workflow_local::{CronFire, CronSchedule, CronScheduleStore};
+use finstack_ai_workflow_local::{CronFire, CronScheduleStore};
 use serde::Serialize;
 
+use crate::cron_bridge::CronBridge;
 use crate::error::WorkerError;
-use crate::fires::{FireRow, FireStatus, FireStore, idempotency_key};
+use crate::fires::FireStore;
 use crate::inbox::{InboxInsertOutcome, InboxKind, InboxRow, InboxStore};
 use crate::park::index_checkpoint;
 use crate::wake::{WakeIndexStore, WakeLease, WakeReason, WakeRow, lease_deadline};
@@ -131,9 +133,11 @@ pub trait RunStarter: Send + Sync {
 /// Per-tick outcome counters.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct TickReport {
-    /// Cron schedules claimed and recorded as fires this tick.
+    /// Cron schedules claimed and recorded as fires this tick. Always zero
+    /// unless the host opted into cron through [`WorkerBuilder::cron`].
     pub cron_fires: usize,
-    /// Claimed fires bridged into started runs this tick.
+    /// Claimed fires bridged into started runs this tick. Always zero unless
+    /// the host opted into cron through [`WorkerBuilder::cron`].
     pub runs_started: usize,
     /// Parked sessions successfully driven to their next wait.
     pub sessions_resumed: usize,
@@ -160,7 +164,28 @@ pub struct TickReport {
     /// Buffered responses durably rejected and moved to dead letters.
     pub responses_rejected: usize,
     /// Per-item failures isolated during the tick.
+    ///
+    /// A due row whose `workflow_kind` has no registered [`PortsFactory`] is
+    /// *not* counted here: it is skipped unclaimed so another worker that
+    /// serves that kind can resume it, and nothing about it is written.
     pub failures: usize,
+}
+
+/// Outcome of one iteration of the loop spawned by [`WorkflowWorker::spawn`].
+///
+/// Published through [`WorkerHandle::last_tick`] after every tick so an
+/// embedding host can observe liveness and failure codes without a logging
+/// dependency.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TickOutcome {
+    /// Counters of the tick, or the default when the tick itself failed.
+    pub report: TickReport,
+    /// Stable code of a tick-level failure (adapter load errors, clock
+    /// overflow); `None` when the tick completed. Per-item failures are
+    /// counted in [`TickReport::failures`] instead.
+    pub error_code: Option<&'static str>,
+    /// Wall-clock instant the tick started at.
+    pub at: Timestamp,
 }
 
 /// Default worker identity used for leases.
@@ -171,6 +196,9 @@ const DEFAULT_LEASE_TTL_MS: u64 = 30_000;
 const DEFAULT_DRIVE_TIMEOUT: Duration = Duration::from_secs(2);
 /// Default upper bound for each adapter scan in one tick phase.
 const DEFAULT_BATCH_LIMIT: usize = 64;
+/// Default number of transient submission failures a buffered response is
+/// allowed before it is dead-lettered.
+const DEFAULT_MAX_RESPONSE_ATTEMPTS: u32 = 8;
 /// Base backoff applied after a failed resume, in milliseconds.
 const BACKOFF_BASE_MS: u64 = 1_000;
 /// Cap on the backoff exponent, bounding the retry delay.
@@ -186,7 +214,7 @@ enum ResumeOutcome {
 
 /// Exponential retry delay after `attempts` failures, capped at
 /// `BACKOFF_BASE_MS << BACKOFF_MAX_SHIFT`.
-fn backoff_ms(attempts: u32) -> u64 {
+pub(crate) fn backoff_ms(attempts: u32) -> u64 {
     BACKOFF_BASE_MS.saturating_mul(1_u64 << attempts.min(BACKOFF_MAX_SHIFT))
 }
 
@@ -238,43 +266,104 @@ fn timer_is_early(wait: &WorkflowWait, now: Timestamp) -> bool {
     matches!(wait, WorkflowWait::Timer { due_at, .. } if *due_at > now)
 }
 
+/// Opt-in cron configuration held by the builder until `build`.
+type CronConfig = (Arc<dyn CronScheduleStore>, Arc<dyn FireStore>, Duration);
+
 /// Builder for [`WorkflowWorker`].
+///
+/// # Examples
+///
+/// ```
+/// use std::sync::Arc;
+/// use std::time::Duration;
+///
+/// use finstack_ai_runtime::ids::Clock;
+/// use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
+/// use finstack_ai_workflow_local::MemoryCronStore;
+/// use finstack_ai_workflow_worker::{
+///     FireStore, InboxStore, MemoryWorkerStore, WakeIndexStore, WorkerBuilder,
+/// };
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let journal = Arc::new(MemoryJournalStore::try_new(MemoryStoreLimits {
+///     sessions: 1,
+///     batches_per_session: 16,
+///     records_per_session: 64,
+///     snapshot_bytes: 4_096,
+/// })?);
+/// let store = Arc::new(MemoryWorkerStore::new());
+///
+/// // Wake index and inbox are always required; cron is opt-in.
+/// let worker = WorkerBuilder::new(
+///     journal,
+///     Arc::clone(&store) as Arc<dyn WakeIndexStore>,
+///     Arc::clone(&store) as Arc<dyn InboxStore>,
+/// )
+/// .cron(
+///     Arc::new(MemoryCronStore::new()),
+///     Arc::clone(&store) as Arc<dyn FireStore>,
+///     Duration::from_hours(7 * 24),
+/// )
+/// .build()?;
+/// assert!(worker.clock().now().is_ok());
+/// # Ok(())
+/// # }
+/// ```
 pub struct WorkerBuilder {
     /// Partially configured worker, finished by [`WorkerBuilder::build`].
     worker: WorkflowWorker,
+    /// Opt-in cron configuration, turned into a [`CronBridge`] by `build`.
+    cron: Option<CronConfig>,
+    /// Run starters keyed by schedule id, handed to the cron bridge.
+    starters: BTreeMap<Arc<str>, Arc<dyn RunStarter>>,
 }
 
 impl WorkerBuilder {
-    /// Builder over the journal plus the four adapter tables.
+    /// Builder over the journal plus the wake index and response inbox.
+    ///
+    /// Cron scheduling is opt-in through [`WorkerBuilder::cron`].
     #[must_use]
     pub fn new(
         journal: Arc<dyn JournalStore>,
-        cron: Arc<dyn CronScheduleStore>,
         wake: Arc<dyn WakeIndexStore>,
-        fires: Arc<dyn FireStore>,
         inbox: Arc<dyn InboxStore>,
     ) -> Self {
         Self {
             worker: WorkflowWorker {
                 journal,
-                cron,
+                cron: None,
                 wake,
-                fires,
                 inbox,
                 tenant_scope: None,
                 ports: BTreeMap::new(),
                 executions: BTreeMap::new(),
-                starters: BTreeMap::new(),
                 interaction_lifecycle: None,
                 clock: ExternalClock::new(UNIX_EPOCH),
                 worker_id: Arc::from(DEFAULT_WORKER_ID),
                 lease_ttl_ms: DEFAULT_LEASE_TTL_MS,
                 drive_timeout: DEFAULT_DRIVE_TIMEOUT,
                 batch_limit: DEFAULT_BATCH_LIMIT,
+                max_response_attempts: DEFAULT_MAX_RESPONSE_ATTEMPTS,
                 pump_clock: AtomicBool::new(false),
-                start_backoff: Mutex::new(BTreeMap::new()),
             },
+            cron: None,
+            starters: BTreeMap::new(),
         }
+    }
+
+    /// Opt into the cron phases: claim due schedules from `cron` as fires in
+    /// `fires`, bridge them through registered [`RunStarter`]s, and purge
+    /// started fires older than `fire_retention` in bounded batches after
+    /// each bridge pass.
+    #[must_use]
+    pub fn cron(
+        mut self,
+        cron: Arc<dyn CronScheduleStore>,
+        fires: Arc<dyn FireStore>,
+        fire_retention: Duration,
+    ) -> Self {
+        self.cron = Some((cron, fires, fire_retention));
+        self
     }
 
     /// Restrict wake processing to one application-authorized tenant.
@@ -312,6 +401,20 @@ impl WorkerBuilder {
         self
     }
 
+    /// Number of transient submission failures a buffered response survives
+    /// before it is dead-lettered with the last failure's code. Defaults to
+    /// `8`.
+    ///
+    /// The bound is measured against the wake row's `attempts` counter, which
+    /// every failed resume of that row increments (a drive timeout after the
+    /// response was applied included), so it is an upper bound on retries of
+    /// the submission itself.
+    #[must_use]
+    pub const fn max_response_attempts(mut self, attempts: u32) -> Self {
+        self.worker.max_response_attempts = attempts;
+        self
+    }
+
     /// Injected clock. Defaults to a clock fixed at the unix epoch.
     #[must_use]
     pub fn clock(mut self, clock: ExternalClock) -> Self {
@@ -344,9 +447,11 @@ impl WorkerBuilder {
     }
 
     /// Register the run starter used to bridge one schedule's fires.
+    ///
+    /// Requires [`WorkerBuilder::cron`]; `build` fails closed otherwise.
     #[must_use]
     pub fn register_starter(mut self, schedule_id: &str, starter: Arc<dyn RunStarter>) -> Self {
-        self.worker.starters.insert(Arc::from(schedule_id), starter);
+        self.starters.insert(Arc::from(schedule_id), starter);
         self
     }
 
@@ -362,9 +467,42 @@ impl WorkerBuilder {
     /// # Errors
     ///
     /// Returns [`WorkerError::InvalidConfiguration`] when the worker id is
-    /// empty, a duration is zero, the drive budget can outlive its lease, or
-    /// the batch limit is zero.
-    pub fn build(self) -> Result<WorkflowWorker, WorkerError> {
+    /// empty, a duration is zero, the drive budget can outlive its lease,
+    /// the batch limit or response attempt bound is zero, the fire retention
+    /// does not fit a millisecond timestamp, or a run starter was registered
+    /// without [`WorkerBuilder::cron`] (`cron_not_configured`).
+    pub fn build(mut self) -> Result<WorkflowWorker, WorkerError> {
+        match self.cron.take() {
+            Some((cron, fires, fire_retention)) => {
+                if fire_retention.is_zero() {
+                    return Err(WorkerError::InvalidConfiguration {
+                        code: "fire_retention_zero",
+                    });
+                }
+                if i64::try_from(fire_retention.as_millis()).is_err() {
+                    return Err(WorkerError::InvalidConfiguration {
+                        code: "fire_retention_overflow",
+                    });
+                }
+                self.worker.cron = Some(CronBridge::new(
+                    cron,
+                    fires,
+                    fire_retention,
+                    std::mem::take(&mut self.starters),
+                ));
+            }
+            None if !self.starters.is_empty() => {
+                return Err(WorkerError::InvalidConfiguration {
+                    code: "cron_not_configured",
+                });
+            }
+            None => {}
+        }
+        if self.worker.max_response_attempts == 0 {
+            return Err(WorkerError::InvalidConfiguration {
+                code: "max_response_attempts_zero",
+            });
+        }
         if self.worker.worker_id.is_empty() {
             return Err(WorkerError::InvalidConfiguration {
                 code: "worker_id_empty",
@@ -405,12 +543,11 @@ impl WorkerBuilder {
 pub struct WorkflowWorker {
     /// Authoritative kernel journal.
     journal: Arc<dyn JournalStore>,
-    /// Adapter-owned cron schedule table.
-    cron: Arc<dyn CronScheduleStore>,
+    /// Opt-in cron phases; `None` when the host never called
+    /// [`WorkerBuilder::cron`].
+    cron: Option<CronBridge>,
     /// Adapter-owned wake index.
     wake: Arc<dyn WakeIndexStore>,
-    /// Adapter-owned cron-fire records.
-    fires: Arc<dyn FireStore>,
     /// Adapter-owned response inbox.
     inbox: Arc<dyn InboxStore>,
     /// Optional application-authorized tenant restriction.
@@ -419,8 +556,6 @@ pub struct WorkflowWorker {
     ports: BTreeMap<Arc<str>, Arc<dyn PortsFactory>>,
     /// Host-owned stage advancement keyed by workflow kind.
     executions: BTreeMap<Arc<str>, Arc<dyn WorkflowExecution>>,
-    /// Run starters keyed by schedule id.
-    starters: BTreeMap<Arc<str>, Arc<dyn RunStarter>>,
     /// Optional adapter bridge for HITL capture and delivery outcomes.
     interaction_lifecycle: Option<Arc<dyn InteractionLifecycle>>,
     /// Injected clock; the single source of tick time.
@@ -433,10 +568,10 @@ pub struct WorkflowWorker {
     drive_timeout: Duration,
     /// Maximum rows loaded by each adapter scan.
     batch_limit: usize,
+    /// Transient submission failures allowed before a response is dead-lettered.
+    max_response_attempts: u32,
     /// Whether the tick loop drives this worker from wall time.
     pump_clock: AtomicBool,
-    /// Process-local start backoff per fire: attempts and next eligible time.
-    start_backoff: Mutex<BTreeMap<String, (u32, Timestamp)>>,
 }
 
 impl WorkflowWorker {
@@ -517,8 +652,9 @@ impl WorkflowWorker {
         self.inbox.insert(&row)
     }
 
-    /// Run one tick: claim due cron fires, bridge them into runs, then
-    /// resume every due parked session.
+    /// Run one tick: when cron is configured, claim due cron fires, bridge
+    /// them into runs and purge started fires past retention; then resume
+    /// every due parked session.
     ///
     /// # Errors
     ///
@@ -528,102 +664,28 @@ impl WorkflowWorker {
     pub async fn tick(&self) -> Result<TickReport, WorkerError> {
         let now = self.clock.now().map_err(|_| WorkerError::TimeOverflow)?;
         let mut report = TickReport::default();
-        self.tick_cron(now, &mut report).await?;
-        Box::pin(self.tick_bridge(now, &mut report)).await?;
+        if let Some(cron) = &self.cron {
+            Box::pin(cron.tick(now, self.batch_limit, self.drive_timeout, &mut report)).await?;
+        }
         Box::pin(self.tick_wake(now, &mut report)).await?;
         Ok(report)
     }
 
-    /// Record a bounded batch of claimed fires before advancing their schedules.
-    async fn tick_cron(&self, now: Timestamp, report: &mut TickReport) -> Result<(), WorkerError> {
-        let cron = Arc::clone(&self.cron);
-        let fires = Arc::clone(&self.fires);
-        let limit = self.batch_limit;
-        let (claimed, failures) = crate::blocking::run(move || {
-            let mut claimed = 0;
-            let mut failures = 0;
-            for schedule in cron.load_due(now, limit)? {
-                match claim_schedule(cron.as_ref(), fires.as_ref(), &schedule, now) {
-                    Ok(true) => claimed += 1,
-                    Ok(false) => {}
-                    Err(_) => failures += 1,
-                }
-            }
-            Ok((claimed, failures))
-        })
-        .await?;
-        report.cron_fires += claimed;
-        report.failures += failures;
-        Ok(())
-    }
-
-    /// Phase 3: bridge claimed-but-unstarted fires into started runs.
+    /// Claim and resume every due parked session.
     ///
-    /// A fire whose schedule has no registered starter is counted as a
-    /// failure and left claimed — fail closed, visible, never dropped.
-    ///
-    /// Two bounds protect the tick from the host code behind [`RunStarter`].
-    /// Each call is capped by the same per-item budget a resume gets, so a
-    /// starter that never returns cannot wedge the loop (and with it the
-    /// shutdown signal, which is only observed between ticks). A call that
-    /// fails or times out also backs the fire off, so a starter whose
-    /// dependency is down is retried on a widening delay instead of once per
-    /// poll interval. That backoff is process-local: the fires table records
-    /// no attempt state, so a restart deliberately retries immediately.
-    async fn tick_bridge(
-        &self,
-        now: Timestamp,
-        report: &mut TickReport,
-    ) -> Result<(), WorkerError> {
-        let fires = Arc::clone(&self.fires);
-        let limit = self.batch_limit;
-        let rows = crate::blocking::run(move || fires.load_unstarted(limit)).await?;
-        for row in rows {
-            let Some(starter) = self.starters.get(row.schedule_id.as_ref()) else {
-                report.failures += 1;
-                continue;
-            };
-            let key = idempotency_key(&row);
-            if self.start_deferred(key.as_str(), now) {
-                continue;
-            }
-            let fire = CronFire {
-                tenant_scope: Arc::clone(&row.tenant_scope),
-                schedule_id: Arc::clone(&row.schedule_id),
-                fired_at: row.fired_at,
-            };
-            let outcome =
-                tokio::time::timeout(self.drive_timeout, starter.start(&fire, key.as_str())).await;
-            let Ok(Ok(run)) = outcome else {
-                report.failures += 1;
-                self.defer_start(key.as_str().to_owned(), now);
-                continue;
-            };
-            self.clear_start_backoff(key.as_str());
-            let fires = Arc::clone(&self.fires);
-            match crate::blocking::run(move || {
-                fires.mark_started(
-                    row.tenant_scope.as_ref(),
-                    row.schedule_id.as_ref(),
-                    row.fire_count,
-                    run.session_id,
-                )
-            })
-            .await
-            {
-                Ok(_) => report.runs_started += 1,
-                Err(_) => report.failures += 1,
-            }
-        }
-        Ok(())
-    }
-
-    /// Phase 4: claim and resume every due parked session.
+    /// The store already applies the dueness predicate (clock for timers and
+    /// runnable rows; backoff gate plus a buffered response or a passed
+    /// deadline for inbox-driven rows), so the checks repeated here are cheap
+    /// re-validations against races between the page load and the claim.
     async fn tick_wake(&self, now: Timestamp, report: &mut TickReport) -> Result<(), WorkerError> {
         let wake = Arc::clone(&self.wake);
         let limit = self.batch_limit;
-        let due = crate::blocking::run(move || wake.load_due(now, limit)).await?;
+        let tenant = self.tenant_scope.clone();
+        let due = crate::blocking::run(move || wake.load_due_scoped(tenant.as_deref(), now, limit))
+            .await?;
         for row in due {
+            // `load_due_scoped` already filtered; a custom store that ignores
+            // the scope must still fail closed at the tenant boundary.
             if self
                 .tenant_scope
                 .as_ref()
@@ -631,31 +693,27 @@ impl WorkflowWorker {
             {
                 continue;
             }
-            let inbox = Arc::clone(&self.inbox);
-            let key = row.clone();
-            let Ok(entry) = crate::blocking::run(move || {
-                inbox.load(
-                    key.tenant_scope.as_ref(),
-                    key.session_id,
-                    key.pending_id.as_ref(),
-                )
-            })
-            .await
-            else {
-                report.failures += 1;
+            // A kind this worker cannot serve is left unclaimed and
+            // unwritten so a worker that does serve it is not delayed by
+            // our backoff.
+            if !self.ports.contains_key(row.workflow_kind.as_ref()) {
                 continue;
-            };
+            }
             // A past-deadline interaction is due on the clock alone, exactly
             // like a timer: nobody is going to answer it, and the kernel's own
             // expiry can only fire once the session is attached. Interaction
             // rows without a deadline, and every other inbox-driven reason,
             // still wait for a buffered response.
             let expiring = expiry_due(&row, now);
-            if !matches!(row.reason, WakeReason::Timer | WakeReason::Runnable)
-                && entry.is_none()
-                && !expiring
-            {
-                continue;
+            let inbox_driven = !matches!(row.reason, WakeReason::Timer | WakeReason::Runnable);
+            if inbox_driven && !expiring {
+                let Ok(entry) = self.load_inbox_entry(&row).await else {
+                    report.failures += 1;
+                    continue;
+                };
+                if entry.is_none() {
+                    continue;
+                }
             }
             // Both the lease this takes out and the backoff written below are
             // deadlines measured from the moment they are written, so each
@@ -683,6 +741,18 @@ impl WorkflowWorker {
                     continue;
                 }
             };
+            // The entry is re-read under the lease: another worker may have
+            // consumed it between the page load and this claim, and an
+            // inbox-driven row with nothing to apply must not be resumed.
+            let Ok(entry) = self.load_inbox_entry(&row).await else {
+                report.failures += 1;
+                drop(self.release_lease(&lease).await);
+                continue;
+            };
+            if inbox_driven && entry.is_none() && !expiring {
+                drop(self.release_lease(&lease).await);
+                continue;
+            }
             let mut expired = false;
             let outcome =
                 Box::pin(self.resume_row(&row, &lease, entry.as_ref(), claim_now, &mut expired))
@@ -719,20 +789,41 @@ impl WorkflowWorker {
         Ok(())
     }
 
+    /// Exact-key inbox lookup for one wake row.
+    async fn load_inbox_entry(&self, row: &WakeRow) -> Result<Option<InboxRow>, WorkerError> {
+        let inbox = Arc::clone(&self.inbox);
+        let key = row.clone();
+        crate::blocking::run(move || {
+            inbox.load(
+                key.tenant_scope.as_ref(),
+                key.session_id,
+                key.pending_id.as_ref(),
+            )
+        })
+        .await
+    }
+
     /// Submit one buffered response and dead-letter it when the runtime
-    /// durably rejects it. `None` means the response was applied and the
-    /// resume continues.
+    /// durably rejects it, when the failure is permanent, or when a transient
+    /// failure has recurred `max_response_attempts` times (measured on the
+    /// row's `attempts`). `None` means the response was applied and the
+    /// resume continues; a transient failure under the bound is returned so
+    /// the caller backs the row off and the entry is retried.
     async fn apply_inbox_entry(
         &self,
         session: &WorkflowSession,
         entry: &InboxRow,
+        attempts: u32,
         now: Timestamp,
     ) -> Result<Option<ResumeOutcome>, WorkerError> {
         let reason_code = match Box::pin(self.submit_response(session, entry, now)).await {
             Ok(InteractionDeliveryOutcome::Accepted) => return Ok(None),
             Ok(InteractionDeliveryOutcome::Rejected { reason_code }) => reason_code,
             Err(error) => {
-                let Some(reason_code) = permanent_response_error(&error) else {
+                let exhausted = attempts.saturating_add(1) >= self.max_response_attempts;
+                let Some(reason_code) =
+                    permanent_response_error(&error).or_else(|| exhausted.then(|| error.code()))
+                else {
                     return Err(error);
                 };
                 if entry.kind == InboxKind::Interaction
@@ -810,7 +901,9 @@ impl WorkflowWorker {
         }
         self.ensure_lease(lease, self.row_now(now)).await?;
         if let Some(entry) = inbox_entry
-            && let Some(outcome) = self.apply_inbox_entry(&session, entry, now).await?
+            && let Some(outcome) = self
+                .apply_inbox_entry(&session, entry, row.attempts, now)
+                .await?
         {
             return Ok(outcome);
         }
@@ -869,7 +962,6 @@ impl WorkflowWorker {
             Ok(())
         })
         .await?;
-        session.abort_owner();
         // Only now is the response fully consumed. Dropping it earlier would
         // strand the row: a non-timer row is claimed only while its inbox
         // entry exists, so a resume that failed after the delete could never
@@ -1055,35 +1147,6 @@ impl WorkflowWorker {
         crate::blocking::run(move || wake.release(&lease)).await
     }
 
-    /// Whether this fire's starter is still inside its backoff window.
-    fn start_deferred(&self, key: &str, now: Timestamp) -> bool {
-        let Ok(backoff) = self.start_backoff.lock() else {
-            return false;
-        };
-        backoff
-            .get(key)
-            .is_some_and(|(_, retry_at)| *retry_at > now)
-    }
-
-    /// Widen this fire's starter backoff after a failed or timed-out start.
-    fn defer_start(&self, key: String, now: Timestamp) {
-        let Ok(mut backoff) = self.start_backoff.lock() else {
-            return;
-        };
-        let attempts = backoff.get(&key).map_or(0, |(attempts, _)| *attempts);
-        let Ok(retry_at) = lease_deadline(now, backoff_ms(attempts)) else {
-            return;
-        };
-        backoff.insert(key, (attempts.saturating_add(1), retry_at));
-    }
-
-    /// Drop this fire's starter backoff after a successful start.
-    fn clear_start_backoff(&self, key: &str) {
-        if let Ok(mut backoff) = self.start_backoff.lock() {
-            backoff.remove(key);
-        }
-    }
-
     /// Current instant for one row's work.
     ///
     /// A tick that drives many rows can span far more wall time than its own
@@ -1111,10 +1174,13 @@ impl WorkflowWorker {
     /// Each iteration reads the wall clock and feeds it to [`Self::clock`];
     /// a clock read failure skips that tick rather than aborting the loop.
     /// [`Self::tick`] already isolates per-item failures, so a tick error is
-    /// likewise swallowed: the loop itself never panics or exits early.
+    /// likewise swallowed by the loop itself — it is published instead, as
+    /// the [`TickOutcome`] readable from [`WorkerHandle::last_tick`] — and
+    /// the loop never panics or exits early.
     #[must_use]
     pub fn spawn(self: Arc<Self>, poll_interval: Duration) -> WorkerHandle {
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
+        let (outcome_tx, outcome_rx) = tokio::sync::watch::channel(None);
         self.pump_clock.store(true, Ordering::Release);
         let join = tokio::spawn(async move {
             let mut interval = tokio::time::interval(poll_interval);
@@ -1128,7 +1194,15 @@ impl WorkflowWorker {
                     _ = interval.tick() => {
                         if let Ok(now) = SystemClock.now() {
                             self.clock.set(now);
-                            let _ = self.tick().await;
+                            let outcome = match self.tick().await {
+                                Ok(report) => TickOutcome { report, error_code: None, at: now },
+                                Err(error) => TickOutcome {
+                                    report: TickReport::default(),
+                                    error_code: Some(error.code()),
+                                    at: now,
+                                },
+                            };
+                            outcome_tx.send_replace(Some(outcome));
                         }
                     }
                     _ = shutdown_rx.changed() => break,
@@ -1137,15 +1211,31 @@ impl WorkflowWorker {
         });
         WorkerHandle {
             shutdown: shutdown_tx,
+            last_tick: outcome_rx,
             join: Some(join),
         }
     }
 }
 
+/// Stable code of a response failure no retry can fix, or `None` when the
+/// failure is transient and the response should be resubmitted after backoff.
+///
+/// Permanent: the command's locator does not match the session
+/// ([`WorkflowDriverError::UnknownLocator`]), the router could not build a
+/// normalized command ([`ExternalRouteError::InvalidNormalizedCommand`]),
+/// the pure kernel decision rejected the input
+/// ([`CommitCoordinatorError::Decision`]), or the stored payload does not
+/// decode (`inbox_payload`). Everything else — a non-revealing ingress
+/// rejection, id allocation, a store, boundary or event-delivery fault —
+/// may clear on a later tick.
 fn permanent_response_error(error: &WorkerError) -> Option<&'static str> {
     match error {
         WorkerError::Driver(
-            WorkflowDriverError::UnknownLocator | WorkflowDriverError::Ingress(_),
+            WorkflowDriverError::UnknownLocator
+            | WorkflowDriverError::Ingress(
+                ExternalRouteError::InvalidNormalizedCommand
+                | ExternalRouteError::Runtime(CommitCoordinatorError::Decision { .. }),
+            ),
         )
         | WorkerError::StoreIntegrity {
             code: "inbox_payload",
@@ -1158,6 +1248,8 @@ fn permanent_response_error(error: &WorkerError) -> Option<&'static str> {
 pub struct WorkerHandle {
     /// Signals the loop to stop after its current tick.
     shutdown: tokio::sync::watch::Sender<bool>,
+    /// Most recent tick outcome, `None` until the first tick completes.
+    last_tick: tokio::sync::watch::Receiver<Option<TickOutcome>>,
     /// Join handle for the spawned loop task.
     join: Option<tokio::task::JoinHandle<()>>,
 }
@@ -1170,6 +1262,17 @@ impl WorkerHandle {
             let _ = join.await;
         }
     }
+
+    /// Watch the outcome of the most recent tick.
+    ///
+    /// The receiver holds `None` until the first tick completes and is
+    /// replaced after every tick, including ticks that failed at the
+    /// adapter-load level. Await `changed()` on it to follow the loop, or
+    /// `borrow()` to sample liveness.
+    #[must_use]
+    pub fn last_tick(&self) -> tokio::sync::watch::Receiver<Option<TickOutcome>> {
+        self.last_tick.clone()
+    }
 }
 
 impl Drop for WorkerHandle {
@@ -1179,35 +1282,6 @@ impl Drop for WorkerHandle {
             join.abort();
         }
     }
-}
-
-// Fire intent precedes schedule CAS so a crash can reconcile the same fire key.
-fn claim_schedule(
-    cron: &dyn CronScheduleStore,
-    fires: &dyn FireStore,
-    schedule: &CronSchedule,
-    now: Timestamp,
-) -> Result<bool, WorkerError> {
-    let expected_next = schedule.next_fire_at.as_unix_ms();
-    let mut claimed = schedule.clone();
-    claimed.last_fired_at = Some(now);
-    claimed.fire_count = claimed.fire_count.saturating_add(1);
-    claimed.next_fire_at = claimed.expression.next_after(claimed.origin, now)?;
-    fires.record_claimed(&FireRow {
-        tenant_scope: Arc::clone(&claimed.tenant_scope),
-        schedule_id: Arc::clone(&claimed.schedule_id),
-        fire_count: claimed.fire_count,
-        fired_at: now,
-        status: FireStatus::Claimed,
-        started_session: None,
-    })?;
-    Ok(cron.try_claim(
-        claimed.tenant_scope.as_ref(),
-        claimed.schedule_id.as_ref(),
-        expected_next,
-        now,
-        &claimed,
-    )?)
 }
 
 async fn settle_interaction(

@@ -23,7 +23,7 @@ native-tokio = [
     "finstack-ai-runtime/native-tokio",
     "dep:finstack-ai-remote-child",
 ]
-durable-host = ["native-tokio", "dep:finstack-ai-store-sqlite", "dep:finstack-ai-workflow-worker", "dep:finstack-ai-workflow-hitl", "dep:finstack-ai-workflow-local", "dep:tokio"]
+durable-host = ["native-tokio", "dep:finstack-ai-store-sqlite", "dep:finstack-ai-workflow-worker", "dep:finstack-ai-workflow-hitl", "dep:tokio"]
 provider-openai = ["native-tokio", "dep:finstack-ai-provider-openai", "dep:finstack-ai-store-memory"]
 provider-openrouter = ["native-tokio", "dep:finstack-ai-provider-openrouter", "dep:finstack-ai-store-memory"]
 provider-anthropic = ["native-tokio", "dep:finstack-ai-provider-anthropic", "dep:finstack-ai-store-memory"]
@@ -90,7 +90,6 @@ finstack-ai-workflow-media-pipeline = { workspace = true, optional = true }
 finstack-ai-store-sqlite = { workspace = true, optional = true }
 finstack-ai-workflow-worker = { workspace = true, optional = true }
 finstack-ai-workflow-hitl = { workspace = true, optional = true }
-finstack-ai-workflow-local = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

@@ -17,9 +17,9 @@ use finstack_ai_runtime::ports::model::ModelRequestDraft;
 use finstack_ai_tools_document::parser::DocumentLimits;
 
 use crate::{
-    DocumentIngestMiddleware, FALLBACK_NOTE_TEXT, LIMITS_IDENTITY_VERSION, PARSE_CACHE_CAPACITY,
-    ParseCache, ParseCacheKey, fallback_text_block, limits_identity_bytes, note_block,
-    rebuild_message, skip_note_message,
+    DOCUMENT_INGEST_INTEGRITY_MISMATCH, DOCUMENT_INGEST_LOOKUP_FAILED, DocumentIngestMiddleware,
+    FALLBACK_NOTE_TEXT, LIMITS_IDENTITY_VERSION, PARSE_CACHE_CAPACITY, ParseCache, ParseCacheKey,
+    fallback_text_block, limits_identity_bytes, note_block, rebuild_message, skip_note_message,
 };
 
 #[path = "test_support.rs"]
@@ -162,9 +162,15 @@ fn indexed_artifact(ordinal: usize) -> (BlobRef, ArtifactRef) {
 
 fn parse_key(ordinal: usize) -> ParseCacheKey {
     ParseCacheKey {
-        digest: Digest::blob_content(&ordinal.to_be_bytes()),
-        media_type: "text/csv".to_owned(),
-        name: format!("{ordinal}.csv"),
+        tenant_scope: Arc::from("tenant-a"),
+        blob: BlobRef::try_new(
+            format!("blob-{ordinal}"),
+            "text/csv",
+            1,
+            Some(Digest::blob_content(&ordinal.to_be_bytes())),
+            Some(format!("{ordinal}.csv")),
+        )
+        .expect("blob"),
     }
 }
 
@@ -228,7 +234,7 @@ fn unresolvable_artifact_fails_closed() {
         before_model_input_with_dangling_file(),
     ))
     .expect_err("missing artifact must fail closed");
-    assert_eq!(error.code(), MIDDLEWARE_OUTCOME_NOT_ALLOWED);
+    assert_eq!(error.code(), DOCUMENT_INGEST_LOOKUP_FAILED);
 }
 
 #[test]
@@ -280,42 +286,106 @@ fn non_user_role_message_is_left_untouched() {
     );
 }
 
-#[test]
-fn digest_mismatch_fails_closed() {
-    // The staged artifact resolves fine (index hit, store returns bytes),
-    // but the wire `BlobRef` on the message's `ContentBlock::File` declares
-    // a digest that does not match the actual stored content — e.g. a
-    // stale/forged reference. `fetch_blob` must reject the mismatch and
-    // the middleware must fall back to the same "could not be read"
-    // fail-soft note used for an unresolvable artifact, rather than
-    // feeding wrongly-attributed bytes to the parser.
-    let store = Arc::new(CaptureArtifactStore::default());
-    let artifact = stage(store.as_ref(), SAMPLE_CSV, "text/csv", "revenue.csv");
-    let middleware = DocumentIngestMiddleware::try_new(store).expect("middleware");
+/// Store that resolves every blob the way an id-indexed production store
+/// would, but serves `content` regardless of the digest the wire reference
+/// declares, and reports `reference_blob` (the wire blob when `None`) as
+/// the store-owned reference. Drives the two integrity branches that a
+/// digest-indexed stub can never reach.
+struct TamperedStore {
+    content: &'static [u8],
+    reference_blob: Option<BlobRef>,
+}
 
-    // Same blob id as the staged artifact (so the index lookup and store
-    // fetch both succeed), but a digest that belongs to different content.
-    let wrong_digest = Digest::blob_content(b"totally different content");
-    let mismatched_blob = BlobRef::try_new(
-        artifact.blob().id(),
+impl ArtifactStore for TamperedStore {
+    fn stage_put(
+        &self,
+        _scope: ArtifactScope,
+        _content: Bytes,
+        _metadata: ArtifactMetadata,
+    ) -> PortFuture<Result<ArtifactRef, ArtifactError>> {
+        Box::pin(async {
+            Err(ArtifactError::Unavailable {
+                message: Arc::from("unavailable"),
+            })
+        })
+    }
+
+    fn get(
+        &self,
+        _scope: ArtifactScope,
+        _artifact: ArtifactRef,
+    ) -> PortFuture<Result<Bytes, ArtifactError>> {
+        Box::pin(async {
+            Err(ArtifactError::Unavailable {
+                message: Arc::from("unavailable"),
+            })
+        })
+    }
+
+    fn get_by_blob(
+        &self,
+        scope: ArtifactScope,
+        blob: BlobRef,
+    ) -> PortFuture<Result<finstack_ai_runtime::artifact::ArtifactRead, ArtifactError>> {
+        let content = Bytes::from_static(self.content);
+        let reference_blob = self.reference_blob.clone().unwrap_or(blob);
+        Box::pin(async move {
+            let reference = ArtifactRef::try_new(
+                ArtifactId::from_bytes([7; 16]),
+                "attachment",
+                reference_blob,
+                Digest::blob_content(&content),
+                scope.digest()?,
+                Metadata::empty(),
+            )
+            .map_err(|_| ArtifactError::Integrity {
+                message: Arc::from("tampered reference invalid"),
+            })?;
+            Ok(finstack_ai_runtime::artifact::ArtifactRead { reference, content })
+        })
+    }
+}
+
+/// A wire reference whose declared digest is for `SAMPLE_CSV`.
+fn sample_csv_blob() -> BlobRef {
+    BlobRef::try_new(
+        "blob-sample",
         "text/csv",
-        artifact.blob().length(),
-        Some(wrong_digest),
+        u64::try_from(SAMPLE_CSV.len()).expect("length"),
+        Some(Digest::blob_content(SAMPLE_CSV)),
         Some("revenue.csv"),
     )
-    .expect("blob");
-    let input = before_model_input(vec![message(
-        1,
-        MessageRole::User,
-        vec![
-            text("please review the attachment"),
-            file_block(mismatched_blob),
-        ],
-    )]);
+    .expect("blob")
+}
 
-    let error = block_on(middleware.invoke(middleware_context(), input))
-        .expect_err("digest mismatch must fail closed");
-    assert_eq!(error.code(), MIDDLEWARE_OUTCOME_NOT_ALLOWED);
+fn ingest_error_with(store: TamperedStore, blob: BlobRef) -> MiddlewareError {
+    let middleware = DocumentIngestMiddleware::try_new(Arc::new(store)).expect("middleware");
+    block_on(middleware.invoke(
+        middleware_context(),
+        before_model_input(vec![message(
+            1,
+            MessageRole::User,
+            vec![text("please review the attachment"), file_block(blob)],
+        )]),
+    ))
+    .expect_err("integrity failure must fail closed")
+}
+
+#[test]
+fn digest_mismatch_fails_closed() {
+    // The store resolves the blob and returns bytes, but their digest is not
+    // the one the wire `BlobRef` declares (a stale or forged reference).
+    // `fetch_blob` must reject the mismatch rather than feed
+    // wrongly-attributed bytes to the parser, and the failure is an error,
+    // never a fail-soft note.
+    let error = ingest_error_with(
+        TamperedStore {
+            content: b"totally different content",
+            reference_blob: None,
+        },
+        sample_csv_blob(),
+    );
+    assert_eq!(error.code(), DOCUMENT_INGEST_INTEGRITY_MISMATCH);
 }
 
 #[test]
@@ -332,7 +402,7 @@ fn store_fetch_failure_fails_closed() {
         )]),
     ))
     .expect_err("store failure must fail closed");
-    assert_eq!(error.code(), MIDDLEWARE_OUTCOME_NOT_ALLOWED);
+    assert_eq!(error.code(), DOCUMENT_INGEST_LOOKUP_FAILED);
 }
 
 #[test]
@@ -644,4 +714,130 @@ fn cached_parse_keeps_each_exact_uploaded_blob_reference() {
         );
         assert!(text.contains("Q1"));
     }
+}
+
+#[test]
+fn cache_hit_skips_artifact_fetch() {
+    // Turn one resolves, verifies, and parses the attachment (one store
+    // read). Turn two carries the same wire reference under the same tenant,
+    // so the memo answers without touching the store at all.
+    let store = Arc::new(CaptureArtifactStore::default());
+    let artifact = stage(store.as_ref(), SAMPLE_CSV, "text/csv", "revenue.csv");
+    let middleware =
+        DocumentIngestMiddleware::try_new(Arc::clone(&store) as Arc<dyn ArtifactStore>)
+            .expect("middleware");
+
+    let first = block_on(middleware.invoke(
+        middleware_context(),
+        before_model_input_with_file(&artifact),
+    ))
+    .expect("first turn");
+    assert_eq!(store.blob_reads(), 1, "first turn must fetch the blob");
+
+    let second = block_on(middleware.invoke(
+        middleware_context(),
+        before_model_input_with_file(&artifact),
+    ))
+    .expect("second turn");
+    assert_eq!(
+        store.blob_reads(),
+        1,
+        "second turn with the same attachment must perform zero store reads"
+    );
+
+    let (StageOutcome::Replace(first), StageOutcome::Replace(second)) = (first, second) else {
+        panic!("both turns must replace the draft");
+    };
+    assert_eq!(first.as_bytes(), second.as_bytes());
+}
+
+#[test]
+fn cache_is_tenant_scoped() {
+    // A hit must never cross tenants: the same wire reference presented by
+    // another tenant goes back through the store (and fails there, since the
+    // artifact lives in tenant-a's scope).
+    let store = Arc::new(CaptureArtifactStore::default());
+    let artifact = stage(store.as_ref(), SAMPLE_CSV, "text/csv", "revenue.csv");
+    let middleware =
+        DocumentIngestMiddleware::try_new(Arc::clone(&store) as Arc<dyn ArtifactStore>)
+            .expect("middleware");
+    block_on(middleware.invoke(
+        middleware_context(),
+        before_model_input_with_file(&artifact),
+    ))
+    .expect("tenant-a turn");
+    assert_eq!(store.blob_reads(), 1);
+
+    let mut other_tenant = middleware_context();
+    other_tenant.run.locator = finstack_ai_kernel::OperationLocator::try_new(
+        "tenant-b",
+        other_tenant.run.locator.session_id,
+        other_tenant.run.locator.lane_id,
+        other_tenant.run.locator.run_id,
+    )
+    .expect("locator");
+    let error = block_on(middleware.invoke(other_tenant, before_model_input_with_file(&artifact)))
+        .expect_err("another tenant must not be served from the memo");
+    assert_eq!(error.code(), DOCUMENT_INGEST_LOOKUP_FAILED);
+    assert_eq!(store.blob_reads(), 2, "the other tenant must hit the store");
+}
+
+#[test]
+fn lookup_failure_uses_lookup_code() {
+    let store = Arc::new(FailingGetStore);
+    let (blob, _artifact) = indexed_artifact(1);
+    let middleware = DocumentIngestMiddleware::try_new(store).expect("middleware");
+    let error = block_on(middleware.invoke(
+        middleware_context(),
+        before_model_input(vec![message(
+            1,
+            MessageRole::User,
+            vec![text("please review the attachment"), file_block(blob)],
+        )]),
+    ))
+    .expect_err("store failure must fail closed");
+    assert_eq!(error.code(), DOCUMENT_INGEST_LOOKUP_FAILED);
+    assert_ne!(error.code(), MIDDLEWARE_OUTCOME_NOT_ALLOWED);
+    assert_eq!(
+        error.descriptor().category,
+        finstack_ai_kernel::ErrorCategory::Middleware
+    );
+}
+
+#[test]
+fn digest_mismatch_uses_integrity_code() {
+    let error = ingest_error_with(
+        TamperedStore {
+            content: b"totally different content",
+            reference_blob: None,
+        },
+        sample_csv_blob(),
+    );
+    assert_eq!(error.code(), DOCUMENT_INGEST_INTEGRITY_MISMATCH);
+    assert_ne!(error.code(), DOCUMENT_INGEST_LOOKUP_FAILED);
+    assert_ne!(error.code(), MIDDLEWARE_OUTCOME_NOT_ALLOWED);
+}
+
+#[test]
+fn reference_mismatch_uses_integrity_code() {
+    // Content digest is fine, but the store-owned reference names a
+    // different blob than the wire reference: still an integrity failure,
+    // not a lookup failure.
+    let wire = sample_csv_blob();
+    let other = BlobRef::try_new(
+        "blob-other",
+        "text/csv",
+        wire.length(),
+        wire.digest().copied(),
+        Some("revenue.csv"),
+    )
+    .expect("blob");
+    let error = ingest_error_with(
+        TamperedStore {
+            content: SAMPLE_CSV,
+            reference_blob: Some(other),
+        },
+        wire,
+    );
+    assert_eq!(error.code(), DOCUMENT_INGEST_INTEGRITY_MISMATCH);
 }

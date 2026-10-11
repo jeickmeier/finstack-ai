@@ -14,7 +14,7 @@ use finstack_ai_runtime::ports::observer::Observer;
 
 use crate::extract::{CandidateMemory, MemoryExtractor, RuleBasedExtractor};
 use crate::observer::MemoryObserver;
-use crate::record::{ExtractionMethod, MemoryScope, system_clock};
+use crate::record::{ExtractionMethod, MemoryId, MemoryScope, system_clock};
 use crate::store::{InProcessMemoryStore, MemoryPage, MemoryStore, MemoryStoreError, PutOutcome};
 
 fn id<T: IdTag>(value: u64) -> Id<T> {
@@ -323,7 +323,7 @@ async fn observer_handles_candidates_without_event_correlation() {
     impl MemoryExtractor for FixedExtractor {
         fn extract(&self, _events: &[RunEvent]) -> Vec<CandidateMemory> {
             vec![CandidateMemory {
-                id: None,
+                id: MemoryId::parse("fixed").expect("id"),
                 keywords: vec![Arc::from("alpha")],
                 body: Arc::from("fixed body"),
                 sensitivity: Sensitivity::Internal,

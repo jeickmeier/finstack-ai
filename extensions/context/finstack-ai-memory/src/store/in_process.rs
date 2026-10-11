@@ -27,16 +27,16 @@ fn is_live(record: &MemoryRecord, now: Timestamp) -> bool {
     !record.tombstoned && record.superseded_by.is_none() && !record.is_expired_at(now)
 }
 
-/// Whether writing `incoming` at its id conflicts with `existing`.
+/// Whether writing at a `(scope, id)` key conflicts with the record
+/// `existing` already stored under that same key.
 ///
-/// A live record always conflicts: ids are a global key, and a collision
-/// with another scope's record must not silently replace it. A *tombstoned*
-/// record in the identical scope does not conflict — it is the same owner
-/// re-remembering something they forgot, and refusing that would strand the
-/// id forever, since the supersession route rejects a replacement whose id
-/// equals the one it supersedes.
-fn conflicts_with(existing: Option<&MemoryRecord>, incoming: &MemoryRecord) -> bool {
-    existing.is_some_and(|existing| !(existing.tombstoned && existing.scope == incoming.scope))
+/// A live record conflicts: it must not be silently replaced. A
+/// *tombstoned* one does not — it is the same owner (records are keyed by
+/// their complete scope) re-remembering something they forgot, and refusing
+/// that would strand the id forever, since the supersession route rejects a
+/// replacement whose id equals the one it supersedes.
+fn conflicts_with(existing: Option<&MemoryRecord>) -> bool {
+    existing.is_some_and(|existing| !existing.tombstoned)
 }
 
 fn lock_error() -> MemoryStoreError {
@@ -155,7 +155,7 @@ impl MemoryStore for InProcessMemoryStore {
             if receipt_replay(&state, &record.scope, &idempotency_key, fingerprint)? {
                 return Ok(PutOutcome::AlreadyApplied);
             }
-            if conflicts_with(state.records.get(&record_key), &record) {
+            if conflicts_with(state.records.get(&record_key)) {
                 return Err(MemoryStoreError::IdConflict);
             }
             reserve_receipt(&state, self.limits)?;
@@ -339,7 +339,7 @@ impl MemoryStore for InProcessMemoryStore {
             if scope != old_record.scope || replacement.scope != old_record.scope {
                 return Err(MemoryStoreError::NotFound);
             }
-            if conflicts_with(state.records.get(&replacement_key), &replacement) {
+            if conflicts_with(state.records.get(&replacement_key)) {
                 return Err(MemoryStoreError::IdConflict);
             }
             reserve_receipt(&state, self.limits)?;

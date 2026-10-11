@@ -17,6 +17,9 @@ use super::StreamNormError;
 const CONTINUATION_PROVIDER: &str = "openai.responses";
 const CONTINUATION_VERSION: u64 = 1;
 
+/// Upstream error codes the Responses API documents as transient.
+const RETRYABLE_ERROR_CODES: &[&str] = &["server_error", "rate_limit_exceeded"];
+
 #[derive(Deserialize)]
 struct WireEvent {
     #[serde(rename = "type")]
@@ -33,6 +36,20 @@ struct WireEvent {
     item: Option<WireOutputItem>,
     #[serde(default)]
     response: Option<WireResponse>,
+    /// Top-level code carried by the documented `error` event shape.
+    #[serde(default)]
+    code: Option<String>,
+    /// Nested error object (`error.code`) some gateways emit instead.
+    #[serde(default)]
+    error: Option<WireError>,
+}
+
+/// The `code` member of an upstream error object; the vendor message is
+/// deliberately not decoded so it can never reach a durable error.
+#[derive(Deserialize)]
+struct WireError {
+    #[serde(default)]
+    code: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -53,6 +70,8 @@ struct WireResponse {
     #[serde(default)]
     output: Vec<Value>,
     usage: Option<WireUsage>,
+    #[serde(default)]
+    error: Option<WireError>,
 }
 
 #[derive(Deserialize)]
@@ -69,7 +88,8 @@ struct WireUsage {
 #[derive(Default)]
 struct ToolAssembly {
     call_id: Option<String>,
-    name: Option<String>,
+    /// Shared so every argument fragment clones a pointer, not the string.
+    name: Option<Arc<str>>,
     arguments: String,
 }
 
@@ -113,8 +133,16 @@ impl OpenAiResponsesAssembly {
             .map_err(|_| StreamNormError::stream("SSE event is invalid JSON"))?;
         self.observe_sequence(event.sequence_number)?;
         match event.kind.as_str() {
-            "error" => Err(StreamNormError::stream("stream reported an error")),
-            "response.failed" => Err(StreamNormError::response("response failed")),
+            "error" => Err(upstream_error(event.code.as_deref().or_else(|| {
+                event.error.as_ref().and_then(|error| error.code.as_deref())
+            }))),
+            "response.failed" => Err(upstream_error(
+                event
+                    .response
+                    .as_ref()
+                    .and_then(|response| response.error.as_ref())
+                    .and_then(|error| error.code.as_deref()),
+            )),
             "response.incomplete" => Err(StreamNormError::incomplete("response was incomplete")),
             "response.completed" => self.consume_completed(event),
             "response.output_text.delta" => Ok(self.consume_text_delta(&event)),
@@ -175,7 +203,7 @@ impl OpenAiResponsesAssembly {
             tool.call_id = Some(call_id);
         }
         if let Some(name) = item.name.filter(|value| !value.is_empty()) {
-            tool.name = Some(name);
+            tool.name = Some(Arc::from(name.as_str()));
         }
         let arguments = item.arguments.unwrap_or_default();
         if !arguments.is_empty() {
@@ -183,7 +211,7 @@ impl OpenAiResponsesAssembly {
         }
         Ok(vec![ModelStreamItem::ToolCallDelta(ToolCallDelta {
             index: stream_index,
-            name: tool.name.as_deref().map(Arc::from),
+            name: tool.name.clone(),
             arguments_delta: Arc::from(arguments.as_str()),
             provider_call_id: tool.call_id.as_deref().map(Arc::from),
         })])
@@ -199,7 +227,7 @@ impl OpenAiResponsesAssembly {
         tool.arguments.push_str(fragment);
         Ok(vec![ModelStreamItem::ToolCallDelta(ToolCallDelta {
             index: stream_index,
-            name: tool.name.as_deref().map(Arc::from),
+            name: tool.name.clone(),
             arguments_delta: Arc::from(fragment),
             provider_call_id: tool.call_id.as_deref().map(Arc::from),
         })])
@@ -216,7 +244,7 @@ impl OpenAiResponsesAssembly {
             tool.arguments.clone_from(&arguments);
             return Ok(vec![ModelStreamItem::ToolCallDelta(ToolCallDelta {
                 index: stream_index,
-                name: tool.name.as_deref().map(Arc::from),
+                name: tool.name.clone(),
                 arguments_delta: Arc::from(arguments.as_str()),
                 provider_call_id: tool.call_id.as_deref().map(Arc::from),
             })]);
@@ -287,7 +315,9 @@ impl OpenAiResponsesAssembly {
         completion_id: String,
         continuation_state: Option<RawJson>,
     ) -> Result<ModelResponse, StreamNormError> {
-        let assistant_content: Arc<[ContentBlock]> = if self.structured {
+        // A structured turn that only emitted tool calls carries no text; the
+        // JSON block is required only once the model actually answered.
+        let assistant_content: Arc<[ContentBlock]> = if self.structured && !self.text.is_empty() {
             let value = RawJson::parse(self.text.as_bytes())
                 .map_err(|_| StreamNormError::response("structured output is not valid JSON"))?;
             Arc::from([ContentBlock::Json(JsonBlock::new(value))])
@@ -309,7 +339,7 @@ impl OpenAiResponsesAssembly {
             }
             let name = tool
                 .name
-                .as_deref()
+                .clone()
                 .ok_or_else(|| StreamNormError::response("tool call omitted its name"))?;
             let arguments = if tool.arguments.is_empty() {
                 b"{}".as_slice()
@@ -319,7 +349,7 @@ impl OpenAiResponsesAssembly {
             let arguments = RawJson::parse(arguments)
                 .map_err(|_| StreamNormError::response("tool-call arguments are invalid JSON"))?;
             tool_calls.push(ModelToolCall {
-                name: Arc::from(name),
+                name,
                 arguments,
                 provider_call_id: tool.call_id.as_deref().map(Arc::from),
             });
@@ -338,6 +368,19 @@ impl OpenAiResponsesAssembly {
             completion_id: Arc::from(completion_id),
             continuation_state,
         })
+    }
+}
+
+/// Map an upstream failure code onto a fixed-message stream error.
+///
+/// Only the code is consulted; the vendor's message text is never forwarded.
+/// `server_error` and `rate_limit_exceeded` are the documented transient
+/// codes, so they alone mark the failure retryable.
+fn upstream_error(code: Option<&str>) -> StreamNormError {
+    if code.is_some_and(|code| RETRYABLE_ERROR_CODES.contains(&code)) {
+        StreamNormError::upstream("stream reported a transient upstream error", true)
+    } else {
+        StreamNormError::upstream("stream reported an upstream error", false)
     }
 }
 
@@ -410,25 +453,115 @@ mod tests {
     }
 
     #[test]
-    fn incomplete_and_failed_are_errors() {
+    fn structured_tool_only_turn_completes_without_json_block() {
+        let mut assembly = OpenAiResponsesAssembly::new("request-1".to_owned(), true);
+        assembly
+            .consume(
+                r#"{"type":"response.output_item.added","sequence_number":1,"output_index":0,"item":{"type":"function_call","call_id":"call_abc","name":"lookup","arguments":""}}"#,
+            )
+            .unwrap();
+        assembly
+            .consume(
+                r#"{"type":"response.function_call_arguments.delta","sequence_number":2,"output_index":0,"delta":"{\"x\":1}"}"#,
+            )
+            .unwrap();
+        let items = assembly
+            .consume(
+                r#"{"type":"response.completed","sequence_number":3,"response":{"id":"resp-1","output":[{"arguments":"{\"x\":1}","call_id":"call_abc","name":"lookup","type":"function_call"}]}}"#,
+            )
+            .unwrap();
+        let ModelStreamItem::Completed(response) = &items[0] else {
+            panic!("expected completed item");
+        };
+        assert!(response.assistant_content.is_empty());
+        assert!(
+            !response
+                .assistant_content
+                .iter()
+                .any(|block| matches!(block, ContentBlock::Json(_)))
+        );
+        assert_eq!(response.tool_calls.len(), 1);
+        assert_eq!(response.tool_calls[0].name.as_ref(), "lookup");
+        assert_eq!(response.tool_calls[0].arguments.as_str(), r#"{"x":1}"#);
+    }
+
+    #[test]
+    fn structured_turn_with_text_still_requires_json() {
+        let mut assembly = OpenAiResponsesAssembly::new("request-1".to_owned(), true);
+        assembly
+            .consume(
+                r#"{"type":"response.output_text.delta","sequence_number":1,"delta":"not json"}"#,
+            )
+            .unwrap();
+        let error = assembly
+            .consume(r#"{"type":"response.completed","sequence_number":2,"response":{"id":"resp-1","output":[]}}"#)
+            .expect_err("invalid structured output");
+        assert_eq!(error.kind, crate::StreamNormKind::Response);
+    }
+
+    #[test]
+    fn server_error_is_retryable_and_invalid_request_is_not() {
+        // Documented `error` event shape: the code sits at the event top level.
         let mut assembly = OpenAiResponsesAssembly::new("request-1".to_owned(), false);
-        assert_eq!(
-            assembly
-                .consume(r#"{"type":"response.incomplete","sequence_number":1,"response":{"id":"resp-1","incomplete_details":{"reason":"max_output_tokens"}}}"#)
-                .expect_err("incomplete")
-                .kind,
-            crate::StreamNormKind::Incomplete
-        );
+        let error = assembly
+            .consume(
+                r#"{"type":"error","sequence_number":1,"code":"server_error","message":"vendor-secret-canary","param":null}"#,
+            )
+            .expect_err("server error");
+        assert_eq!(error.kind, crate::StreamNormKind::Stream);
+        assert!(error.retryable);
+        assert!(!error.message.contains("canary"));
+
+        // Nested `error.code` fallback.
         let mut assembly = OpenAiResponsesAssembly::new("request-2".to_owned(), false);
-        assert_eq!(
-            assembly
-                .consume(
-                    r#"{"type":"response.failed","sequence_number":1,"response":{"id":"resp-2"}}"#
-                )
-                .expect_err("failed")
-                .kind,
-            crate::StreamNormKind::Response
-        );
+        let error = assembly
+            .consume(
+                r#"{"type":"error","sequence_number":1,"error":{"code":"rate_limit_exceeded","message":"vendor-secret-canary"}}"#,
+            )
+            .expect_err("rate limited");
+        assert!(error.retryable);
+        assert!(!error.message.contains("canary"));
+
+        // `response.failed` carries the code under `response.error`.
+        let mut assembly = OpenAiResponsesAssembly::new("request-3".to_owned(), false);
+        let error = assembly
+            .consume(
+                r#"{"type":"response.failed","sequence_number":1,"response":{"id":"resp-3","status":"failed","error":{"code":"server_error","message":"vendor-secret-canary"}}}"#,
+            )
+            .expect_err("failed");
+        assert_eq!(error.kind, crate::StreamNormKind::Stream);
+        assert!(error.retryable);
+        assert!(!error.message.contains("canary"));
+
+        let mut assembly = OpenAiResponsesAssembly::new("request-4".to_owned(), false);
+        let error = assembly
+            .consume(
+                r#"{"type":"error","sequence_number":1,"code":"invalid_request_error","message":"vendor-secret-canary"}"#,
+            )
+            .expect_err("invalid request");
+        assert_eq!(error.kind, crate::StreamNormKind::Stream);
+        assert!(!error.retryable);
+        assert!(!error.message.contains("canary"));
+
+        // A failure without any code is final.
+        let mut assembly = OpenAiResponsesAssembly::new("request-5".to_owned(), false);
+        let error = assembly
+            .consume(r#"{"type":"response.failed","sequence_number":1,"response":{"id":"resp-5"}}"#)
+            .expect_err("failed without code");
+        assert_eq!(error.kind, crate::StreamNormKind::Stream);
+        assert!(!error.retryable);
+    }
+
+    #[test]
+    fn response_incomplete_is_incomplete_kind() {
+        let mut assembly = OpenAiResponsesAssembly::new("request-1".to_owned(), false);
+        let error = assembly
+            .consume(
+                r#"{"type":"response.incomplete","sequence_number":1,"response":{"id":"resp-1","incomplete_details":{"reason":"max_output_tokens"}}}"#,
+            )
+            .expect_err("incomplete");
+        assert_eq!(error.kind, crate::StreamNormKind::Incomplete);
+        assert!(!error.retryable);
     }
 
     #[test]

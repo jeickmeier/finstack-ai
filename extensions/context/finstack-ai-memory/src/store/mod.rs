@@ -29,6 +29,8 @@ pub use finstack_ai_runtime::artifact::InProcessArtifactStore;
 pub use in_process::InProcessMemoryStore;
 #[cfg(all(feature = "sqlite", not(target_arch = "wasm32")))]
 pub use sqlite::SqliteMemoryStore;
+#[cfg(all(test, feature = "sqlite", not(target_arch = "wasm32")))]
+pub(crate) use sqlite::counters_audit;
 
 /// Default maximum records retained by a bounded memory store.
 pub const MAX_MEMORY_RECORDS: usize = 10_000;

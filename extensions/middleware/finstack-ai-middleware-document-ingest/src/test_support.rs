@@ -1,8 +1,8 @@
 //! Crate-local fixtures shared by unit tests and the ingest benchmark.
 
 use std::future::Future;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::task::{Context, Poll, Waker};
 
 use finstack_ai_kernel::{
     ArtifactId, ArtifactRef, BlobRef, ContentBlock, Digest, Id, IdTag, LaneId, MediaRef, Message,
@@ -22,15 +22,13 @@ use finstack_ai_runtime::ports::model::{
 
 pub(crate) const SAMPLE_CSV: &[u8] = include_bytes!("../../../../fixtures/documents/sample.csv");
 
+/// Drive a future on a current-thread tokio runtime: the middleware offloads
+/// parsing through `spawn_blocking`, which needs a runtime context.
 pub(crate) fn block_on<T>(future: impl Future<Output = T>) -> T {
-    let mut context = Context::from_waker(Waker::noop());
-    let mut future = std::pin::pin!(future);
-    loop {
-        match future.as_mut().poll(&mut context) {
-            Poll::Ready(value) => return value,
-            Poll::Pending => std::thread::yield_now(),
-        }
-    }
+    tokio::runtime::Builder::new_current_thread()
+        .build()
+        .expect("test runtime")
+        .block_on(future)
 }
 
 fn id<T: IdTag>(value: u64) -> Id<T> {
@@ -41,11 +39,23 @@ fn id<T: IdTag>(value: u64) -> Id<T> {
     Id::from_bytes(bytes)
 }
 
-/// Test-only in-memory `ArtifactStore` that captures every `stage_put` call
-/// and serves `get` by content-digest match.
+/// Test-only in-memory `ArtifactStore` that captures every `stage_put` call,
+/// serves `get` by content-digest match, and counts `get_by_blob` reads so
+/// tests can prove when the parse memo skipped the store entirely.
 #[derive(Clone, Default)]
 pub(crate) struct CaptureArtifactStore {
     staged: Arc<Mutex<Vec<(ArtifactScope, Bytes, ArtifactMetadata)>>>,
+    blob_reads: Arc<AtomicUsize>,
+}
+
+impl CaptureArtifactStore {
+    /// Number of `get_by_blob` calls served so far (hits and misses alike).
+    /// Only the unit tests read it; the ingest bench includes this file by
+    /// path and never does.
+    #[allow(dead_code)]
+    pub(crate) fn blob_reads(&self) -> usize {
+        self.blob_reads.load(Ordering::SeqCst)
+    }
 }
 
 impl ArtifactStore for CaptureArtifactStore {
@@ -109,6 +119,7 @@ impl ArtifactStore for CaptureArtifactStore {
         blob: BlobRef,
     ) -> PortFuture<Result<ArtifactRead, ArtifactError>> {
         let staged = Arc::clone(&self.staged);
+        self.blob_reads.fetch_add(1, Ordering::SeqCst);
         Box::pin(async move {
             let staged = staged.lock().expect("capture lock");
             let (_, content, metadata) = staged

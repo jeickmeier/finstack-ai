@@ -11,10 +11,11 @@ description = "HITL interaction lifecycle notifier observer for finstack-ai"
 readme = "README.md"
 
 [features]
-vendored-tls = ["reqwest/native-tls-vendored"]
+vendored-tls = ["reqwest/native-tls-vendored", "finstack-ai-net-guard/vendored-tls"]
 
 [dependencies]
 finstack-ai-kernel = { workspace = true }
+finstack-ai-net-guard = { workspace = true }
 finstack-ai-runtime = { workspace = true, default-features = false, features = ["native-tokio"] }
 reqwest = { workspace = true }
 serde = { workspace = true }

@@ -8,9 +8,8 @@ use finstack_ai_runtime::workflow::WorkflowWait;
 use finstack_ai_workflow_hitl::{
     HitlInboxStore, HitlRouter, InteractionStatus, MemoryHitlStore, capture,
 };
-use finstack_ai_workflow_local::MemoryCronStore;
 use finstack_ai_workflow_worker::{
-    FireStore, InboxStore, MemoryWorkerStore, WakeIndexStore, WakeReason, WakeRow, WorkerBuilder,
+    InboxStore, MemoryWorkerStore, WakeIndexStore, WakeReason, WakeRow, WorkerBuilder,
 };
 
 use crate::capture::{accepted, approval_request, checkpoint, id, memory_store, timestamp};
@@ -62,9 +61,7 @@ fn harness() -> (
     let worker = Arc::new(
         WorkerBuilder::new(
             memory_store() as Arc<dyn JournalStore>,
-            Arc::new(MemoryCronStore::new()),
             Arc::clone(&worker_store) as Arc<dyn WakeIndexStore>,
-            Arc::clone(&worker_store) as Arc<dyn FireStore>,
             Arc::clone(&worker_store) as Arc<dyn InboxStore>,
         )
         .build()

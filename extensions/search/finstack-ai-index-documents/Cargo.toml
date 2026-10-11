@@ -13,7 +13,7 @@ publish = false
 [dependencies]
 finstack-ai-kernel.workspace = true
 finstack-ai-runtime.workspace = true
-finstack-ai-search-core.workspace = true
+finstack-ai-search-core = { workspace = true, features = ["sqlite"] }
 finstack-ai-embeddings.workspace = true
 finstack-ai-tools-document.workspace = true
 futures-util.workspace = true

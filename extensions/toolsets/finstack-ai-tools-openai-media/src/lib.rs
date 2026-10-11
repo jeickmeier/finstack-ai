@@ -37,17 +37,19 @@ use finstack_ai_kernel::{
 };
 use finstack_ai_runtime::Bytes;
 use finstack_ai_runtime::artifact::{
-    ArtifactMetadata, ArtifactScope, ArtifactStore, stage_required_artifact,
+    ArtifactError, ArtifactMetadata, ArtifactScope, ArtifactStore, stage_required_artifact,
 };
 use finstack_ai_runtime::ports::PortFuture;
 use finstack_ai_runtime::ports::model::{
-    ApprovalMetadata, ApprovalRequirement, SideEffectClass, ToolDeferralSupport, ToolSpec,
+    ApprovalMetadata, ApprovalRequirement, SecretRejected, SecretString, SideEffectClass,
+    ToolDeferralSupport, ToolSpec,
 };
 use finstack_ai_runtime::ports::tool::{
     ToolCallContext, ToolError, ToolEventStream, ToolResult, ToolStreamItem, Toolset,
     ToolsetDescriptor, verify_authority,
 };
 use futures_util::stream;
+use reqwest::header::HeaderValue;
 use serde::Deserialize;
 
 mod config;
@@ -172,12 +174,23 @@ impl OpenAiMediaToolset {
     /// # Errors
     ///
     /// Returns [`OpenAiMediaError::CredentialRequired`] when `api_key` is empty.
-    /// Returns [`OpenAiMediaError::EndpointInvalid`] for a non-HTTP URL, userinfo,
-    /// query, fragment, plaintext HTTP off loopback, or an out-of-range result cap.
+    /// Returns [`OpenAiMediaError::EndpointInvalid`] for an `api_key` that is
+    /// non-ASCII or oversized, a non-HTTP URL, userinfo, query, fragment,
+    /// plaintext HTTP off loopback, or an out-of-range result cap.
     pub fn try_new(config: OpenAiMediaConfig) -> Result<Self, OpenAiMediaError> {
-        if config.api_key.is_empty() {
-            return Err(OpenAiMediaError::CredentialRequired);
-        }
+        let secret = SecretString::try_new(config.api_key).map_err(|rejected| match rejected {
+            SecretRejected::Empty => OpenAiMediaError::CredentialRequired,
+            SecretRejected::TooLong | SecretRejected::NonAscii => {
+                OpenAiMediaError::EndpointInvalid {
+                    reason: "api_key is invalid",
+                }
+            }
+        })?;
+        let mut authorization = HeaderValue::from_str(&format!("Bearer {}", secret.expose()))
+            .map_err(|_| OpenAiMediaError::EndpointInvalid {
+                reason: "api_key is invalid",
+            })?;
+        authorization.set_sensitive(true);
         if config.max_result_bytes == 0 || config.max_result_bytes > MAX_RESULT_BYTES_CEILING {
             return Err(OpenAiMediaError::EndpointInvalid {
                 reason: "result cap out of range",
@@ -222,7 +235,7 @@ impl OpenAiMediaToolset {
             tools: Arc::from(tools),
             route: Route {
                 client,
-                api_key: config.api_key,
+                authorization,
                 endpoint,
                 max_result_bytes: config.max_result_bytes,
                 store: None,
@@ -416,12 +429,17 @@ async fn deliver_media(
         },
     )
     .await
-    .map_err(|_| {
-        tool_error(
+    .map_err(|error| match error {
+        ArtifactError::TooLarge { .. } => tool_error(
             OPENAI_MEDIA_LIMIT_EXCEEDED,
+            ErrorCategory::Limit,
+            "openai media result exceeds the artifact store limit",
+        ),
+        _ => tool_error(
+            OPENAI_MEDIA_TRANSPORT_FAILED,
             ErrorCategory::Tool,
             "openai media artifact staging failed",
-        )
+        ),
     })?;
     Ok(MediaOutput {
         value: serde_json::json!({
@@ -590,12 +608,15 @@ mod tests {
 
     use base64::Engine as _;
     use finstack_ai_kernel::{
-        Digest, EffectId, EffectOutputContract, EffectOutputKind, LaneId, Metadata,
-        OperationLocator, PrincipalRef, RawJson, RunId, SessionId, ToolBatchId, ToolCallBlock,
-        ToolCallId, ToolFailurePolicy, ValidatedToolCall,
+        ArtifactRef, Digest, EffectId, EffectOutputContract, EffectOutputKind, ErrorCategory,
+        LaneId, Metadata, OperationLocator, PrincipalRef, RawJson, RunId, SessionId, ToolBatchId,
+        ToolCallBlock, ToolCallId, ToolFailurePolicy, ValidatedToolCall,
     };
-    use finstack_ai_runtime::artifact::ArtifactStore;
-    use finstack_ai_runtime::artifact::InProcessArtifactStore;
+    use finstack_ai_runtime::Bytes;
+    use finstack_ai_runtime::artifact::{
+        ArtifactError, ArtifactMetadata, ArtifactScope, ArtifactStore, InProcessArtifactStore,
+    };
+    use finstack_ai_runtime::ports::PortFuture;
     use finstack_ai_runtime::ports::model::{
         AuthorizationContext, CancellationSignal, RunCallContext,
     };
@@ -1171,6 +1192,110 @@ mod tests {
             "no HTTP must reach the fixture"
         );
         server.abort();
+    }
+
+    #[tokio::test]
+    async fn endpoint_rejection_names_status_and_detail() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let (seen_tx, _seen_rx) = mpsc::unbounded_channel();
+        let server = tokio::spawn(async move {
+            respond(
+                &listener,
+                &seen_tx,
+                400,
+                br#"{"error":{"message":"size must be one of 1024x1024, 1536x1024"}}"#,
+                "application/json",
+            )
+            .await;
+        });
+        let tools =
+            OpenAiMediaToolset::try_new(base_config(format!("http://{addr}"))).expect("tools");
+        let spec = find_spec(&tools.tools(), IMAGE_TOOL_NAME);
+        let call = call_for(&spec, br#"{"model":"m","prompt":"a cat","size":"huge"}"#);
+        let Err(error) = tools.call(tool_context(), call).await else {
+            panic!("expected rejection");
+        };
+        assert_eq!(error.code(), crate::OPENAI_MEDIA_TRANSPORT_FAILED);
+        assert_eq!(error.category(), ErrorCategory::Tool);
+        let message = error.message();
+        assert!(message.contains("HTTP 400"), "{message}");
+        assert!(
+            message.contains("size must be one of 1024x1024, 1536x1024"),
+            "endpoint detail must reach the model: {message}"
+        );
+        assert!(!message.contains(CANARY));
+        server.await.expect("server");
+    }
+
+    /// Store whose `stage_put` always fails with the configured error.
+    struct FailingStore(fn() -> ArtifactError);
+
+    impl ArtifactStore for FailingStore {
+        fn stage_put(
+            &self,
+            _scope: ArtifactScope,
+            _content: Bytes,
+            _metadata: ArtifactMetadata,
+        ) -> PortFuture<Result<ArtifactRef, ArtifactError>> {
+            let error = (self.0)();
+            Box::pin(async move { Err(error) })
+        }
+
+        fn get(
+            &self,
+            _scope: ArtifactScope,
+            _artifact: ArtifactRef,
+        ) -> PortFuture<Result<Bytes, ArtifactError>> {
+            Box::pin(async { Err(ArtifactError::NotFound) })
+        }
+    }
+
+    async fn stage_image_through(store: Arc<dyn ArtifactStore>) -> crate::ToolError {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let (seen_tx, _seen_rx) = mpsc::unbounded_channel();
+        let server = tokio::spawn(async move {
+            respond(
+                &listener,
+                &seen_tx,
+                200,
+                br#"{"data":[{"b64_json":"aGVsbG8="}]}"#,
+                "application/json",
+            )
+            .await;
+        });
+        let tools = OpenAiMediaToolset::try_new(base_config(format!("http://{addr}")))
+            .expect("tools")
+            .with_artifact_store(store);
+        let spec = find_spec(&tools.tools(), IMAGE_TOOL_NAME);
+        let call = call_for(&spec, br#"{"model":"m","prompt":"a cat"}"#);
+        let Err(error) = tools.call(tool_context(), call).await else {
+            panic!("expected staging failure");
+        };
+        server.await.expect("server");
+        error
+    }
+
+    #[tokio::test]
+    async fn oversized_artifact_maps_to_limit_code() {
+        let error = stage_image_through(Arc::new(FailingStore(|| ArtifactError::TooLarge {
+            len: 5,
+            max: 4,
+        })))
+        .await;
+        assert_eq!(error.code(), crate::OPENAI_MEDIA_LIMIT_EXCEEDED);
+        assert_eq!(error.category(), ErrorCategory::Limit);
+    }
+
+    #[tokio::test]
+    async fn store_failure_maps_to_transport_code() {
+        let error = stage_image_through(Arc::new(FailingStore(|| ArtifactError::Unavailable {
+            message: Arc::from("store offline"),
+        })))
+        .await;
+        assert_eq!(error.code(), crate::OPENAI_MEDIA_TRANSPORT_FAILED);
+        assert_eq!(error.category(), ErrorCategory::Tool);
     }
 
     fn host_allow_catalog(toolset: Arc<dyn Toolset>) -> ResolvedToolCatalog {

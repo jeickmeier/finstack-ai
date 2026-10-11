@@ -6,14 +6,18 @@ use rusqlite::{Connection, Transaction, params};
 
 use crate::record::MemoryRecord;
 
-use super::super::MemoryStoreError;
-use super::queries::{legacy_record_from_row, sqlite_unavailable, write_record};
+use super::super::{MemoryStoreError, embedding_source_digest, embedding_source_text};
+use super::queries::{legacy_record_from_row, record_from_row, sqlite_unavailable, write_record};
 
 /// Applied `PRAGMA user_version` for the current schema.
-const SCHEMA_USER_VERSION: i32 = 3;
+const SCHEMA_USER_VERSION: i32 = 4;
 
 /// `PRAGMA user_version` of the last schema without the embedding index.
 const V2_USER_VERSION: i32 = 2;
+
+/// `PRAGMA user_version` of the last schema without the stored embedding
+/// source digest and the byte counters.
+const V3_USER_VERSION: i32 = 3;
 
 /// The v3 addition: the per-space embedding index. Shared verbatim between
 /// the fresh-create DDL, the v1 migration (which needs the table before it
@@ -31,7 +35,29 @@ CREATE INDEX IF NOT EXISTS memory_embeddings_space
   ON memory_embeddings(embedder_id, scope_digest);
 ";
 
-const V3_BASE_DDL: &str = "
+/// The v4 counters: one row caching the aggregate inline-body and
+/// embedding-vector byte totals that capacity checks read, maintained by
+/// every write path in the same transaction as the rows it counts. Seeded
+/// at zero; [`migrate_v3_to_v4_schema`] re-seeds it from the actual sums.
+const COUNTERS_DDL: &str = "
+CREATE TABLE IF NOT EXISTS memory_counters (
+  singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+  inline_bytes INTEGER NOT NULL,
+  embedding_bytes INTEGER NOT NULL
+);
+INSERT OR IGNORE INTO memory_counters (singleton, inline_bytes, embedding_bytes)
+VALUES (1, 0, 0);
+";
+
+/// Recompute the counters from the tables they cache.
+const RESEED_COUNTERS_SQL: &str = "
+INSERT OR REPLACE INTO memory_counters (singleton, inline_bytes, embedding_bytes)
+SELECT 1,
+  (SELECT COALESCE(SUM(length(CAST(body_inline AS BLOB))), 0) FROM memory_records),
+  (SELECT COALESCE(SUM(length(vector)), 0) FROM memory_embeddings);
+";
+
+const V4_BASE_DDL: &str = "
 CREATE TABLE memory_records (
   scope_digest TEXT NOT NULL,
   id TEXT NOT NULL,
@@ -50,6 +76,7 @@ CREATE TABLE memory_records (
   expires_at INTEGER,
   tombstoned INTEGER NOT NULL DEFAULT 0
     CHECK (tombstoned IN (0, 1)),
+  source_digest TEXT,
   CHECK ((body_inline IS NULL) != (blob_ref_json IS NULL)),
   PRIMARY KEY (scope_digest, id)
 );
@@ -141,12 +168,17 @@ pub(super) fn apply_schema(connection: &Connection) -> Result<(), MemoryStoreErr
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .map_err(|_| sqlite_unavailable())?;
     match version {
-        0 => create_v3_schema(connection),
+        0 => create_v4_schema(connection),
         1 => {
             migrate_v1_schema(connection)?;
-            migrate_v2_to_v3_schema(connection)
+            migrate_v2_to_v3_schema(connection)?;
+            migrate_v3_to_v4_schema(connection)
         }
-        V2_USER_VERSION => migrate_v2_to_v3_schema(connection),
+        V2_USER_VERSION => {
+            migrate_v2_to_v3_schema(connection)?;
+            migrate_v3_to_v4_schema(connection)
+        }
+        V3_USER_VERSION => migrate_v3_to_v4_schema(connection),
         SCHEMA_USER_VERSION => Ok(()),
         _ => Err(MemoryStoreError::Unavailable {
             message: Arc::from("memory_store_sqlite_schema_unsupported"),
@@ -154,15 +186,18 @@ pub(super) fn apply_schema(connection: &Connection) -> Result<(), MemoryStoreErr
     }
 }
 
-fn create_v3_schema(connection: &Connection) -> Result<(), MemoryStoreError> {
+fn create_v4_schema(connection: &Connection) -> Result<(), MemoryStoreError> {
     let transaction = connection
         .unchecked_transaction()
         .map_err(|_| sqlite_unavailable())?;
     transaction
-        .execute_batch(V3_BASE_DDL)
+        .execute_batch(V4_BASE_DDL)
         .map_err(|_| sqlite_unavailable())?;
     transaction
         .execute_batch(EMBEDDINGS_DDL)
+        .map_err(|_| sqlite_unavailable())?;
+    transaction
+        .execute_batch(COUNTERS_DDL)
         .map_err(|_| sqlite_unavailable())?;
     finish_schema_transaction(transaction, SCHEMA_USER_VERSION)
 }
@@ -183,7 +218,77 @@ fn migrate_v2_to_v3_schema(connection: &Connection) -> Result<(), MemoryStoreErr
     if quick_check != "ok" {
         return Err(sqlite_unavailable());
     }
+    finish_schema_transaction(transaction, V3_USER_VERSION)
+}
+
+/// Additive v3→v4 step, in one transaction: add `memory_records.source_digest`
+/// (unless the v1 replay already created it), backfill it for every row
+/// from the record's current content, create and seed `memory_counters`
+/// from the actual byte sums, verify integrity, bump the version.
+fn migrate_v3_to_v4_schema(connection: &Connection) -> Result<(), MemoryStoreError> {
+    let transaction = connection
+        .unchecked_transaction()
+        .map_err(|_| sqlite_unavailable())?;
+    ensure_v4_structures(&transaction)?;
+    let records = {
+        let mut statement = transaction
+            .prepare("SELECT * FROM memory_records ORDER BY scope_digest, id")
+            .map_err(|_| sqlite_unavailable())?;
+        let rows = statement
+            .query_map([], record_from_row)
+            .map_err(|_| sqlite_unavailable())?;
+        rows.map(|row| row.map_err(|_| sqlite_unavailable()))
+            .collect::<Result<Vec<MemoryRecord>, _>>()?
+    };
+    for record in &records {
+        let digest = embedding_source_digest(&embedding_source_text(record))?;
+        let scope_digest = record
+            .scope
+            .digest()
+            .map_err(|_| sqlite_unavailable())?
+            .to_hex();
+        transaction
+            .execute(
+                "UPDATE memory_records SET source_digest = ?1
+                 WHERE scope_digest = ?2 AND id = ?3",
+                params![digest.to_hex(), scope_digest, record.id.as_str()],
+            )
+            .map_err(|_| sqlite_unavailable())?;
+    }
+    transaction
+        .execute_batch(RESEED_COUNTERS_SQL)
+        .map_err(|_| sqlite_unavailable())?;
+    let quick_check: String = transaction
+        .query_row("PRAGMA quick_check", [], |row| row.get(0))
+        .map_err(|_| sqlite_unavailable())?;
+    if quick_check != "ok" {
+        return Err(sqlite_unavailable());
+    }
     finish_schema_transaction(transaction, SCHEMA_USER_VERSION)
+}
+
+/// Make the v4 column and counters table exist, idempotently: the column is
+/// added only when `memory_records` lacks it (`ALTER TABLE ADD COLUMN` has
+/// no `IF NOT EXISTS`), and the counters DDL is `IF NOT EXISTS` itself.
+fn ensure_v4_structures(transaction: &Transaction<'_>) -> Result<(), MemoryStoreError> {
+    let columns = {
+        let mut statement = transaction
+            .prepare("PRAGMA table_info(memory_records)")
+            .map_err(|_| sqlite_unavailable())?;
+        let rows = statement
+            .query_map([], |row| row.get::<_, String>(1))
+            .map_err(|_| sqlite_unavailable())?;
+        rows.map(|row| row.map_err(|_| sqlite_unavailable()))
+            .collect::<Result<Vec<String>, _>>()?
+    };
+    if !columns.iter().any(|column| column == "source_digest") {
+        transaction
+            .execute_batch("ALTER TABLE memory_records ADD COLUMN source_digest TEXT")
+            .map_err(|_| sqlite_unavailable())?;
+    }
+    transaction
+        .execute_batch(COUNTERS_DDL)
+        .map_err(|_| sqlite_unavailable())
 }
 
 fn migrate_v1_schema(connection: &Connection) -> Result<(), MemoryStoreError> {
@@ -216,11 +321,13 @@ fn migrate_v1_schema(connection: &Connection) -> Result<(), MemoryStoreError> {
     transaction
         .execute_batch(MIGRATE_V1_DDL)
         .map_err(|_| sqlite_unavailable())?;
-    // `write_record` resets the record's embedding rows, so the table must
-    // exist before the replay even though this step only reaches v2.
+    // `write_record` resets the record's embedding rows, stores its source
+    // digest, and maintains the byte counters, so those v3/v4 structures
+    // must exist before the replay even though this step only reaches v2.
     transaction
         .execute_batch(EMBEDDINGS_DDL)
         .map_err(|_| sqlite_unavailable())?;
+    ensure_v4_structures(&transaction)?;
     for record in &records {
         write_record(&transaction, record)?;
     }
@@ -233,8 +340,9 @@ fn migrate_v1_schema(connection: &Connection) -> Result<(), MemoryStoreError> {
     if quick_check != "ok" {
         return Err(sqlite_unavailable());
     }
-    // The v1 migration produces an exact v2 database; the shared v2→v3 step
-    // then finishes the chain.
+    // The v1 migration produces a v2 database (carrying the later tables
+    // the replay needed); the shared v2→v3 and v3→v4 steps then finish the
+    // chain.
     finish_schema_transaction(transaction, V2_USER_VERSION)
 }
 

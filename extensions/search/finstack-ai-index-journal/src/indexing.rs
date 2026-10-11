@@ -325,6 +325,35 @@ fn write_entry(
     db.execute("INSERT INTO entries(scope,session,lane,entry,timestamp,hit_json,text,complete) VALUES(?1,?2,?3,?4,?5,?6,?7,?8) ON CONFLICT(scope,session,lane,entry) DO UPDATE SET timestamp=excluded.timestamp,hit_json=excluded.hit_json,text=excluded.text,complete=excluded.complete",params![scope,session.to_string(),lane.to_string(),id.to_string(),entry.timestamp.map(|t|t.to_string()),hit,entry.evidence.text.as_ref(),entry.evidence.complete]).map_err(sql_error)?;
     Ok(())
 }
+/// Read the checkpoints of every listed session in one statement.
+pub(crate) fn checkpoints(
+    db: &Connection,
+    scope: &str,
+    sessions: &[SessionId],
+) -> Result<std::collections::BTreeMap<SessionId, Checkpoint>, SearchError> {
+    let ids = serde_json::to_string(&sessions.iter().map(ToString::to_string).collect::<Vec<_>>())
+        .map_err(|_| SearchError::invalid("journal_sessions"))?;
+    let mut statement = db
+        .prepare(
+            "SELECT session,state FROM checkpoints WHERE scope=?1 AND session IN (SELECT value FROM json_each(?2))",
+        )
+        .map_err(sql_error)?;
+    let rows = statement
+        .query_map(params![scope, ids], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })
+        .map_err(sql_error)?;
+    let mut found = std::collections::BTreeMap::new();
+    for row in rows {
+        let (session, state) = row.map_err(sql_error)?;
+        let session =
+            SessionId::parse(&session).map_err(|_| SearchError::invalid("journal_checkpoint"))?;
+        let state =
+            serde_json::from_str(&state).map_err(|_| SearchError::invalid("journal_checkpoint"))?;
+        found.insert(session, state);
+    }
+    Ok(found)
+}
 fn checkpoint(
     db: &Connection,
     scope: &str,

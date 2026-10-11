@@ -147,6 +147,7 @@ pub finstack_ai_workflow_media_pipeline::MediaPipelineConfig::state: alloc::sync
 pub struct finstack_ai_workflow_media_pipeline::MediaPipelineDriver
 impl finstack_ai_workflow_media_pipeline::MediaPipelineDriver
 pub async fn finstack_ai_workflow_media_pipeline::MediaPipelineDriver::advance(&self, &finstack_ai_runtime::ports::tool::types::ToolCallContext, &str) -> core::result::Result<finstack_ai_workflow_media_pipeline::RenderState, finstack_ai_runtime::ports::tool::error::ToolError>
+pub async fn finstack_ai_workflow_media_pipeline::MediaPipelineDriver::release_claim(&self, &str, &str, &str) -> core::result::Result<finstack_ai_workflow_media_pipeline::RenderState, finstack_ai_runtime::ports::tool::error::ToolError>
 pub fn finstack_ai_workflow_media_pipeline::MediaPipelineDriver::status(&self, &str, &str) -> core::result::Result<finstack_ai_workflow_media_pipeline::RenderState, finstack_ai_runtime::ports::tool::error::ToolError>
 pub async fn finstack_ai_workflow_media_pipeline::MediaPipelineDriver::submit_plan(&self, &finstack_ai_runtime::ports::tool::types::ToolCallContext, &[u8]) -> core::result::Result<finstack_ai_workflow_media_pipeline::RenderState, finstack_ai_runtime::ports::tool::error::ToolError>
 pub fn finstack_ai_workflow_media_pipeline::MediaPipelineDriver::try_new(finstack_ai_workflow_media_pipeline::MediaPipelineConfig) -> core::result::Result<Self, finstack_ai_workflow_media_pipeline::PipelineError>
@@ -278,6 +279,7 @@ pub fn finstack_ai_workflow_media_pipeline::PlanTransition::serialize<__S>(&self
 impl<'de> serde_core::de::Deserialize<'de> for finstack_ai_workflow_media_pipeline::PlanTransition
 pub fn finstack_ai_workflow_media_pipeline::PlanTransition::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
 pub struct finstack_ai_workflow_media_pipeline::RenderState
+pub finstack_ai_workflow_media_pipeline::RenderState::failure: core::option::Option<alloc::string::String>
 pub finstack_ai_workflow_media_pipeline::RenderState::final_artifact: core::option::Option<finstack_ai_kernel::primitives::handles::ArtifactRef>
 pub finstack_ai_workflow_media_pipeline::RenderState::plan_digest: finstack_ai_kernel::primitives::digest::Digest
 pub finstack_ai_workflow_media_pipeline::RenderState::plan_json: alloc::string::String
@@ -364,11 +366,13 @@ impl finstack_ai_workflow_media_pipeline::RenderStateStore for finstack_ai_workf
 pub fn finstack_ai_workflow_media_pipeline::SqliteRenderStateStore::insert(&self, &finstack_ai_workflow_media_pipeline::RenderState) -> core::result::Result<(), finstack_ai_workflow_media_pipeline::StateError>
 pub fn finstack_ai_workflow_media_pipeline::SqliteRenderStateStore::load(&self, &str, &str) -> core::result::Result<core::option::Option<finstack_ai_workflow_media_pipeline::RenderState>, finstack_ai_workflow_media_pipeline::StateError>
 pub fn finstack_ai_workflow_media_pipeline::SqliteRenderStateStore::update(&self, &finstack_ai_workflow_media_pipeline::RenderState) -> core::result::Result<bool, finstack_ai_workflow_media_pipeline::StateError>
+pub const finstack_ai_workflow_media_pipeline::MAX_RELEASE_REASON_BYTES: usize
 pub const finstack_ai_workflow_media_pipeline::MEDIA_PIPELINE_BUDGET_EXCEEDED: &str
 pub const finstack_ai_workflow_media_pipeline::MEDIA_PIPELINE_CONFIG_INVALID: &str
 pub const finstack_ai_workflow_media_pipeline::MEDIA_PIPELINE_INVALID_ARGUMENTS: &str
 pub const finstack_ai_workflow_media_pipeline::MEDIA_PIPELINE_NOT_FOUND: &str
 pub const finstack_ai_workflow_media_pipeline::MEDIA_PIPELINE_PLAN_INVALID: &str
+pub const finstack_ai_workflow_media_pipeline::MEDIA_PIPELINE_SCHEMA_VERSION: &str
 pub const finstack_ai_workflow_media_pipeline::MEDIA_PIPELINE_STAGE_FAILED: &str
 pub const finstack_ai_workflow_media_pipeline::MEDIA_PIPELINE_STORE_FAILURE: &str
 pub trait finstack_ai_workflow_media_pipeline::RenderStateStore: core::marker::Send + core::marker::Sync

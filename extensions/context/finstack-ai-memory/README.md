@@ -38,7 +38,11 @@ without one, behavior is exactly the lexical composition described below.
     and as the default when no persistence is configured.
   - `SqliteMemoryStore` (feature `sqlite`) — FTS5/BM25 full-text retrieval,
     schema migrations, and idempotency-key tracking in a SQLite database.
-    Native-only.
+    Native-only. The file-owned schema is at `PRAGMA user_version` 4:
+    opening a v1, v2, or v3 database migrates it in place (additively from
+    v2 on; v4 adds a stored `source_digest` per record and a cached byte
+    counter row). A newer version than the build understands fails closed
+    with `memory_store_sqlite_schema_unsupported`.
 - **`reconcile_memory_embeddings(store, embedder, limit)`** — the bounded,
   idempotent drain that turns pending records into index rows (see
   [Semantic retrieval](#semantic-retrieval)). Its sibling
@@ -62,11 +66,14 @@ without one, behavior is exactly the lexical composition described below.
   embedding index best-effort after each write.
 - **`MemoryObserver`** — implements the `Observer` port for durable-eventual
   capture: it consumes committed run events, feeds them through a
-  `MemoryExtractor`, and `put`s each candidate with a
-  `capture:{run_id}:{event_id}:{candidate_index}` idempotency key. Observer
-  failure never changes run results, per the port contract. With an
-  embedder, each observed batch ends in the same best-effort index drain.
-- **`MemoryExtractor`** — the trait behind capture. `RuleBasedExtractor`
+  `MemoryExtractor`, and `put`s each candidate under an idempotency key
+  digested from its origin (run, event) and extractor-assigned id, so a
+  redelivered batch replays instead of duplicating. Observer failure never
+  changes run results, per the port contract. With an embedder, each
+  observed batch ends in the same best-effort index drain.
+- **`MemoryExtractor`** — the trait behind capture. Every `CandidateMemory`
+  carries a required `id` the extractor assigns deterministically from the
+  events it came from (there is no index-based fallback). `RuleBasedExtractor`
   (the default) is deliberately conservative and low-recall; aggressive or
   model-based extraction is an application choice via a custom extractor.
 

@@ -159,13 +159,13 @@ async fn failing_run_surfaces_the_stderr_tail() {
     assert!(tail.contains("sandbox denied write"), "tail was {tail:?}");
 }
 
-/// NFR-4: the prompt is passed after a literal `--`, so a prompt that looks
-/// like a flag is still a prompt. `codex_fake` rejects any other argv shape,
-/// so reaching a completed run proves the separator was honored.
+/// NFR-4: the prompt never reaches argv, so a prompt that looks like a flag
+/// is still a prompt. `codex_fake` exits nonzero if the stdin prompt also
+/// appears in argv, so a completed run echoing the text proves it.
 #[tokio::test]
-async fn flag_shaped_prompt_is_passed_after_the_separator() {
+async fn flag_shaped_prompt_is_never_parsed_as_a_flag() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let invoker = fake_invoker("success", dir.path());
+    let invoker = fake_invoker("echo", dir.path());
     let request = codex_request("--dangerously-bypass-approvals-and-sandbox");
     let run_id = request.locator().operation.run_id;
     invoker
@@ -174,7 +174,126 @@ async fn flag_shaped_prompt_is_passed_after_the_separator() {
         .expect("accepted");
     let report = wait_until_settled(&invoker, &run_id).await;
     assert_eq!(report.status, CodexRunStatus::Completed);
-    assert_eq!(report.exit_code, Some(0));
+    assert_eq!(
+        report.last_message.as_deref(),
+        Some("stdin:--dangerously-bypass-approvals-and-sandbox")
+    );
+}
+
+/// The prompt is written to the child's stdin, not placed in argv: the fake
+/// labels the channel it read the prompt from and refuses argv duplicates.
+#[tokio::test]
+async fn prompt_is_delivered_via_stdin_not_argv() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let invoker = fake_invoker("echo", dir.path());
+    let prompt = "refactor the parser\n\nkeep the tests green";
+    let request = codex_request(prompt);
+    let run_id = request.locator().operation.run_id;
+    invoker
+        .start_or_attach(child_context(), request)
+        .await
+        .expect("accepted");
+    let report = wait_until_settled(&invoker, &run_id).await;
+    assert_eq!(report.status, CodexRunStatus::Completed);
+    assert_eq!(
+        report.last_message.as_deref(),
+        Some(format!("stdin:{prompt}").as_str())
+    );
+}
+
+/// A prompt over the 256 KiB cap is rejected before any process is spawned.
+#[tokio::test]
+async fn oversized_prompt_is_rejected_before_spawn() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let invoker = fake_invoker("echo", dir.path());
+    let prompt = "x".repeat(256 * 1_024 + 1);
+    let request = codex_request(&prompt);
+    let run_id = request.locator().operation.run_id;
+    let error = invoker
+        .start_or_attach(child_context(), request)
+        .await
+        .expect_err("rejected");
+    assert!(matches!(error, AgentInvokeError::InvalidRequest { .. }));
+    assert!(error.to_string().contains("256 KiB"), "error was {error}");
+    assert!(
+        invoker
+            .accepted_locator(&child_context().parent, &run_id)
+            .is_none(),
+        "nothing was accepted or spawned"
+    );
+
+    // Exactly at the cap is still accepted and delivered intact over stdin,
+    // well past the pipe buffer size.
+    let request = codex_request(&"y".repeat(256 * 1_024));
+    let run_id = request.locator().operation.run_id;
+    invoker
+        .start_or_attach(child_context(), request)
+        .await
+        .expect("accepted at the cap");
+    let report = wait_until_settled(&invoker, &run_id).await;
+    assert_eq!(report.status, CodexRunStatus::Completed);
+    assert_eq!(report.last_message.as_deref(), Some("stdin-len:262144"));
+}
+
+/// Cancel kills the child's whole process group, not just the leader: a
+/// grandchild the fake spawned (standing in for a command Codex ran) must
+/// be gone afterwards. On the old leader-only `start_kill` path the
+/// orphaned `sleep` would survive.
+#[cfg(unix)]
+#[tokio::test]
+async fn cancel_terminates_process_group() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let invoker = fake_invoker("hang-grandchild", dir.path());
+    let request = codex_request("spawn a long command");
+    let run_id = request.locator().operation.run_id;
+    let handle = invoker
+        .start_or_attach(child_context(), request)
+        .await
+        .expect("accepted");
+
+    let start = Instant::now();
+    let grandchild_pid = loop {
+        let message = invoker
+            .accepted_locator(&child_context().parent, &run_id)
+            .and_then(|locator| invoker.run_status(&locator))
+            .and_then(|report| report.last_message);
+        if let Some(pid) = message {
+            break pid;
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(30),
+            "fake never reported its grandchild"
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    };
+    assert!(process_is_alive(&grandchild_pid), "grandchild is running");
+
+    invoker.cancel(&handle.locator).await.expect("cancelled");
+    let report = wait_until_settled(&invoker, &run_id).await;
+    assert_eq!(report.status, CodexRunStatus::Cancelled);
+
+    // The grandchild is reparented and reaped asynchronously after the
+    // group kill, so poll briefly instead of asserting once.
+    let start = Instant::now();
+    while process_is_alive(&grandchild_pid) {
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "grandchild {grandchild_pid} survived the group kill"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+/// `true` while `pid` names a live (non-zombie) process.
+#[cfg(unix)]
+fn process_is_alive(pid: &str) -> bool {
+    let output = std::process::Command::new("ps")
+        .args(["-o", "stat=", "-p", pid])
+        .output()
+        .expect("ps");
+    let state = String::from_utf8_lossy(&output.stdout);
+    let state = state.trim();
+    !state.is_empty() && !state.starts_with('Z')
 }
 
 #[tokio::test]

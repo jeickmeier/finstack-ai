@@ -61,10 +61,9 @@ use finstack_ai_test::{
     ScriptedModel, ScriptedModelAction, ScriptedModelPlan, ScriptedToolAction, ScriptedToolPlan,
     ScriptedToolset,
 };
-use finstack_ai_workflow_local::MemoryCronStore;
 use finstack_ai_workflow_worker::{
-    FireStore, InboxStore, MemoryWorkerStore, PortsFactory, WakeIndexStore, WorkerBuilder,
-    WorkerError, park_for_wake,
+    InboxStore, MemoryWorkerStore, PortsFactory, WakeIndexStore, WorkerBuilder, WorkerError,
+    park_for_wake,
 };
 
 use crate::helpers::{
@@ -486,9 +485,7 @@ async fn deferred_completion_delivered_while_down_resumes_on_tick() {
 
     let worker = WorkerBuilder::new(
         Arc::clone(&journal) as Arc<dyn JournalStore>,
-        Arc::new(MemoryCronStore::new()),
         Arc::clone(&store) as Arc<dyn WakeIndexStore>,
-        Arc::clone(&store) as Arc<dyn FireStore>,
         Arc::clone(&store) as Arc<dyn InboxStore>,
     )
     .clock(clock.clone())
@@ -740,9 +737,7 @@ async fn interaction_resolution_delivered_while_down_resumes_on_tick() {
 
     let worker = WorkerBuilder::new(
         Arc::clone(&journal) as Arc<dyn JournalStore>,
-        Arc::new(MemoryCronStore::new()),
         Arc::clone(&store) as Arc<dyn WakeIndexStore>,
-        Arc::clone(&store) as Arc<dyn FireStore>,
         Arc::clone(&store) as Arc<dyn InboxStore>,
     )
     .clock(clock.clone())

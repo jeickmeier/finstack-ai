@@ -33,6 +33,22 @@ need new tools or resources re-resolve the agent. The crate emits a
 non-semantic `McpListChangedObserver` event and does not change the
 lock.
 
+Server-initiated requests. A JSON-RPC request from the server (foreign
+id plus `method`, including a real `sampling/createMessage` carrying a
+server id) is answered inline on stdio with `-32601` and surfaced to the
+`McpListChangedObserver` as `client/request_rejected:<method>`; the
+pending response is still paired. Streamable HTTP skips such frames.
+At most 32 server requests and 32 notifications are accepted per round
+trip; the retained notification queue holds 256 entries.
+
+Transport lifecycle. A framing, i/o, or timeout failure poisons a stdio
+transport; later calls fail with `MCP_TRANSPORT_POISONED` (distinct
+from `MCP_PROTOCOL_VIOLATION`, which names the malformed frame).
+`Toolset::reconstruct` and `ContextProvider::reconstruct` respawn the
+server from the retained `StdioConfig` / `HttpConfig`. Dropping a stdio
+transport terminates the server's whole process group (or Job Object
+when confined).
+
 An MCP server is not an application-instruction authority. Every MCP
 resource provider sets `trusted_application_instructions` to `false`.
 

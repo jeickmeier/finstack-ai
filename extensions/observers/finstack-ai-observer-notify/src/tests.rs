@@ -419,6 +419,78 @@ fn webhook_sink_rejects_non_http_urls() {
     }
 }
 
+fn sink_error(url: &str) -> Option<super::NotifyObserverError> {
+    super::WebhookSink::try_new(SecretString::try_new(url).expect("secret")).err()
+}
+
+fn configuration(reason: &'static str) -> super::NotifyObserverError {
+    super::NotifyObserverError::Configuration { reason }
+}
+
+#[test]
+fn plaintext_sink_requires_loopback() {
+    for ok in [
+        "http://localhost:8080/hook",
+        "http://127.0.0.1:9/hook",
+        "http://[::1]:9/hook",
+        "https://hooks.example.com/T000/SECRETPART",
+        "https://hooks.example.com:8443/hook",
+    ] {
+        assert_eq!(sink_error(ok), None, "{ok}");
+    }
+    for plaintext in [
+        "http://hooks.example.com/hook",
+        "http://10.0.0.5/hook",
+        "http://127.77.1.2/hook",
+    ] {
+        assert_eq!(
+            sink_error(plaintext),
+            Some(configuration("plaintext_http_forbidden")),
+            "{plaintext}"
+        );
+    }
+    assert_eq!(
+        sink_error("ftp://x.example/hook"),
+        Some(configuration("invalid_sink_url_scheme"))
+    );
+    assert_eq!(
+        sink_error("not a url"),
+        Some(configuration("invalid_sink_url"))
+    );
+}
+
+#[test]
+fn sink_url_rejects_userinfo_query_fragment() {
+    assert_eq!(
+        sink_error("https://user:pw@hooks.example.com/hook"),
+        Some(configuration("userinfo_forbidden"))
+    );
+    assert_eq!(
+        sink_error("https://user@hooks.example.com/hook"),
+        Some(configuration("userinfo_forbidden"))
+    );
+    assert_eq!(
+        sink_error("https://hooks.example.com/hook?token=SECRET"),
+        Some(configuration("query_forbidden"))
+    );
+    assert_eq!(
+        sink_error("https://hooks.example.com/hook?"),
+        Some(configuration("query_forbidden"))
+    );
+    assert_eq!(
+        sink_error("https://hooks.example.com/hook#frag"),
+        Some(configuration("fragment_forbidden"))
+    );
+    // The Slack sink shares the same vetting.
+    assert_eq!(
+        super::SlackSink::try_new(
+            SecretString::try_new("https://hooks.slack.com/services/T0/B0/x?x=1").expect("secret")
+        )
+        .err(),
+        Some(configuration("query_forbidden"))
+    );
+}
+
 #[tokio::test]
 async fn webhook_sink_posts_notification_json_to_loopback() {
     let (address, received) = tests_support::spawn_loopback_http(200).await;

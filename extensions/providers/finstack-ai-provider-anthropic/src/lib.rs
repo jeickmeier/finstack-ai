@@ -25,7 +25,6 @@ mod config;
 mod error;
 mod provider;
 mod request;
-mod sse;
 
 /// Default Anthropic Messages API version header value.
 pub const ANTHROPIC_MESSAGES_VERSION: &str = "2023-06-01";

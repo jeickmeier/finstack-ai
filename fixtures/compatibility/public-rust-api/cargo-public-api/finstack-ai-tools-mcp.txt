@@ -116,6 +116,7 @@ pub const finstack_ai_tools_mcp::MCP_SERVER_NOT_ALLOWLISTED: &str
 pub const finstack_ai_tools_mcp::MCP_SUBSCRIBE_UNKNOWN: &str
 pub const finstack_ai_tools_mcp::MCP_TIMEOUT: &str
 pub const finstack_ai_tools_mcp::MCP_TRANSPORT_ERROR: &str
+pub const finstack_ai_tools_mcp::MCP_TRANSPORT_POISONED: &str
 pub trait finstack_ai_tools_mcp::McpListChangedObserver: core::marker::Send + core::marker::Sync
 pub fn finstack_ai_tools_mcp::McpListChangedObserver::on_list_changed(&self, &str)
 pub fn finstack_ai_tools_mcp::interaction_request_from_tool_error(&finstack_ai_runtime::ports::tool::error::ToolError) -> core::option::Option<finstack_ai_kernel::effects::interaction::InteractionRequest>

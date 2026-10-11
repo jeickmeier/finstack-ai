@@ -120,6 +120,24 @@ and graph traversal. Semantic memory search/rebuild conservatively admits the
 whole live scope at the configured embedding dimensionality before embedding.
 The [scale report](search-scale.md) records the tested envelope and limitations.
 
+## Upgrade persisted stores in place
+
+SQLite journal files are upgraded in place from `user_version` 1 to 2 on first
+open by a 2.0 binary (per-session footprint counters are backfilled). Memory
+SQLite databases upgrade from `user_version` 3 to 4 on first open (a
+`source_digest` column and a `memory_counters` row are backfilled). Both
+migrations are one-way and lose no data; back up `*.sqlite`, `*-wal`, and
+`*-shm` together first, because a pre-2.0 binary refuses the upgraded file with
+`sqlite_schema_unsupported` or `memory_store_sqlite_schema_unsupported`.
+`sqlite_ops migrate` accepts journal files at 0, 1, or 2.
+
+Media-pipeline render tables gain a `finstack_workflow_media_pipeline_schema`
+singleton (v1); existing unversioned tables are adopted without action.
+Artifact ownership moves from the envelope header to a sidecar object seeded
+lazily on first pin, unpin, or garbage-collection pass; see the
+`finstack-ai-store-artifact` README section "Ownership sidecar and blob index".
+Custom `MemoryExtractor` implementations must now set `CandidateMemory.id`.
+
 ## Validate the migrated application
 
 Run `mise run test-examples`, `test-linked-features`, `test-durable-host`,

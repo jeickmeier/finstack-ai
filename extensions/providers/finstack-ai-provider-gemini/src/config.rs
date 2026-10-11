@@ -2,10 +2,10 @@
 
 use core::fmt;
 use std::collections::BTreeSet;
-use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
+use finstack_ai_provider_wire::{BaseUrlError, validate_request_timeout, validate_stream_limits};
 use finstack_ai_runtime::ports::model::{
     Authentication, CredentialReference, CredentialStore, InputCapabilities, MediaResolver,
     ModelCapabilities, ModelContextProfile, ModelError, ModelName, SecretString,
@@ -135,7 +135,9 @@ impl GeminiConfig {
     ///
     /// # Errors
     ///
-    /// Rejects a URL with credentials, query, fragment, or a non-HTTP scheme.
+    /// Rejects a URL with credentials, query, fragment, a non-HTTP scheme, a
+    /// plaintext non-loopback host, or a path (the provider owns the whole
+    /// request path, so a configured prefix would be silently dropped).
     pub fn try_new(base_url: impl AsRef<str>) -> Result<Self, ModelError> {
         let base_url = base_url.as_ref();
         validate_base_url(base_url)?;
@@ -156,8 +158,8 @@ impl GeminiConfig {
     ///
     /// # Errors
     ///
-    /// Rejects an invalid base URL, or an empty/oversized/NUL-bearing
-    /// `project` or `location`.
+    /// Rejects an invalid base URL (same rules as [`GeminiConfig::try_new`]),
+    /// or an empty/oversized/NUL-bearing `project` or `location`.
     pub fn try_new_vertex(
         base_url: impl AsRef<str>,
         project: impl AsRef<str>,
@@ -238,7 +240,7 @@ impl GeminiConfig {
     /// Returns a configuration error when the timeout is zero or above one
     /// hour, matching every other provider.
     pub fn with_request_timeout(mut self, timeout: Duration) -> Result<Self, ModelError> {
-        if timeout.is_zero() || timeout > Duration::from_hours(1) {
+        if !validate_request_timeout(timeout) {
             return Err(config_error("provider request timeout is invalid"));
         }
         self.request_timeout = timeout;
@@ -246,6 +248,11 @@ impl GeminiConfig {
     }
 
     /// Set raw SSE event and total response byte limits.
+    ///
+    /// The values are not checked here; [`GeminiProvider::try_new`] rejects a
+    /// zero event limit or a stream limit below the event limit.
+    ///
+    /// [`GeminiProvider::try_new`]: crate::GeminiProvider::try_new
     #[must_use]
     pub fn with_stream_limits(mut self, max_event_bytes: usize, max_stream_bytes: usize) -> Self {
         self.max_event_bytes = max_event_bytes;
@@ -340,6 +347,8 @@ impl GeminiConfig {
             let mut segments = url
                 .path_segments_mut()
                 .map_err(|()| config_error("provider base URL cannot contain path segments"))?;
+            // `validate_base_url` already rejected any non-root path, so this
+            // only drops the trailing empty segment of a `/` base.
             segments.clear();
             match &self.endpoint {
                 GeminiEndpoint::GenerativeLanguage => {
@@ -367,10 +376,10 @@ impl GeminiConfig {
     }
 
     pub(crate) fn validate(&self) -> Result<(), ModelError> {
-        if self.request_timeout.is_zero() || self.request_timeout > Duration::from_hours(1) {
+        if !validate_request_timeout(self.request_timeout) {
             return Err(config_error("provider request timeout is invalid"));
         }
-        if self.max_event_bytes == 0 || self.max_stream_bytes < self.max_event_bytes {
+        if !validate_stream_limits(self.max_event_bytes, self.max_stream_bytes) {
             return Err(config_error("provider stream limits are invalid"));
         }
         Ok(())
@@ -378,28 +387,16 @@ impl GeminiConfig {
 }
 
 fn validate_base_url(value: &str) -> Result<(), ModelError> {
-    let url = Url::parse(value).map_err(|_| config_error("provider base URL is invalid"))?;
-    if !matches!(url.scheme(), "http" | "https")
-        || !url.username().is_empty()
-        || url.password().is_some()
-        || url.query().is_some()
-        || url.fragment().is_some()
-    {
-        return Err(config_error(
-            "provider base URL contains forbidden components",
-        ));
-    }
-    if url.scheme() == "http"
-        && !url
-            .host_str()
-            .and_then(|host| host.trim_matches(['[', ']']).parse::<IpAddr>().ok())
-            .is_some_and(|address| address.is_loopback())
-    {
-        return Err(config_error(
-            "plaintext provider base URL must use a loopback IP",
-        ));
-    }
-    Ok(())
+    finstack_ai_provider_wire::validate_base_url(value).map_err(|error| {
+        config_error(match error {
+            BaseUrlError::Invalid => "provider base URL is invalid",
+            BaseUrlError::ForbiddenComponents => "provider base URL contains forbidden components",
+            BaseUrlError::PlaintextNotLoopback => {
+                "plaintext provider base URL must use a loopback IP"
+            }
+            BaseUrlError::NonRootPath => "Gemini base URL must not carry a path",
+        })
+    })
 }
 
 fn validate_label(value: &str) -> Result<&str, ModelError> {
@@ -625,6 +622,21 @@ impl GeminiModelConfig {
         Ok(())
     }
 
+    /// Check the context profile after the infallible `with_*` builders ran.
+    ///
+    /// `with_reserved_output_tokens` and `with_provider_overhead_tokens` cannot
+    /// fail, so the profile is re-checked here when the model enters a
+    /// provider catalog.
+    pub(crate) fn validate(&self) -> Result<(), ModelError> {
+        validate_context_profile(
+            self.hard_input_bytes,
+            self.context_window_tokens,
+            self.max_output_tokens,
+            self.reserved_output_tokens,
+            self.provider_overhead_tokens,
+        )
+    }
+
     pub(crate) const fn name(&self) -> &ModelName {
         &self.name
     }
@@ -669,18 +681,14 @@ fn validate_context_profile(
     reserved_output_tokens: u64,
     provider_overhead_tokens: u64,
 ) -> Result<(), ModelError> {
-    if hard_input_bytes == 0
-        || context_window_tokens == 0
-        || max_output_tokens == 0
-        || reserved_output_tokens == 0
-        || max_output_tokens > context_window_tokens
-        || reserved_output_tokens
-            .checked_add(provider_overhead_tokens)
-            .is_none_or(|total| total > context_window_tokens)
-    {
-        return Err(config_error("provider model context profile is invalid"));
-    }
-    Ok(())
+    finstack_ai_provider_wire::validate_context_profile(
+        hard_input_bytes,
+        context_window_tokens,
+        max_output_tokens,
+        reserved_output_tokens,
+        provider_overhead_tokens,
+    )
+    .map_err(|_| config_error("provider model context profile is invalid"))
 }
 
 #[cfg(test)]
@@ -742,6 +750,47 @@ mod tests {
             assert!(GeminiConfig::try_new(url).is_ok());
         }
         assert!(GeminiConfig::try_new("https://example.test").is_ok());
+    }
+
+    #[test]
+    fn base_url_rejects_non_root_path() {
+        for url in [
+            "https://example.test/v1beta",
+            "https://example.test/v1beta/",
+            "http://127.0.0.1:8080/proxy",
+        ] {
+            let error = GeminiConfig::try_new(url).expect_err("path-bearing base URL");
+            assert_eq!(error.code(), crate::error::GEMINI_CONFIG_INVALID);
+            assert_eq!(error.message(), "Gemini base URL must not carry a path");
+
+            let error = GeminiConfig::try_new_vertex(url, "proj-1", "us-central1")
+                .expect_err("path-bearing vertex base URL");
+            assert_eq!(error.code(), crate::error::GEMINI_CONFIG_INVALID);
+            assert_eq!(error.message(), "Gemini base URL must not carry a path");
+        }
+        for url in ["https://example.test", "https://example.test/"] {
+            assert!(GeminiConfig::try_new(url).is_ok(), "{url}");
+        }
+    }
+
+    #[test]
+    fn vertex_base_url_still_accepted() {
+        let model = ModelName::try_new("gemini-2.5-pro").expect("model");
+        for base in [
+            "https://us-central1-aiplatform.googleapis.com",
+            "https://us-central1-aiplatform.googleapis.com/",
+            "https://aiplatform.googleapis.com",
+        ] {
+            let config =
+                GeminiConfig::try_new_vertex(base, "proj-1", "global").expect("vertex config");
+            let url = config.model_url(&model).expect("url");
+            assert!(
+                url.path()
+                    .starts_with("/v1/projects/proj-1/locations/global/publishers/google/models/"),
+                "{url}"
+            );
+            assert!(!url.path().starts_with("//"), "{url}");
+        }
     }
 
     #[test]

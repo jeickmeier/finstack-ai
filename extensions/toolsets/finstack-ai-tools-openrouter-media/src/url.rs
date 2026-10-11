@@ -1,41 +1,10 @@
 //! Caller-supplied download URL validation and address-pinned fetches.
 //!
-//! Backed by `finstack-ai-net-guard`'s vetted-egress primitives: URL
-//! parsing/vetting (`parse_and_vet_url`), a synchronous literal-destination
-//! check (`reject_literal_destination`), DNS resolve-and-pin
-//! (`resolve_and_pin`), a redirect-disabled address-pinned client
-//! (`pinned_client`), and a bounded body read (`read_body_bounded`). This
-//! replaces the crate's former private copy of the same pipeline.
-//!
-//! Two behaviors are adopted from net-guard beyond legacy parity, both
-//! strictly tightening and controller-ruled safe:
-//!
-//! - Literal or resolved unspecified (`0.0.0.0`), broadcast, and multicast
-//!   addresses are now denied. No legitimate media host is `0.0.0.0` or a
-//!   multicast address.
-//! - Outbound env/system proxies are disabled (`.no_proxy()`, applied by
-//!   `pinned_client`). A proxy would receive the unpinned hostname and
-//!   re-resolve it itself, bypassing the address pin below (security
-//!   finding F-1).
-//!
-//! Everything else is behavior-preserving, including a non-standard
-//! `https` port: [`download_url_policy`] sets
-//! `allow_nonstandard_https_port: true`, restoring the crate's prior
-//! any-port behavior (net-guard's own default is 443-only, the right
-//! choice for a model-supplied URL, but a presigned download URL against a
-//! self-hosted object store on a custom port is a normal shape this crate
-//! has always accepted).
-//!
-//! One deliberate, benign relaxation: the crate's former check rejected
-//! `@` anywhere in the URL after the scheme, which also rejected a
-//! legitimate query string like `?X-Amz-Credential=key@example` — a `@`
-//! after the authority cannot influence host parsing, so that was an
-//! over-broad substring scan, not a security boundary. `parse_and_vet_url`
-//! instead rejects userinfo and fragment structurally
-//! (`Url::username`/`password`/`fragment`), the correct authority-scoped
-//! equivalent: an actual `user:pw@host` userinfo component is still
-//! rejected, but a `@` legitimately embedded in a query string (as in
-//! presigned S3/GCS URLs) is now accepted.
+//! Policy: a model-supplied `audio_url` must be `https` (any port), carry no
+//! userinfo or fragment, and must not resolve to a loopback, private,
+//! link-local, or otherwise forbidden destination; plaintext `http` to
+//! loopback is admitted only in this crate's own test build, never in
+//! production, regardless of where the toolset endpoint points.
 
 use finstack_ai_kernel::ErrorCategory;
 use finstack_ai_net_guard::{
@@ -45,8 +14,8 @@ use finstack_ai_net_guard::{
 use finstack_ai_runtime::ports::tool::{ToolCallContext, ToolError};
 
 use crate::http::{
-    REQUEST_TIMEOUT, deadline_elapsed, endpoint_rejected, invalid_arguments, timeout_error,
-    tool_error, wait_deadline,
+    REQUEST_TIMEOUT, check_interrupted, endpoint_rejected, invalid_arguments, timeout_error,
+    tool_error,
 };
 
 /// Sent when fetching caller-supplied audio, which is an arbitrary host
@@ -59,9 +28,16 @@ const DOWNLOAD_USER_AGENT: &str = concat!(
 
 pub(crate) const MAX_AUDIO_DOWNLOAD_BYTES: usize = 25 * 1_048_576;
 
-fn download_url_policy(endpoint_is_loopback: bool) -> UrlPolicy {
+/// The vetting policy for a model-supplied download URL.
+///
+/// `allow_loopback_http` is a compile-time property of the build, not a
+/// runtime property of the configured endpoint: scripted fixtures in this
+/// crate's tests serve audio from a loopback listener, but a production
+/// build never fetches plaintext audio even when the toolset itself is
+/// pointed at a loopback endpoint.
+pub(crate) fn download_url_policy(allow_loopback_fixtures: bool) -> UrlPolicy {
     UrlPolicy {
-        allow_loopback_http: endpoint_is_loopback,
+        allow_loopback_http: allow_loopback_fixtures,
         allow_nonstandard_https_port: true,
     }
 }
@@ -97,11 +73,16 @@ fn map_net_guard_error(error: NetGuardError) -> ToolError {
 }
 
 /// Vet a caller-supplied download URL before any network activity.
-pub(crate) fn validate_download_url(
+pub(crate) fn validate_download_url(value: &str) -> Result<VettedUrl, ToolError> {
+    validate_download_url_with(value, download_url_policy(cfg!(test)))
+}
+
+/// [`validate_download_url`] under an explicit policy, so tests can assert
+/// the production policy from inside the test build.
+pub(crate) fn validate_download_url_with(
     value: &str,
-    endpoint_is_loopback: bool,
+    policy: UrlPolicy,
 ) -> Result<VettedUrl, ToolError> {
-    let policy = download_url_policy(endpoint_is_loopback);
     let vetted = parse_and_vet_url(value, &policy).map_err(|_| invalid_download_url())?;
     reject_literal_destination(&vetted, &policy).map_err(|_| invalid_download_url())?;
     Ok(vetted)
@@ -109,18 +90,14 @@ pub(crate) fn validate_download_url(
 
 pub(crate) async fn download_bytes(
     url: &str,
-    endpoint_is_loopback: bool,
     ctx: &ToolCallContext,
     cap: usize,
 ) -> Result<Vec<u8>, ToolError> {
-    let vetted = validate_download_url(url, endpoint_is_loopback)?;
-    if ctx.run.cancellation.is_cancelled() || deadline_elapsed(ctx.run.deadline) {
-        return Err(timeout_error());
-    }
+    let vetted = validate_download_url(url)?;
+    check_interrupted(ctx)?;
     let resolve = resolve_and_pin(&vetted, &SystemResolver);
     let addr = tokio::select! {
-        () = ctx.run.cancellation.cancelled() => return Err(timeout_error()),
-        () = wait_deadline(ctx.run.deadline) => return Err(timeout_error()),
+        () = ctx.run.interrupted() => return Err(timeout_error()),
         result = resolve => result.map_err(map_net_guard_error)?,
     };
     let client = pinned_client(&vetted, addr, REQUEST_TIMEOUT).map_err(map_net_guard_error)?;
@@ -131,8 +108,7 @@ pub(crate) async fn download_bytes(
         .header(reqwest::header::USER_AGENT, DOWNLOAD_USER_AGENT)
         .send();
     let response = tokio::select! {
-        () = ctx.run.cancellation.cancelled() => return Err(timeout_error()),
-        () = wait_deadline(ctx.run.deadline) => return Err(timeout_error()),
+        () = ctx.run.interrupted() => return Err(timeout_error()),
         result = send => result.map_err(|_| {
             tool_error(
                 crate::config::OPENROUTER_MEDIA_TRANSPORT_FAILED,
@@ -151,9 +127,32 @@ pub(crate) async fn download_bytes(
         cap,
         BodyReadInterrupt::new(
             async move { cancellation.cancelled().await },
-            wait_deadline(ctx.run.deadline),
+            ctx.run.wait_deadline(),
         ),
     )
     .await
     .map_err(map_net_guard_error)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{download_url_policy, validate_download_url, validate_download_url_with};
+
+    #[test]
+    fn download_url_plaintext_loopback_is_rejected_in_production_policy() {
+        // The test build opts loopback fixtures in; production never does.
+        assert_eq!(
+            download_url_policy(cfg!(test)).allow_loopback_http,
+            cfg!(test)
+        );
+        let production = download_url_policy(false);
+        assert!(!production.allow_loopback_http);
+        assert!(production.allow_nonstandard_https_port);
+        validate_download_url_with("http://127.0.0.1/a.mp3", production)
+            .expect_err("production policy must reject plaintext loopback audio");
+        validate_download_url_with("http://localhost/a.mp3", production)
+            .expect_err("production policy must reject plaintext localhost audio");
+        // An off-loopback plaintext URL is rejected under both policies.
+        validate_download_url("http://8.8.8.8/a.mp3").expect_err("plaintext off loopback");
+    }
 }

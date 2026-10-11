@@ -7,10 +7,11 @@ authorized working-directory handle, a deadline/cancellation timeout, and a
 hard output-byte cap.
 
 The default runner is the labeled unconfined in-process `std::process`
-path plus rustix no-follow cwd authorization. Hosts may inject a
-`CommandSandbox` adapter or call `ShellToolset::try_with_confinement` to
-consume the runtime `ProcessConfinement` service (Linux Landlock +
-`no_new_privs`, macOS Seatbelt, Windows restricted token + Job Object).
+path plus rustix no-follow cwd authorization. Hosts call
+`ShellToolset::try_with_confinement` to consume the runtime
+`ProcessConfinement` service (Linux Landlock + `no_new_privs`, macOS
+Seatbelt, Windows restricted token + Job Object). There is no injectable
+sandbox adapter; the runner is always the in-crate process runner.
 Missing primitives fail closed and never spawn unconfined. This crate
 does not ship a remote/E2B sandbox or `libloading`. Redirects and
 network are not granted. Host secrets are never copied into the child

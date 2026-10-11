@@ -4,7 +4,7 @@
 //! [`LocalArtifactStore`](crate::LocalArtifactStore) surface.
 
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::driver::{
@@ -24,6 +24,7 @@ struct StoredObject {
     scope_digest: Digest,
     content: Bytes,
     content_digest: Digest,
+    media_type: Arc<str>,
 }
 
 fn prepare_object(
@@ -51,6 +52,7 @@ fn prepare_object(
         scope_digest,
         content: bytes,
         content_digest,
+        media_type: Arc::clone(&metadata.media_type),
     };
     let object_ref = ObjectRef {
         key,
@@ -70,6 +72,7 @@ pub struct FakeObjectDriver {
     limits: ObjectStoreLimits,
     objects: Mutex<BTreeMap<String, StoredObject>>,
     poison_next_get: AtomicBool,
+    list_calls: AtomicUsize,
 }
 
 impl Default for FakeObjectDriver {
@@ -78,6 +81,7 @@ impl Default for FakeObjectDriver {
             limits: ObjectStoreLimits::default(),
             objects: Mutex::new(BTreeMap::new()),
             poison_next_get: AtomicBool::new(false),
+            list_calls: AtomicUsize::new(0),
         }
     }
 }
@@ -91,6 +95,12 @@ impl FakeObjectDriver {
     /// this is fake-only surface, not part of the trait contract).
     pub fn fail_next_get_with_integrity(&self) {
         self.poison_next_get.store(true, Ordering::SeqCst);
+    }
+
+    /// Number of `list` calls so far: lets tests prove an index lookup
+    /// never fell back to the listing scan.
+    pub fn list_calls(&self) -> usize {
+        self.list_calls.load(Ordering::SeqCst)
     }
 
     fn lock(
@@ -146,6 +156,33 @@ impl ObjectDriver for FakeObjectDriver {
                 });
             }
             Ok(stored.content.clone())
+        })();
+        Box::pin(async move { result })
+    }
+
+    fn head(
+        &self,
+        scope: ObjectScope,
+        key: ObjectKey,
+    ) -> PortFuture<Result<ObjectRef, ObjectError>> {
+        let result = (|| {
+            let scope_digest = scope.digest()?;
+            let physical = physical_object_key(None, &scope_digest, &key);
+            let objects = self.lock()?;
+            let stored = objects.get(&physical).ok_or(ObjectError::NotFound)?;
+            if stored.scope_digest != scope_digest {
+                return Err(ObjectError::ScopeMismatch {
+                    expected: scope_digest,
+                    actual: stored.scope_digest,
+                });
+            }
+            Ok(ObjectRef {
+                key,
+                scope_digest,
+                content_digest: stored.content_digest,
+                length: stored.content.len() as u64,
+                media_type: Arc::clone(&stored.media_type),
+            })
         })();
         Box::pin(async move { result })
     }
@@ -227,6 +264,7 @@ impl ObjectDriver for FakeObjectDriver {
         prefix: Option<ObjectKey>,
         page: PageToken,
     ) -> PortFuture<Result<ObjectPage, ObjectError>> {
+        self.list_calls.fetch_add(1, Ordering::SeqCst);
         let result = (|| {
             let scope_digest = scope.digest()?;
             let hex = scope_digest.to_hex();
@@ -288,6 +326,102 @@ impl ObjectDriver for FakeObjectDriver {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Shared contract suite
-// ---------------------------------------------------------------------------
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use finstack_ai_kernel::{Metadata, Sensitivity};
+
+    fn scope() -> ObjectScope {
+        ObjectScope {
+            tenant_scope: Arc::from("tenant-a"),
+            session_id: None,
+            run_id: None,
+            sensitivity: Sensitivity::Internal,
+        }
+    }
+
+    fn metadata() -> ObjectMetadata {
+        ObjectMetadata {
+            media_type: Arc::from("application/octet-stream"),
+            name: None,
+            attributes: Metadata::empty(),
+        }
+    }
+
+    async fn seeded() -> (FakeObjectDriver, ObjectKey) {
+        let driver = FakeObjectDriver::default();
+        let key = ObjectKey::try_new("conditional").expect("key");
+        driver
+            .put(scope(), key.clone(), Bytes::from_static(b"v1"), metadata())
+            .await
+            .expect("seed");
+        (driver, key)
+    }
+
+    #[tokio::test]
+    async fn replace_if_digest_mismatch_is_conflict() {
+        let (driver, key) = seeded().await;
+        let wrong = Digest::blob_content(b"not v1");
+        let error = driver
+            .replace_if_digest(
+                scope(),
+                key.clone(),
+                wrong,
+                Bytes::from_static(b"v2"),
+                metadata(),
+            )
+            .await
+            .expect_err("must conflict");
+        assert_eq!(error, ObjectError::Conflict);
+        assert_eq!(
+            driver.get(scope(), key.clone()).await.expect("get"),
+            Bytes::from_static(b"v1")
+        );
+        driver
+            .replace_if_digest(
+                scope(),
+                key,
+                Digest::blob_content(b"v1"),
+                Bytes::from_static(b"v2"),
+                metadata(),
+            )
+            .await
+            .expect("matching digest replaces");
+    }
+
+    #[tokio::test]
+    async fn delete_if_digest_mismatch_is_conflict() {
+        let (driver, key) = seeded().await;
+        let error = driver
+            .delete_if_digest(scope(), key.clone(), Digest::blob_content(b"not v1"))
+            .await
+            .expect_err("must conflict");
+        assert_eq!(error, ObjectError::Conflict);
+        driver
+            .get(scope(), key.clone())
+            .await
+            .expect("still stored");
+        driver
+            .delete_if_digest(scope(), key.clone(), Digest::blob_content(b"v1"))
+            .await
+            .expect("matching digest deletes");
+        assert_eq!(
+            driver.get(scope(), key).await.expect_err("gone"),
+            ObjectError::NotFound
+        );
+    }
+
+    #[tokio::test]
+    async fn put_if_absent_existing_is_conflict() {
+        let (driver, key) = seeded().await;
+        let error = driver
+            .put_if_absent(scope(), key.clone(), Bytes::from_static(b"v2"), metadata())
+            .await
+            .expect_err("must conflict");
+        assert_eq!(error, ObjectError::Conflict);
+        assert_eq!(
+            driver.get(scope(), key).await.expect("get"),
+            Bytes::from_static(b"v1")
+        );
+    }
+}

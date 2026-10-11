@@ -122,33 +122,42 @@ impl DocumentSearchSource {
         let config = self.config.clone();
         let scope_digest = self.scope_digest.clone();
         let chunker_digest = self.chunker_digest;
+        // Parsing and chunking are CPU-bound and never hold the index worker;
+        // the receipt is re-checked inside the write transaction.
+        let (input, report, chunks) = tokio::task::spawn_blocking(move || {
+            let parsed = extract(
+                &bytes,
+                input.artifact.blob().media_type(),
+                &config.parse_limits,
+            )?;
+            let chunks = chunk_document(&parsed.markdown, config.chunker, config.max_chunks)?;
+            let report = DocumentIndexReport {
+                artifact: input.artifact.clone(),
+                chunker_digest,
+                parsed_digest: configuration_digest("document-parsed-text", &parsed.markdown)?,
+                chunks: chunks.len(),
+                status: if parsed.requires_ocr {
+                    DocumentStatus::OcrRequired
+                } else if parsed.truncated {
+                    DocumentStatus::Truncated
+                } else {
+                    DocumentStatus::Indexed
+                },
+                requires_ocr: parsed.requires_ocr,
+                truncated: parsed.truncated,
+                page_count: parsed.page_count,
+            };
+            Ok::<_, SearchError>((input, report, chunks))
+        })
+        .await
+        .map_err(|_| SearchError::SearchUnavailable)??;
+        let max_chunks = self.config.max_chunks;
+        let max_documents = self.config.max_documents;
         self.database
             .call(move |db| {
                 if let Some(report) = receipt(db, &key)? {
                     return Ok(report);
                 }
-                let parsed = extract(
-                    &bytes,
-                    input.artifact.blob().media_type(),
-                    &config.parse_limits,
-                )?;
-                let chunks = chunk_document(&parsed.markdown, config.chunker, config.max_chunks)?;
-                let report = DocumentIndexReport {
-                    artifact: input.artifact.clone(),
-                    chunker_digest,
-                    parsed_digest: configuration_digest("document-parsed-text", &parsed.markdown)?,
-                    chunks: chunks.len(),
-                    status: if parsed.requires_ocr {
-                        DocumentStatus::OcrRequired
-                    } else if parsed.truncated {
-                        DocumentStatus::Truncated
-                    } else {
-                        DocumentStatus::Indexed
-                    },
-                    requires_ocr: parsed.requires_ocr,
-                    truncated: parsed.truncated,
-                    page_count: parsed.page_count,
-                };
                 write_document(
                     db,
                     &key,
@@ -157,8 +166,8 @@ impl DocumentSearchSource {
                     &input,
                     &report,
                     &chunks,
-                    config.max_chunks,
-                    config.max_documents,
+                    max_chunks,
+                    max_documents,
                 )?;
                 Ok(report)
             })

@@ -11,18 +11,28 @@ use finstack_ai_runtime::ports::context::{
     ContextProviderDescriptor, ContextRequest,
 };
 
-use crate::{SearchEngine, SearchError, SearchRequest, configuration_digest};
+use crate::{
+    MAX_LEXICAL_TERMS, SearchEngine, SearchError, SearchRequest, configuration_digest,
+    lexical_terms,
+};
 
 const COMPONENT: &str = "finstack.search.recall";
 
 /// Optional cross-source recall. Emits untrusted references plus explicit
 /// coverage metadata, bounded by the committed context budget. Register this
 /// instead of memory recall when composing global search.
+///
+/// The user turn is recall input, not a validated query: it is cut to the
+/// strictest configured `max_query_bytes` on a character boundary and to
+/// [`MAX_LEXICAL_TERMS`] terms before searching, and a search the engine
+/// rejects or cannot serve becomes an empty contribution whose coverage item
+/// names the error. Only cancellation and scope denial fail the collection.
 #[derive(Clone)]
 pub struct SearchContextProvider {
     engine: Arc<SearchEngine>,
     descriptor: ContextProviderDescriptor,
     max_hits: usize,
+    max_query_bytes: usize,
 }
 
 impl SearchContextProvider {
@@ -34,6 +44,11 @@ impl SearchContextProvider {
         if max_hits == 0 || max_hits > engine.config().limits.max_results {
             return Err(SearchError::invalid("recall_hits"));
         }
+        let max_query_bytes = engine
+            .sources()
+            .iter()
+            .map(|descriptor| descriptor.limits.max_query_bytes)
+            .fold(engine.config().limits.max_query_bytes, usize::min);
         let digest =
             configuration_digest("search-recall", &(engine.configuration_digest(), max_hits))?;
         let descriptor = ContextProviderDescriptor {
@@ -55,8 +70,36 @@ impl SearchContextProvider {
             engine,
             descriptor,
             max_hits,
+            max_query_bytes,
         })
     }
+}
+
+/// Cut recall text to `max_bytes` on a character boundary and to the first
+/// [`MAX_LEXICAL_TERMS`] alphanumeric runs, keeping the original prefix so
+/// literal and regex legs see the same characters the user typed.
+fn bound_query(text: &str, max_bytes: usize) -> &str {
+    let mut end = max_bytes.min(text.len());
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    let text = &text[..end];
+    let mut terms = 0;
+    let mut in_term = false;
+    for (index, c) in text.char_indices() {
+        if c.is_alphanumeric() {
+            if !in_term {
+                in_term = true;
+                terms += 1;
+                if terms > MAX_LEXICAL_TERMS {
+                    return text[..index].trim_end();
+                }
+            }
+        } else {
+            in_term = false;
+        }
+    }
+    text.trim_end()
 }
 
 impl ContextProvider for SearchContextProvider {
@@ -71,6 +114,7 @@ impl ContextProvider for SearchContextProvider {
     ) -> PortFuture<Result<ContextContribution, ContextError>> {
         let engine = Arc::clone(&self.engine);
         let max_hits = self.max_hits;
+        let max_query_bytes = self.max_query_bytes;
         Box::pin(async move {
             if request.session_id != ctx.run.locator.session_id
                 || request.lane_id != ctx.run.locator.lane_id
@@ -90,20 +134,21 @@ impl ContextProvider for SearchContextProvider {
             }
             let mut text = String::new();
             for block in request.user_input.iter() {
+                if text.len() > max_query_bytes {
+                    break;
+                }
                 if let ContentBlock::Text(block) = block {
                     if !text.is_empty() {
                         text.push(' ');
                     }
                     text.push_str(block.text());
-                    if text.len() > engine.config().limits.max_query_bytes {
-                        return Err(context_error("search_query_limit", ErrorCategory::Limit));
-                    }
                 }
             }
-            if text.trim().is_empty() {
+            let bounded = bound_query(&text, max_query_bytes);
+            if lexical_terms(bounded).is_err() {
                 return ContextContribution::try_new(Vec::new(), None::<&str>);
             }
-            let mut search = SearchRequest::text(text);
+            let mut search = SearchRequest::text(bounded);
             search.limit = Some(max_hits);
             let response = tokio::select! {
                 biased;
@@ -119,7 +164,18 @@ impl ContextProvider for SearchContextProvider {
                     serde_json::json!({"search_error":"search_no_successful_sources","search_coverage":outcomes}),
                     Vec::new(),
                 ),
-                Err(error) => return Err(context_error(error.code(), ErrorCategory::Validation)),
+                Err(SearchError::SearchScopeDenied) => {
+                    return Err(context_error(
+                        "search_scope_denied",
+                        ErrorCategory::Validation,
+                    ));
+                }
+                // Recall is best effort: an invalid, unsupported, capacity-bound or
+                // unavailable search leaves the run intact with explicit coverage.
+                Err(error) => (
+                    serde_json::json!({"search_error":error.code(),"search_coverage":[]}),
+                    Vec::new(),
+                ),
             };
             coverage["context_omitted_hits"] = serde_json::json!(0);
             let mut items = vec![item(

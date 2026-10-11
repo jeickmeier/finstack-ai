@@ -1,13 +1,16 @@
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
-use finstack_ai_kernel::{ErrorCategory, Timestamp};
+use finstack_ai_kernel::{ErrorCategory, Metadata};
 use finstack_ai_net_guard::{
     BodyReadInterrupt, NetGuardError, SystemResolver, UrlPolicy, VettedUrl, parse_and_vet_url,
     pinned_client, read_body_bounded_interruptible, reject_literal_destination, resolve_and_pin,
 };
 use finstack_ai_runtime::artifact::ArtifactStore;
+use finstack_ai_runtime::ids::{Clock, SystemClock};
 use finstack_ai_runtime::ports::tool::{ToolCallContext, ToolError};
+use futures_util::StreamExt;
+use reqwest::header::HeaderValue;
 use serde::Deserialize;
 
 use crate::{
@@ -16,12 +19,18 @@ use crate::{
 };
 
 pub(crate) const REQUEST_TIMEOUT: Duration = Duration::from_mins(2);
+/// Bytes of an error response body read before giving up on a reason.
+const ERROR_BODY_CAP: usize = 4096;
+/// Characters of endpoint reason kept in a tool-error message.
+const ERROR_DETAIL_CHARS: usize = 300;
 
 /// Validated `OpenAI` route plus the delivery settings every handler reads.
 #[derive(Clone)]
 pub(crate) struct Route {
     pub(crate) client: reqwest::Client,
-    pub(crate) api_key: String,
+    /// `Authorization: Bearer ...` built once at construction and marked
+    /// sensitive, so the raw key is neither re-formatted nor logged per call.
+    pub(crate) authorization: HeaderValue,
     pub(crate) endpoint: String,
     pub(crate) max_result_bytes: usize,
     pub(crate) store: Option<Arc<dyn ArtifactStore>>,
@@ -73,16 +82,14 @@ pub(crate) async fn send(
     ctx: &ToolCallContext,
 ) -> Result<reqwest::Response, ToolError> {
     check_interrupted(ctx)?;
-    let request = request.header("Authorization", format!("Bearer {}", route.api_key));
+    let request = request.header(reqwest::header::AUTHORIZATION, route.authorization.clone());
     let response = tokio::select! {
-        () = ctx.run.cancellation.cancelled() => return Err(timeout_error()),
-        () = wait_deadline(ctx.run.deadline) => return Err(timeout_error()),
+        () = ctx.run.interrupted() => return Err(timeout_error()),
         result = request.send() => result.map_err(|_| transport_error("openai media request failed"))?,
     };
-    if !response.status().is_success() {
-        return Err(transport_error(
-            "openai media endpoint rejected the request",
-        ));
+    let status = response.status();
+    if !status.is_success() {
+        return Err(endpoint_rejected("endpoint", status, response, ctx).await);
     }
     Ok(response)
 }
@@ -95,22 +102,19 @@ pub(crate) async fn download_bytes(
     let vetted = validate_download_url(url)?;
     check_interrupted(ctx)?;
     let addr = tokio::select! {
-        () = ctx.run.cancellation.cancelled() => return Err(timeout_error()),
-        () = wait_deadline(ctx.run.deadline) => return Err(timeout_error()),
+        () = ctx.run.interrupted() => return Err(timeout_error()),
         result = resolve_and_pin(&vetted, &SystemResolver) => result.map_err(map_net_guard_error)?,
     };
     let client = pinned_client(&vetted, addr, REQUEST_TIMEOUT).map_err(map_net_guard_error)?;
     let response = tokio::select! {
-        () = ctx.run.cancellation.cancelled() => return Err(timeout_error()),
-        () = wait_deadline(ctx.run.deadline) => return Err(timeout_error()),
+        () = ctx.run.interrupted() => return Err(timeout_error()),
         result = client.get(vetted.url.as_str()).send() => {
             result.map_err(|_| transport_error("openai media audio download failed"))?
         },
     };
-    if !response.status().is_success() {
-        return Err(transport_error(
-            "openai media audio host rejected the request",
-        ));
+    let status = response.status();
+    if !status.is_success() {
+        return Err(endpoint_rejected("audio host", status, response, ctx).await);
     }
     read_interruptible(response, cap, ctx)
         .await
@@ -180,7 +184,7 @@ async fn read_interruptible(
         cap,
         BodyReadInterrupt::new(
             async move { cancellation.cancelled().await },
-            wait_deadline(ctx.run.deadline),
+            ctx.run.wait_deadline(),
         ),
     )
     .await
@@ -195,36 +199,19 @@ pub(crate) async fn read_bounded_json<T: for<'de> Deserialize<'de>>(
     serde_json::from_slice(&body).map_err(|_| transport_error("openai media response is invalid"))
 }
 
+/// Synchronous cancellation/deadline gate, evaluated before any network
+/// activity so an already-interrupted call never reaches the wire.
+///
+/// A clock that cannot produce a timestamp is treated as an elapsed
+/// deadline (fail closed), matching `RunCallContext::wait_deadline`.
 pub(crate) fn check_interrupted(ctx: &ToolCallContext) -> Result<(), ToolError> {
-    if ctx.run.cancellation.is_cancelled() || deadline_elapsed(ctx.run.deadline) {
+    let interrupted = SystemClock
+        .now()
+        .map_or(true, |now| ctx.run.is_interrupted(now));
+    if interrupted {
         return Err(timeout_error());
     }
     Ok(())
-}
-
-fn deadline_elapsed(deadline: Option<Timestamp>) -> bool {
-    deadline.is_some_and(|deadline| now_unix_ms() >= deadline.as_unix_ms())
-}
-
-async fn wait_deadline(deadline: Option<Timestamp>) {
-    let Some(deadline) = deadline else {
-        std::future::pending::<()>().await;
-        return;
-    };
-    let remaining = deadline.as_unix_ms().saturating_sub(now_unix_ms());
-    let millis = u64::try_from(remaining).unwrap_or(0);
-    if millis != 0 {
-        tokio::time::sleep(Duration::from_millis(millis)).await;
-    }
-}
-
-fn now_unix_ms() -> i64 {
-    i64::try_from(
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |duration| duration.as_millis()),
-    )
-    .unwrap_or(i64::MAX)
 }
 
 fn timeout_error() -> ToolError {
@@ -237,4 +224,82 @@ fn timeout_error() -> ToolError {
 
 fn transport_error(message: &'static str) -> ToolError {
     tool_error(OPENAI_MEDIA_TRANSPORT_FAILED, ErrorCategory::Tool, message)
+}
+
+/// Reject an unsuccessful media response, naming the status and the endpoint's
+/// own reason.
+///
+/// The message is the model's only self-correction signal. A status alone does
+/// not say which argument was wrong, so the model reissues the identical call;
+/// because these tools are approval-gated, every retry also re-prompts the
+/// caller, and the run burns its cycles without progressing.
+pub(crate) async fn endpoint_rejected(
+    what: &'static str,
+    status: reqwest::StatusCode,
+    response: reqwest::Response,
+    ctx: &ToolCallContext,
+) -> ToolError {
+    let message = match rejection_detail(response, ctx).await {
+        Some(detail) => {
+            format!("openai media {what} rejected the request with HTTP {status}: {detail}")
+        }
+        None => format!("openai media {what} rejected the request with HTTP {status}"),
+    };
+    ToolError::try_new(
+        OPENAI_MEDIA_TRANSPORT_FAILED,
+        ErrorCategory::Tool,
+        false,
+        message,
+        Metadata::empty(),
+    )
+    .unwrap_or_else(Into::into)
+}
+
+/// Reduce an error response body to one short line.
+///
+/// Reads at most [`ERROR_BODY_CAP`] bytes so a hostile or malformed endpoint
+/// cannot stream an unbounded body into an error message.
+async fn rejection_detail(response: reqwest::Response, ctx: &ToolCallContext) -> Option<String> {
+    let mut body = Vec::new();
+    let mut stream = response.bytes_stream();
+    loop {
+        let next = tokio::select! {
+            () = ctx.run.interrupted() => break,
+            chunk = stream.next() => chunk,
+        };
+        let Some(Ok(chunk)) = next else {
+            break;
+        };
+        let remaining = ERROR_BODY_CAP.saturating_sub(body.len());
+        if remaining == 0 {
+            break;
+        }
+        body.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
+    }
+    let text = String::from_utf8_lossy(&body);
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+    // OpenAI reports failures as {"error":{"message":...}}; anything else is
+    // surfaced verbatim so an unexpected shape still reaches the model.
+    let detail = serde_json::from_str::<serde_json::Value>(text)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("error")
+                .and_then(|error| error.get("message"))
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| text.to_owned());
+    let detail = detail.split_whitespace().collect::<Vec<_>>().join(" ");
+    if detail.is_empty() {
+        return None;
+    }
+    if detail.chars().count() <= ERROR_DETAIL_CHARS {
+        return Some(detail);
+    }
+    let kept: String = detail.chars().take(ERROR_DETAIL_CHARS).collect();
+    Some(format!("{kept}..."))
 }

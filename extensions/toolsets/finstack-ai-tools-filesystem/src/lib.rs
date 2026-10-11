@@ -35,7 +35,7 @@ mod unix;
 
 use std::path::Path;
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use finstack_ai_kernel::{
     ErrorCategory, Metadata, RawJson, RetrySafety, Sensitivity, ToolExecutionMode, ToolId,
@@ -45,7 +45,11 @@ use finstack_ai_runtime::Bytes;
 use finstack_ai_runtime::artifact::{
     ArtifactMetadata, ArtifactScope, ArtifactStore, stage_required_artifact,
 };
+#[cfg(unix)]
+use finstack_ai_runtime::ids::{Clock, SystemClock};
 use finstack_ai_runtime::ports::PortFuture;
+#[cfg(unix)]
+use finstack_ai_runtime::ports::model::RunCallContext;
 use finstack_ai_runtime::ports::model::{
     ApprovalMetadata, ApprovalRequirement, SideEffectClass, ToolDeferralSupport, ToolSpec,
 };
@@ -322,7 +326,7 @@ impl Toolset for FileSystemToolset {
                 let operation = decode_operation(&call, &tool_ids, &protected, limits)?;
                 let cancellation = ctx.run.cancellation.clone();
                 let deadline = operation_deadline(
-                    ctx.run.deadline,
+                    &ctx.run,
                     operation.is_search().then_some(limits.search_timeout),
                 )?;
                 let output = tokio::task::spawn_blocking(move || {
@@ -350,23 +354,32 @@ impl Toolset for FileSystemToolset {
     }
 }
 
+/// Resolve the monotonic instant at which the blocking worker must stop.
+///
+/// Combines the optional per-operation timeout with the time left on the
+/// call deadline (via [`RunCallContext::deadline_remaining`]) and takes the
+/// earlier. An unreadable wall clock or an already-elapsed deadline fails
+/// closed with [`FILESYSTEM_TIMEOUT`].
 #[cfg(unix)]
 fn operation_deadline(
-    call_deadline: Option<finstack_ai_kernel::Timestamp>,
+    run: &RunCallContext,
     operation_timeout: Option<Duration>,
 ) -> Result<Option<Instant>, ToolError> {
     let now = Instant::now();
     let configured = operation_timeout.and_then(|timeout| now.checked_add(timeout));
-    let persisted = call_deadline.map(|deadline| {
-        let wall_now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default();
-        let wall_now_ms = i64::try_from(wall_now.as_millis()).unwrap_or(i64::MAX);
-        let remaining_ms =
-            u64::try_from(deadline.as_unix_ms().saturating_sub(wall_now_ms).max(0)).unwrap_or(0);
-        now.checked_add(Duration::from_millis(remaining_ms))
-            .unwrap_or(now)
-    });
+    let persisted = if run.deadline.is_some() {
+        let wall_now = SystemClock.now().map_err(|_| {
+            fs_tool_error(
+                FILESYSTEM_TIMEOUT,
+                ErrorCategory::Deadline,
+                "filesystem operation timed out",
+            )
+        })?;
+        run.deadline_remaining(wall_now)
+            .map(|remaining| now.checked_add(remaining).unwrap_or(now))
+    } else {
+        None
+    };
     let deadline = match (configured, persisted) {
         (Some(left), Some(right)) => Some(left.min(right)),
         (Some(value), None) | (None, Some(value)) => Some(value),

@@ -26,7 +26,7 @@ use std::fmt::Write as _;
 use std::sync::{Arc, Mutex};
 
 use finstack_ai_kernel::{
-    ComponentId, ComponentRef, Metadata, RunEvent, RunEventBody, RunEventKind, Version,
+    ComponentId, ComponentRef, EffectId, Metadata, RunEvent, RunEventBody, RunEventKind, Version,
 };
 use finstack_ai_runtime::ports::PortFuture;
 use finstack_ai_runtime::ports::middleware::{
@@ -38,6 +38,10 @@ use finstack_ai_runtime::ports::observer::{
 use thiserror::Error;
 
 const LATENCY_BUCKETS: [f64; 9] = [0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0];
+/// Hard bound on in-flight effect start timestamps retained for latency.
+/// When reached, the entry with the oldest start timestamp is evicted so a
+/// stream that never settles its effects cannot grow the map without limit.
+const MAX_EFFECT_STARTS: usize = 4096;
 
 /// Metrics-observer construction failure.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -74,7 +78,10 @@ impl Histogram {
 struct MetricsState {
     status: BTreeMap<&'static str, u64>,
     hub_queue_depth: u64,
-    effect_starts: BTreeMap<String, i64>,
+    /// Start timestamp (unix ms) per in-flight effect, bounded by
+    /// [`MAX_EFFECT_STARTS`]; entries are removed on every terminal or
+    /// deferring effect event.
+    effect_starts: BTreeMap<EffectId, i64>,
     effect_latency: Histogram,
     store_latency: Histogram,
     usage_input: u64,
@@ -87,6 +94,33 @@ struct MetricsState {
     compaction_summary_latency: Histogram,
     compaction_failure: u64,
     compaction_cache_impact: BTreeMap<&'static str, u64>,
+}
+
+impl MetricsState {
+    /// Remember when an effect was requested. At the bound, the entry with
+    /// the oldest start timestamp is evicted first so the map never exceeds
+    /// [`MAX_EFFECT_STARTS`] entries.
+    fn record_effect_start(&mut self, effect_id: EffectId, started_at_ms: i64) {
+        if !self.effect_starts.contains_key(&effect_id)
+            && self.effect_starts.len() >= MAX_EFFECT_STARTS
+            && let Some(oldest) = self
+                .effect_starts
+                .iter()
+                .min_by_key(|(_, started)| **started)
+                .map(|(id, _)| *id)
+        {
+            self.effect_starts.remove(&oldest);
+        }
+        self.effect_starts.insert(effect_id, started_at_ms);
+    }
+
+    /// Forget an effect's start on any non-completion settlement so a failed,
+    /// deferred, or cancelled effect does not pin its entry.
+    fn clear_effect_start(&mut self, effect_id: Option<EffectId>) {
+        if let Some(effect_id) = effect_id {
+            self.effect_starts.remove(&effect_id);
+        }
+    }
 }
 
 /// Prometheus text exposition observer. Default payload mode is metadata-only.
@@ -200,14 +234,12 @@ impl MetricsObserver {
             }
             RunEventKind::EffectRequested => {
                 if let Some(effect_id) = event.effect_id() {
-                    state
-                        .effect_starts
-                        .insert(effect_id.to_string(), event.timestamp().as_unix_ms());
+                    state.record_effect_start(effect_id, event.timestamp().as_unix_ms());
                 }
             }
             RunEventKind::EffectCompleted => {
                 if let Some(effect_id) = event.effect_id()
-                    && let Some(start) = state.effect_starts.remove(&effect_id.to_string())
+                    && let Some(start) = state.effect_starts.remove(&effect_id)
                 {
                     let delta_ms = event.timestamp().as_unix_ms().saturating_sub(start);
                     let millis = u32::try_from(delta_ms.max(0)).unwrap_or(u32::MAX);
@@ -221,10 +253,15 @@ impl MetricsObserver {
                 }
             }
             RunEventKind::EffectFailed => {
+                state.clear_effect_start(event.effect_id());
                 *state.recovery.entry("fail").or_insert(0) += 1;
             }
             RunEventKind::EffectDeferred => {
+                state.clear_effect_start(event.effect_id());
                 *state.recovery.entry("uncertain").or_insert(0) += 1;
+            }
+            RunEventKind::EffectCancelled => {
+                state.clear_effect_start(event.effect_id());
             }
             RunEventKind::QueueDepthWarning => {
                 if let RunEventBody::QueueDepthWarning(warning) = event.body() {

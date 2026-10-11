@@ -643,3 +643,246 @@ async fn cache_key_stable_across_identical_semantic_collects() {
     assert_eq!(first.cache_key, second.cache_key);
     assert_eq!(first, second);
 }
+
+/// A store that records every `search` query and can script the hits of
+/// the lexical legs, delegating everything else to an in-process store.
+struct ScriptedStore {
+    inner: Arc<InProcessMemoryStore>,
+    seen: std::sync::Mutex<Vec<MemoryQuery>>,
+    keyword_hits: Option<Result<Vec<MemoryHit>, MemoryStoreError>>,
+    full_text_hits: Option<Result<Vec<MemoryHit>, MemoryStoreError>>,
+}
+
+impl ScriptedStore {
+    fn recording(inner: Arc<InProcessMemoryStore>) -> Self {
+        Self {
+            inner,
+            seen: std::sync::Mutex::new(Vec::new()),
+            keyword_hits: None,
+            full_text_hits: None,
+        }
+    }
+
+    fn seen(&self) -> Vec<MemoryQuery> {
+        self.seen.lock().expect("seen").clone()
+    }
+}
+
+impl MemoryStore for ScriptedStore {
+    fn put(
+        &self,
+        idempotency_key: Arc<str>,
+        record: MemoryRecord,
+    ) -> PortFuture<Result<PutOutcome, MemoryStoreError>> {
+        self.inner.put(idempotency_key, record)
+    }
+
+    fn get(
+        &self,
+        scope: MemoryScope,
+        id: MemoryId,
+    ) -> PortFuture<Result<Option<MemoryRecord>, MemoryStoreError>> {
+        self.inner.get(scope, id)
+    }
+
+    fn search(
+        &self,
+        scope: MemoryScope,
+        query: MemoryQuery,
+        limit: usize,
+    ) -> PortFuture<Result<Vec<MemoryHit>, MemoryStoreError>> {
+        self.seen.lock().expect("seen").push(query.clone());
+        let scripted = match &query {
+            MemoryQuery::Keywords(_) => self.keyword_hits.clone(),
+            MemoryQuery::FullText(_) => self.full_text_hits.clone(),
+            _ => None,
+        };
+        match scripted {
+            Some(result) => Box::pin(async move { result }),
+            None => self.inner.search(scope, query, limit),
+        }
+    }
+
+    fn forget(
+        &self,
+        idempotency_key: Arc<str>,
+        scope: MemoryScope,
+        id: MemoryId,
+    ) -> PortFuture<Result<(), MemoryStoreError>> {
+        self.inner.forget(idempotency_key, scope, id)
+    }
+
+    fn correct(
+        &self,
+        idempotency_key: Arc<str>,
+        scope: MemoryScope,
+        old: MemoryId,
+        replacement: MemoryRecord,
+    ) -> PortFuture<Result<(), MemoryStoreError>> {
+        self.inner.correct(idempotency_key, scope, old, replacement)
+    }
+
+    fn list(
+        &self,
+        scope: MemoryScope,
+        page: MemoryPage,
+    ) -> PortFuture<Result<MemoryListing, MemoryStoreError>> {
+        self.inner.list(scope, page)
+    }
+}
+
+fn scripted_provider(store: Arc<ScriptedStore>) -> MemoryContextProvider {
+    MemoryContextProvider::try_new(
+        store,
+        &InProcessArtifactStore::default(),
+        MemoryScope::try_new("tenant-a").expect("scope"),
+        RecallConfig::default(),
+    )
+    .expect("provider")
+}
+
+fn recalled_ids(
+    contribution: &finstack_ai_runtime::ports::context::ContextContribution,
+) -> Vec<Option<Arc<str>>> {
+    contribution
+        .items
+        .iter()
+        .map(|item| item.provenance.source_ref.clone())
+        .collect()
+}
+
+#[tokio::test]
+async fn provider_normalizes_and_bounds_query_tokens() {
+    let inner = Arc::new(InProcessMemoryStore::new());
+    inner
+        .put(
+            Arc::from("k1"),
+            keyworded_record("note-1", "tenant-a", &["token1"], "a note"),
+        )
+        .await
+        .expect("put");
+    let store = Arc::new(ScriptedStore::recording(inner));
+    let provider = scripted_provider(Arc::clone(&store));
+
+    // 70 raw tokens (two of them duplicates differing only in case, one
+    // over the per-keyword byte ceiling) would be rejected verbatim.
+    let mut raw: Vec<String> = (1..=67).map(|index| format!("Token{index}")).collect();
+    raw.push("token1".to_owned());
+    raw.push("x".repeat(KEYWORD_MAX_BYTES + 1));
+    raw.push("Token2!".to_owned());
+    assert_eq!(raw.len(), 70);
+    let query = raw.join(" ");
+
+    let contribution = provider
+        .collect(context(), request(&query))
+        .await
+        .expect("bounded tokens are accepted");
+    assert_eq!(recalled_ids(&contribution), vec![Some(Arc::from("note-1"))]);
+
+    let seen = store.seen();
+    let keywords = seen
+        .iter()
+        .find_map(|query| match query {
+            MemoryQuery::Keywords(keywords) => Some(keywords.clone()),
+            _ => None,
+        })
+        .expect("keyword leg ran");
+    assert!(!keywords.is_empty() && keywords.len() <= KEYWORDS_MAX_COUNT);
+    assert!(
+        keywords
+            .iter()
+            .all(|keyword| keyword.len() <= KEYWORD_MAX_BYTES
+                && keyword.chars().all(|c| c.is_lowercase() || c.is_numeric()))
+    );
+    let mut deduped = keywords.to_vec();
+    deduped.sort();
+    deduped.dedup();
+    assert_eq!(deduped.len(), keywords.len(), "tokens are deduplicated");
+    assert_eq!(keywords[0].as_ref(), "token1");
+}
+
+#[tokio::test]
+async fn provider_truncates_full_text_query() {
+    let inner = Arc::new(InProcessMemoryStore::new());
+    inner
+        .put(
+            Arc::from("k1"),
+            keyworded_record("note-1", "tenant-a", &["ledger"], "ledger note"),
+        )
+        .await
+        .expect("put");
+    let store = Arc::new(ScriptedStore::recording(inner));
+    let provider = scripted_provider(Arc::clone(&store));
+
+    // Three-byte characters, so the byte ceiling is not a char boundary.
+    let query = format!("ledger {}", "€".repeat(INLINE_BODY_MAX_BYTES / 3 + 10));
+    assert!(query.len() > INLINE_BODY_MAX_BYTES);
+    let contribution = provider
+        .collect(context(), request(&query))
+        .await
+        .expect("over-long text is truncated, not rejected");
+    assert_eq!(recalled_ids(&contribution), vec![Some(Arc::from("note-1"))]);
+
+    let text = store
+        .seen()
+        .iter()
+        .find_map(|query| match query {
+            MemoryQuery::FullText(text) => Some(Arc::clone(text)),
+            _ => None,
+        })
+        .expect("full-text leg ran");
+    assert!(text.len() <= INLINE_BODY_MAX_BYTES);
+    assert!(text.starts_with("ledger "));
+    assert!(query.starts_with(text.as_ref()));
+}
+
+#[tokio::test]
+async fn lexical_leg_invalid_request_contributes_nothing() {
+    let inner = Arc::new(InProcessMemoryStore::new());
+    inner
+        .put(
+            Arc::from("k1"),
+            keyworded_record("note-1", "tenant-a", &["ledger"], "ledger note"),
+        )
+        .await
+        .expect("put");
+    let mut store = ScriptedStore::recording(inner);
+    store.keyword_hits = Some(Err(MemoryStoreError::InvalidRequest {
+        reason: "memory_query_keywords_invalid",
+    }));
+    let provider = scripted_provider(Arc::new(store));
+    let contribution = provider
+        .collect(context(), request("ledger"))
+        .await
+        .expect("a rejected leg degrades to the other legs");
+    assert_eq!(recalled_ids(&contribution), vec![Some(Arc::from("note-1"))]);
+}
+
+#[tokio::test]
+async fn recall_merge_keeps_tier_winning_score() {
+    let inner = Arc::new(InProcessMemoryStore::new());
+    let hit = |id: &str, score: u32, matched: MatchEvidence| MemoryHit {
+        record: keyworded_record(id, "tenant-a", &["alpha"], "alpha note"),
+        score,
+        matched,
+    };
+    let mut store = ScriptedStore::recording(inner);
+    // Both records match on keywords (tier 0); m-1 also matches full text
+    // with a large rank score. The keyword-tier score must decide, so m-2
+    // (two keyword matches) recalls before m-1 (one), whatever the
+    // full-text leg scored.
+    store.keyword_hits = Some(Ok(vec![
+        hit("m-1", 1, MatchEvidence::Keyword(Arc::from("alpha"))),
+        hit("m-2", 2, MatchEvidence::Keyword(Arc::from("alpha"))),
+    ]));
+    store.full_text_hits = Some(Ok(vec![hit("m-1", 50, MatchEvidence::FullText)]));
+    let provider = scripted_provider(Arc::new(store));
+    let contribution = provider
+        .collect(context(), request("alpha"))
+        .await
+        .expect("collect");
+    assert_eq!(
+        recalled_ids(&contribution),
+        vec![Some(Arc::from("m-2")), Some(Arc::from("m-1"))]
+    );
+}

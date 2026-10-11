@@ -311,6 +311,7 @@ test_fast() {
   cargo nextest run -p finstack-ai-wasm --locked
   cargo test -p finstack-ai-wasm --doc --locked
   cargo nextest run -p finstack-ai-store-artifact --locked --features s3
+  cargo nextest run -p finstack-ai-store-sqlite --locked --features fault-injection
   export PYO3_PYTHON="${PYO3_PYTHON:-$(uv python find 3.14)}"
   uv run pytest -q
   if [ "${FINSTACK_WASM_SKIP_BUILD:-0}" != "1" ]; then
@@ -342,6 +343,9 @@ test_rust() {
   # fail-closed integrity tests never compile. They only run from here.
   cargo nextest run -p finstack-ai-store-artifact --locked --features s3
   cargo test -p finstack-ai-store-artifact --doc --locked --features s3
+  # The sqlite store's fault-injection hooks and helper binary are feature
+  # gated; the three fault tests only compile from here.
+  cargo nextest run -p finstack-ai-store-sqlite --locked --features fault-injection
 }
 test_rust
 """

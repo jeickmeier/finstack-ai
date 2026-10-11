@@ -104,11 +104,12 @@ pub(crate) fn narrow_universe(
 /// `MessageRole::User` messages, and of every `ContentBlock::Text` block
 /// nested inside a `ContentBlock::ToolResult` in `MessageRole::Tool`
 /// messages. Assistant and system text is trusted and never scanned.
-/// Case-insensitivity is via `str::to_lowercase` on both the pattern and
-/// the scanned text; patterns are expected to be ASCII-ish config strings,
-/// but a non-ASCII pattern still matches — only against its own lowercased
-/// Unicode form, which may not equal every locale's notion of "same word".
-/// On the first pattern match: `JailbreakAction::Fail` short-circuits to
+/// ASCII patterns are matched by one precompiled ASCII-case-insensitive
+/// Aho-Corasick automaton that scans the text in place; a non-ASCII
+/// pattern falls back to `str::to_lowercase` on the scanned text and still
+/// matches — only against its own lowercased Unicode form, which may not
+/// equal every locale's notion of "same word" (see
+/// `JailbreakTriggers::matches`). On the first pattern match: `JailbreakAction::Fail` short-circuits to
 /// `PolicyVerdict::Fail`; `JailbreakAction::RestrictTo(safe)` intersects
 /// the retain set with `safe` and scanning stops. Work is bounded by the
 /// draft's own ceilings: at most `ModelRequestDraft::MAX_MESSAGES` (4 096)
@@ -164,14 +165,16 @@ pub(crate) fn evaluate_before_model(
         'scan: for message in input.request.messages.iter() {
             let triggered = match message.role() {
                 MessageRole::User => message.content().iter().any(|block| match block {
-                    ContentBlock::Text(text) => contains_pattern(text.text(), &jailbreak.patterns),
+                    ContentBlock::Text(text) => jailbreak.matches(text.text()),
                     _ => false,
                 }),
-                MessageRole::Tool => message.content().iter().any(|block| match block {
+                MessageRole::Tool => message.content().iter().any(|block| {
+                    match block {
                     ContentBlock::ToolResult(result) => result.content().iter().any(|block| {
-                        matches!(block, ContentBlock::Text(text) if contains_pattern(text.text(), &jailbreak.patterns))
+                        matches!(block, ContentBlock::Text(text) if jailbreak.matches(text.text()))
                     }),
                     _ => false,
+                }
                 }),
                 MessageRole::System | MessageRole::Developer | MessageRole::Assistant => false,
             };
@@ -192,13 +195,6 @@ pub(crate) fn evaluate_before_model(
     }
 
     PolicyVerdict::narrowed(&universe, retain)
-}
-
-fn contains_pattern(text: &str, patterns: &[Arc<str>]) -> bool {
-    let lowered = text.to_lowercase();
-    patterns
-        .iter()
-        .any(|pattern| lowered.contains(pattern.as_ref()))
 }
 
 /// Evaluate the `before_tool_batch` defense-in-depth policy.

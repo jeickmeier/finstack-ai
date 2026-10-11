@@ -50,9 +50,9 @@ pub use conformance::compaction::{
 pub use conformance::ports::{
     ContextConformanceCase, JournalStoreConformanceCase, MiddlewareConformanceCase,
     ModelConformanceCase, PORT_CONFORMANCE_SUITE_VERSION, PortConformanceFailure,
-    ToolsetConformanceCase, check_context_conformance, check_journal_store_conformance,
-    check_middleware_conformance, check_model_conformance, check_observer_conformance,
-    check_toolset_conformance,
+    PruneBoundaryConformanceCase, ToolsetConformanceCase, check_context_conformance,
+    check_journal_store_conformance, check_middleware_conformance, check_model_conformance,
+    check_observer_conformance, check_prune_boundary_conformance, check_toolset_conformance,
 };
 pub use conformance::reducer::{
     ReducerExecution, ReducerRustAdapter, ReducerTerminalProjection, execute_reducer_trace,

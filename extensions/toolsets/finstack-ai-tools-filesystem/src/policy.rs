@@ -152,54 +152,100 @@ pub(crate) fn validate_glob(pattern: &str) -> Result<(), ToolError> {
     Ok(())
 }
 
-pub(crate) fn glob_matches(pattern: &str, path: &str) -> bool {
-    let pattern = pattern.as_bytes();
-    let path = path.as_bytes();
-    let mut previous = vec![false; path.len() + 1];
-    previous[0] = true;
-    let mut index = 0;
-    while index < pattern.len() {
-        let double_star = pattern[index] == b'*' && pattern.get(index + 1).copied() == Some(b'*');
-        let recursive_prefix = double_star && pattern.get(index + 2).copied() == Some(b'/');
-        let token = pattern[index];
-        if recursive_prefix {
-            let mut current = previous.clone();
-            let mut reachable = previous[0];
-            for position in 1..=path.len() {
-                if path[position - 1] == b'/' && reachable {
-                    current[position] = true;
-                }
-                reachable |= previous[position];
-            }
-            previous = current;
-            index += 3;
-            continue;
+/// Match slash-separated relative paths against one glob pattern, reusing
+/// two dynamic-programming rows across calls.
+///
+/// `*` and `?` never cross `/`; `**` matches across separators and a
+/// leading `**/` also matches zero directories. Any other byte is literal.
+pub(crate) struct GlobMatcher<'p> {
+    pattern: &'p [u8],
+    previous: Vec<bool>,
+    current: Vec<bool>,
+}
+
+impl<'p> GlobMatcher<'p> {
+    pub(crate) fn new(pattern: &'p str) -> Self {
+        Self {
+            pattern: pattern.as_bytes(),
+            previous: Vec::new(),
+            current: Vec::new(),
         }
-        if double_star {
-            while pattern.get(index + 1).copied() == Some(b'*') {
-                index += 1;
-            }
-        }
-        let mut current = vec![false; path.len() + 1];
-        if token == b'*' {
-            current[0] = previous[0];
-            for position in 1..=path.len() {
-                let can_consume = double_star || path[position - 1] != b'/';
-                current[position] = previous[position] || (can_consume && current[position - 1]);
-            }
-        } else if token == b'?' {
-            for position in 1..=path.len() {
-                current[position] = previous[position - 1] && path[position - 1] != b'/';
-            }
-        } else {
-            for position in 1..=path.len() {
-                current[position] = previous[position - 1] && path[position - 1] == token;
-            }
-        }
-        previous = current;
-        index += 1;
     }
-    previous[path.len()]
+
+    pub(crate) fn matches(&mut self, path: &str) -> bool {
+        let pattern = self.pattern;
+        let path = path.as_bytes();
+        let width = path.len() + 1;
+        self.previous.clear();
+        self.previous.resize(width, false);
+        self.current.clear();
+        self.current.resize(width, false);
+        self.previous[0] = true;
+        let mut index = 0;
+        while index < pattern.len() {
+            let double_star =
+                pattern[index] == b'*' && pattern.get(index + 1).copied() == Some(b'*');
+            let recursive_prefix = double_star && pattern.get(index + 2).copied() == Some(b'/');
+            let token = pattern[index];
+            if recursive_prefix {
+                self.current.copy_from_slice(&self.previous);
+                let mut reachable = self.previous[0];
+                for position in 1..=path.len() {
+                    if path[position - 1] == b'/' && reachable {
+                        self.current[position] = true;
+                    }
+                    reachable |= self.previous[position];
+                }
+                core::mem::swap(&mut self.previous, &mut self.current);
+                index += 3;
+                continue;
+            }
+            if double_star {
+                while pattern.get(index + 1).copied() == Some(b'*') {
+                    index += 1;
+                }
+            }
+            self.current.fill(false);
+            if token == b'*' {
+                self.current[0] = self.previous[0];
+                for position in 1..=path.len() {
+                    let can_consume = double_star || path[position - 1] != b'/';
+                    self.current[position] =
+                        self.previous[position] || (can_consume && self.current[position - 1]);
+                }
+            } else if token == b'?' {
+                for position in 1..=path.len() {
+                    self.current[position] =
+                        self.previous[position - 1] && path[position - 1] != b'/';
+                }
+            } else {
+                for position in 1..=path.len() {
+                    self.current[position] =
+                        self.previous[position - 1] && path[position - 1] == token;
+                }
+            }
+            core::mem::swap(&mut self.previous, &mut self.current);
+            index += 1;
+        }
+        self.previous[path.len()]
+    }
+}
+
+/// One-shot convenience over [`GlobMatcher`] for callers without a hot loop.
+pub(crate) fn glob_matches(pattern: &str, path: &str) -> bool {
+    GlobMatcher::new(pattern).matches(path)
+}
+
+/// The deepest directory named literally by `pattern` before its first glob
+/// metacharacter (`*`, `?`, or `[`): the only subtree that can hold matches.
+///
+/// Returns `""` (the root) when the first path component already contains a
+/// metacharacter. A pattern without metacharacters names its parent
+/// directory.
+pub(crate) fn literal_prefix_directory(pattern: &str) -> &str {
+    let literal_end = pattern.find(['*', '?', '[']).unwrap_or(pattern.len());
+    let literal = &pattern[..literal_end];
+    literal.rfind('/').map_or("", |slash| &literal[..slash])
 }
 
 #[cfg(test)]
@@ -212,6 +258,132 @@ mod tests {
         assert!(glob_matches("*.rs", "lib.rs"));
         assert!(!glob_matches("*.rs", "src/lib.rs"));
         assert!(glob_matches("src/?.rs", "src/a.rs"));
+    }
+
+    /// The pre-`GlobMatcher` implementation, kept verbatim as the parity oracle.
+    fn legacy_glob_matches(pattern: &str, path: &str) -> bool {
+        let pattern = pattern.as_bytes();
+        let path = path.as_bytes();
+        let mut previous = vec![false; path.len() + 1];
+        previous[0] = true;
+        let mut index = 0;
+        while index < pattern.len() {
+            let double_star =
+                pattern[index] == b'*' && pattern.get(index + 1).copied() == Some(b'*');
+            let recursive_prefix = double_star && pattern.get(index + 2).copied() == Some(b'/');
+            let token = pattern[index];
+            if recursive_prefix {
+                let mut current = previous.clone();
+                let mut reachable = previous[0];
+                for position in 1..=path.len() {
+                    if path[position - 1] == b'/' && reachable {
+                        current[position] = true;
+                    }
+                    reachable |= previous[position];
+                }
+                previous = current;
+                index += 3;
+                continue;
+            }
+            if double_star {
+                while pattern.get(index + 1).copied() == Some(b'*') {
+                    index += 1;
+                }
+            }
+            let mut current = vec![false; path.len() + 1];
+            if token == b'*' {
+                current[0] = previous[0];
+                for position in 1..=path.len() {
+                    let can_consume = double_star || path[position - 1] != b'/';
+                    current[position] =
+                        previous[position] || (can_consume && current[position - 1]);
+                }
+            } else if token == b'?' {
+                for position in 1..=path.len() {
+                    current[position] = previous[position - 1] && path[position - 1] != b'/';
+                }
+            } else {
+                for position in 1..=path.len() {
+                    current[position] = previous[position - 1] && path[position - 1] == token;
+                }
+            }
+            previous = current;
+            index += 1;
+        }
+        previous[path.len()]
+    }
+
+    #[test]
+    fn glob_matcher_parity() {
+        let patterns = [
+            "*.rs",
+            "**/*.rs",
+            "src/**/*.rs",
+            "src/*/*.rs",
+            "src/?.rs",
+            "**",
+            "***/x",
+            "a**b",
+            "**/**/c",
+            "src/lib.rs",
+            "*",
+            "?",
+            "",
+            "src/**",
+            "**/src/**/mod.rs",
+        ];
+        // Deliberately mixed lengths so one matcher's rows shrink and grow.
+        let paths = [
+            "src/a/b.rs",
+            "lib.rs",
+            "src/lib.rs",
+            "src/a.rs",
+            "",
+            "a/b/c",
+            "x",
+            "src/deep/er/mod.rs",
+            "axb",
+            "a/b",
+            "src/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z.rs",
+            "c",
+            "src",
+            "src/",
+            "b.rs",
+        ];
+        for pattern in patterns {
+            let mut matcher = GlobMatcher::new(pattern);
+            for path in paths {
+                assert_eq!(
+                    matcher.matches(path),
+                    legacy_glob_matches(pattern, path),
+                    "pattern {pattern:?} path {path:?}"
+                );
+                assert_eq!(
+                    glob_matches(pattern, path),
+                    legacy_glob_matches(pattern, path)
+                );
+            }
+            // Reuse after a long path must not leak stale row bits.
+            for path in paths.iter().rev() {
+                assert_eq!(
+                    matcher.matches(path),
+                    legacy_glob_matches(pattern, path),
+                    "pattern {pattern:?} path {path:?} (reverse)"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn literal_prefix_stops_at_the_first_metacharacter() {
+        assert_eq!(literal_prefix_directory("src/**/*.rs"), "src");
+        assert_eq!(literal_prefix_directory("src/a/b?.rs"), "src/a");
+        assert_eq!(literal_prefix_directory("*.rs"), "");
+        assert_eq!(literal_prefix_directory("**/*.rs"), "");
+        assert_eq!(literal_prefix_directory("src[0]/x"), "");
+        assert_eq!(literal_prefix_directory("src/lib.rs"), "src");
+        assert_eq!(literal_prefix_directory("lib.rs"), "");
+        assert_eq!(literal_prefix_directory("a/b/c/*"), "a/b/c");
     }
 
     #[test]

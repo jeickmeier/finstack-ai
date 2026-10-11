@@ -334,10 +334,9 @@ fn sliding_window(
     config: &CompactionConfig,
     input: &BeforeModelInput,
 ) -> Result<StageOutcome, MiddlewareError> {
-    let before = estimate_request(&input.request, &input.request.messages, 0)?;
-    if before <= config.threshold_tokens {
+    let Some(before) = estimate_over_threshold(&input.request, config.threshold_tokens)? else {
         return Ok(StageOutcome::Continue);
-    }
+    };
     let target = config
         .threshold_tokens
         .saturating_sub(config.hysteresis_tokens)
@@ -350,23 +349,22 @@ fn sliding_window(
         if current <= target {
             break;
         }
-        if required.contains(&index) || !retained.contains(&index) {
+        if !retained.contains(&index) {
             continue;
         }
+        // A component is dropped or kept as a whole: one required member
+        // (protected, or an in-flight call) pins every member.
         if pairs
-            .partner
-            .get(index)
-            .copied()
-            .flatten()
-            .is_some_and(|partner| required.contains(&partner))
+            .component(index)
+            .iter()
+            .any(|member| required.contains(member))
         {
             continue;
         }
-        current = current.saturating_sub(drop_with_pair(
+        current = current.saturating_sub(drop_component(
             index,
             &input.source_entries,
             &pairs,
-            &required,
             &mut retained,
         ));
     }
@@ -395,10 +393,9 @@ fn large_tool_output(
     config: &CompactionConfig,
     input: &BeforeModelInput,
 ) -> Result<StageOutcome, MiddlewareError> {
-    let before = estimate_request(&input.request, &input.request.messages, 0)?;
-    if before <= config.threshold_tokens {
+    let Some(before) = estimate_over_threshold(&input.request, config.threshold_tokens)? else {
         return Ok(StageOutcome::Continue);
-    }
+    };
     let mut messages = Vec::new();
     for entry in input.source_entries.iter() {
         if entry.protected {
@@ -435,8 +432,7 @@ fn summarize(
     ctx: &MiddlewareContext,
     input: &BeforeModelInput,
 ) -> Result<StageOutcome, MiddlewareError> {
-    let before = estimate_request(&input.request, &input.request.messages, 0)?;
-    if before <= config.threshold_tokens {
+    if estimate_over_threshold(&input.request, config.threshold_tokens)?.is_none() {
         return Ok(StageOutcome::Continue);
     }
     if let Some(resume) = &ctx.compaction_resume {
@@ -604,8 +600,21 @@ fn finish(
     Ok(StageOutcome::CompactContext(Box::new(result)))
 }
 
+/// Tool call/result grouping over source-entry indices.
+///
+/// The kernel records one `MessageRole::Tool` message per tool result, so an
+/// assistant message carrying N tool calls is paired with N result
+/// messages. Union-find over message indices folds each call message
+/// together with every one of its result messages into one component, and
+/// the sliding window drops or keeps a component atomically — never a call
+/// without one of its results, never a result without its call. Messages
+/// without tool associations are singleton components.
 struct PairIndex {
-    partner: Vec<Option<usize>>,
+    /// Component leader per entry (fully compressed after union-find).
+    root: Vec<usize>,
+    /// Members of each component, keyed by root, in ascending index order.
+    component: BTreeMap<usize, Vec<usize>>,
+    /// Call messages with at least one call that has no result yet.
     unmatched_calls: BTreeSet<usize>,
 }
 
@@ -614,7 +623,7 @@ impl PairIndex {
         #[cfg(test)]
         PAIR_ANALYSIS_COUNT.with(|count| count.set(count.get().saturating_add(1)));
         let mut calls = BTreeMap::new();
-        let mut results = BTreeMap::new();
+        let mut results: BTreeMap<_, Vec<usize>> = BTreeMap::new();
         for (index, entry) in entries.iter().enumerate() {
             for block in entry.message.content() {
                 match block {
@@ -622,26 +631,83 @@ impl PairIndex {
                         calls.insert(*call.tool_call_id(), index);
                     }
                     ContentBlock::ToolResult(result) => {
-                        results.insert(*result.tool_call_id(), index);
+                        results
+                            .entry(*result.tool_call_id())
+                            .or_default()
+                            .push(index);
                     }
                     _ => {}
                 }
             }
         }
-        let mut partner = vec![None; entries.len()];
+        let mut root = (0..entries.len()).collect::<Vec<_>>();
         let mut unmatched_calls = BTreeSet::new();
         for (id, call_index) in calls {
-            if let Some(result_index) = results.get(&id).copied() {
-                partner[call_index] = Some(result_index);
-                partner[result_index] = Some(call_index);
-            } else {
-                unmatched_calls.insert(call_index);
+            match results.get(&id) {
+                Some(result_indices) => {
+                    for result_index in result_indices {
+                        union(&mut root, call_index, *result_index);
+                    }
+                }
+                None => {
+                    unmatched_calls.insert(call_index);
+                }
             }
         }
+        let mut component: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+        for index in 0..entries.len() {
+            let leader = find(&mut root, index);
+            // Fully compress so `root[index]` is the component key, not an
+            // intermediate node left behind by path halving.
+            if let Some(slot) = root.get_mut(index) {
+                *slot = leader;
+            }
+            component.entry(leader).or_default().push(index);
+        }
         Self {
-            partner,
+            root,
+            component,
             unmatched_calls,
         }
+    }
+
+    /// Every entry index in the same tool component as `index` (including
+    /// `index` itself), ascending. An out-of-range index yields no members.
+    fn component(&self, index: usize) -> &[usize] {
+        self.root
+            .get(index)
+            .and_then(|leader| self.component.get(leader))
+            .map_or(&[], Vec::as_slice)
+    }
+}
+
+/// Union-find root lookup with path halving; `index` must be in range.
+fn find(root: &mut [usize], index: usize) -> usize {
+    let mut current = index;
+    loop {
+        let Some(&parent) = root.get(current) else {
+            return current;
+        };
+        if parent == current {
+            return current;
+        }
+        let grandparent = root.get(parent).copied().unwrap_or(parent);
+        if let Some(slot) = root.get_mut(current) {
+            *slot = grandparent;
+        }
+        current = grandparent;
+    }
+}
+
+fn union(root: &mut [usize], left: usize, right: usize) {
+    let left_root = find(root, left);
+    let right_root = find(root, right);
+    if left_root != right_root
+        && let Some(slot) = root.get_mut(right_root.max(left_root))
+    {
+        // Attach the higher root under the lower one so leaders are stable
+        // and deterministic regardless of union order.
+        *slot = right_root.min(left_root);
     }
 }
 
@@ -656,22 +722,22 @@ fn required_indices(entries: &[CompactionSourceEntry], pairs: &PairIndex) -> BTr
     required
 }
 
-fn drop_with_pair(
+/// Drop every member of `index`'s tool component from `retained` and return
+/// the estimate of what was actually removed (members already dropped
+/// contribute nothing).
+fn drop_component(
     index: usize,
     entries: &[CompactionSourceEntry],
     pairs: &PairIndex,
-    required: &BTreeSet<usize>,
     retained: &mut BTreeSet<usize>,
 ) -> u64 {
     let mut subtracted = 0_u64;
-    if retained.remove(&index) {
-        subtracted = subtracted.saturating_add(estimate_message(&entries[index].message));
-    }
-    if let Some(partner) = pairs.partner[index]
-        && !required.contains(&partner)
-        && retained.remove(&partner)
-    {
-        subtracted = subtracted.saturating_add(estimate_message(&entries[partner].message));
+    for member in pairs.component(index) {
+        if retained.remove(member)
+            && let Some(entry) = entries.get(*member)
+        {
+            subtracted = subtracted.saturating_add(estimate_message(&entry.message));
+        }
     }
     subtracted
 }
@@ -776,6 +842,19 @@ fn utf8_prefix(value: &str, max_bytes: usize) -> &str {
     &value[..end]
 }
 
+/// Decide whether the request is over the threshold from the authoritative
+/// canonical estimate. Block lengths alone undercount the canonical form
+/// (tool specs, instructions, and escaping), so no cheaper pre-check gates
+/// this decision.
+fn estimate_over_threshold(
+    request: &ModelRequestDraft,
+    threshold_tokens: u64,
+) -> Result<Option<u64>, MiddlewareError> {
+    let before = estimate_request(request, &request.messages, 0)?;
+    Ok((before > threshold_tokens).then_some(before))
+}
+
+/// Authoritative token estimate over the canonical request bytes.
 fn estimate_request(
     request: &ModelRequestDraft,
     messages: &[Message],

@@ -1,34 +1,26 @@
 //! Native Ollama `/api/chat` provider implementation.
 
 use core::fmt;
-use core::pin::Pin;
-use core::task::{Context, Poll};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::sync::{Arc, PoisonError, RwLock};
 
 use finstack_ai_kernel::{ErrorCategory, Metadata, OutputSpec};
 use finstack_ai_provider_wire::{
-    OllamaChatAssembly, OllamaReplayEntry, StreamNormError, StreamNormKind,
+    BoundedRequest, NdjsonParser, OllamaChatAssembly, catalog_from_models, draft_media_error,
+    request_limit_error, unknown_model_capabilities,
 };
 use finstack_ai_runtime::ports::model::{
-    MediaResolveKind, Model, ModelCapabilities, ModelDescriptor, ModelError, ModelEventStream,
-    ModelName, ModelRequest, ModelStreamItem, ModelTokenEstimate, ResolveDraftMediaError,
-    resolve_draft_media,
+    Model, ModelCapabilities, ModelDescriptor, ModelError, ModelEventStream, ModelName,
+    ModelRequest, ModelTokenEstimate, StructuredOutputCapability, resolve_draft_media,
 };
-use futures_util::{Stream, StreamExt};
 use reqwest::redirect::Policy;
-use tokio::sync::mpsc;
 
 use crate::config::estimator_ref;
-use crate::error::{
-    CANCELLED, HTTP_ERROR, RESPONSE_INVALID, STREAM_LIMIT_EXCEEDED, TIMEOUT, TRANSPORT_ERROR,
-    config_error, error, request_error, response_error, stream_error, stream_limit_error,
-};
-use crate::ndjson::NdjsonParser;
-use crate::request::{ChatRequest, ReplayEntry, serialize_request};
+use crate::error::{CODES, RESPONSE_INVALID, VENDOR, config_error, error, request_error};
+use crate::request::{ChatRequest, serialize_request};
 use crate::{OllamaConfig, OllamaModelConfig};
 
-const STREAM_CHANNEL_CAPACITY: usize = 32;
+const PROVIDER: &str = "ollama";
 
 /// Reusable native Ollama `/api/chat` provider.
 pub struct OllamaProvider {
@@ -89,7 +81,7 @@ impl OllamaProvider {
     ) -> Result<Self, ModelError> {
         let endpoint = config.endpoint_url()?;
         let headers = config.header_map()?;
-        let by_name = catalog_from_models(models)?;
+        let by_name = catalog(models)?;
         let client = reqwest::Client::builder()
             .default_headers(headers)
             .redirect(Policy::none())
@@ -109,7 +101,7 @@ impl OllamaProvider {
     ///
     /// Rejects an empty or duplicate catalog.
     pub fn replace_model_catalog(&self, models: Vec<OllamaModelConfig>) -> Result<(), ModelError> {
-        let by_name = catalog_from_models(models)?;
+        let by_name = catalog(models)?;
         *self.models.write().unwrap_or_else(PoisonError::into_inner) = by_name;
         Ok(())
     }
@@ -145,52 +137,23 @@ impl OllamaProvider {
     }
 }
 
-fn map_draft_media(failure: ResolveDraftMediaError) -> ModelError {
-    match failure {
-        ResolveDraftMediaError::MissingResolver => {
-            request_error("media content requires a configured media resolver")
-        }
-        ResolveDraftMediaError::Resolve(inner) => match inner.kind {
-            MediaResolveKind::NotFound => request_error(inner.message),
-            MediaResolveKind::Unavailable => error(
-                TRANSPORT_ERROR,
-                ErrorCategory::Model,
-                true,
-                "Ollama media resolution is unavailable",
-            ),
-            MediaResolveKind::Limit => stream_limit_error(),
-        },
-        ResolveDraftMediaError::Limit => stream_limit_error(),
-    }
-}
-
-fn catalog_from_models(
+fn catalog(
     models: Vec<OllamaModelConfig>,
 ) -> Result<BTreeMap<ModelName, OllamaModelConfig>, ModelError> {
-    let mut by_name = BTreeMap::new();
-    for model in models {
-        model.validate()?;
-        if by_name.insert(model.name.clone(), model).is_some() {
-            return Err(config_error("provider contains a duplicate model name"));
-        }
-    }
-    if by_name.is_empty() {
-        return Err(config_error("provider requires at least one model"));
-    }
-    let descriptor = ModelDescriptor {
-        provider: Arc::from("ollama"),
-        models: by_name.keys().cloned().collect::<Vec<_>>().into(),
-        metadata: Metadata::empty(),
-    };
-    descriptor.validate()?;
-    Ok(by_name)
+    catalog_from_models(
+        &CODES,
+        PROVIDER,
+        models,
+        |model| &model.name,
+        OllamaModelConfig::validate,
+    )
 }
 
 impl Model for OllamaProvider {
     fn descriptor(&self) -> ModelDescriptor {
         let models = self.models.read().unwrap_or_else(PoisonError::into_inner);
         ModelDescriptor {
-            provider: Arc::from("ollama"),
+            provider: Arc::from(PROVIDER),
             models: models.keys().cloned().collect::<Vec<_>>().into(),
             metadata: Metadata::empty(),
         }
@@ -199,33 +162,13 @@ impl Model for OllamaProvider {
     fn capabilities(&self, model: &ModelName) -> ModelCapabilities {
         let models = self.models.read().unwrap_or_else(PoisonError::into_inner);
         models.get(model).map_or_else(
-            || ModelCapabilities {
-                input: finstack_ai_runtime::ports::model::InputCapabilities {
-                    text: false,
-                    json: false,
-                    images: false,
-                    audio: false,
-                    files: false,
-                },
-                context_profile: finstack_ai_runtime::ports::model::ModelContextProfile {
-                    provider: Arc::from("ollama"),
-                    model: model.clone(),
-                    hard_input_bytes: 0,
-                    context_window_tokens: 0,
-                    max_output_tokens: 0,
-                    reserved_output_tokens: 0,
-                    provider_overhead_tokens: 0,
-                    estimator: estimator_ref(),
-                },
-                native_tool_calls: false,
-                parallel_tool_calls: false,
-                structured_output:
-                    finstack_ai_runtime::ports::model::StructuredOutputCapability::Prompted,
-                reasoning: false,
-                prompt_cache: false,
-                resumable_stream: false,
-                idempotent_requests: false,
-                native_capabilities: BTreeSet::new(),
+            || {
+                unknown_model_capabilities(
+                    PROVIDER,
+                    model,
+                    StructuredOutputCapability::Prompted,
+                    estimator_ref(),
+                )
             },
             OllamaModelConfig::capabilities,
         )
@@ -262,16 +205,21 @@ impl Model for OllamaProvider {
         let max_stream_bytes = self.config.max_stream_bytes();
         let media_resolver = self.config.media_resolver();
         Box::pin(async move {
-            let deadline = tokio::time::Instant::now() + timeout;
-            let cancellation = request.call.run.cancellation.clone();
+            let bounds = BoundedRequest::new(
+                CODES,
+                VENDOR,
+                request.call.run.cancellation.clone(),
+                timeout,
+            );
             let model = model?;
-            let resolved_media = tokio::select! {
-                () = cancellation.cancelled() => return Err(cancelled_error()),
-                () = tokio::time::sleep_until(deadline) => return Err(timeout_error()),
-                resolved = resolve_draft_media(media_resolver.as_ref(), &request.draft, max_stream_bytes) => {
-                    resolved.map_err(map_draft_media)?
-                }
-            };
+            let resolved_media = bounds
+                .guard(resolve_draft_media(
+                    media_resolver.as_ref(),
+                    &request.draft,
+                    max_stream_bytes,
+                ))
+                .await?
+                .map_err(|failure| draft_media_error(&CODES, VENDOR, failure))?;
             let prepared = ChatRequest::try_from_draft(
                 &request.draft,
                 &model,
@@ -280,225 +228,33 @@ impl Model for OllamaProvider {
             )?;
             let payload = serialize_request(&prepared.request)?;
             if payload.len() > max_stream_bytes {
-                return Err(request_limit_error());
+                return Err(request_limit_error(&CODES, VENDOR));
             }
             let request_id = request.call.request_id.to_string();
-            let send = client
-                .post(endpoint)
-                .header(reqwest::header::CONTENT_TYPE, "application/json")
-                .timeout(timeout)
-                .body(payload)
-                .send();
-            let response = tokio::select! {
-                () = cancellation.cancelled() => return Err(cancelled_error()),
-                () = tokio::time::sleep_until(deadline) => return Err(timeout_error()),
-                response = send => response.map_err(|source| transport_error(&source))?,
-            };
-            if !response.status().is_success() {
-                let retryable = matches!(response.status().as_u16(), 408 | 409 | 429 | 500..=599);
-                return Err(error(
-                    HTTP_ERROR,
-                    ErrorCategory::Model,
-                    retryable,
-                    "Ollama endpoint returned an unsuccessful status",
-                ));
-            }
-            let (sender, receiver) = mpsc::channel(STREAM_CHANNEL_CAPACITY);
+            let response = bounds
+                .send(
+                    client
+                        .post(endpoint)
+                        .header(reqwest::header::CONTENT_TYPE, "application/json")
+                        .body(payload),
+                    "chat endpoint",
+                )
+                .await?;
             let structured = matches!(request.draft.output, OutputSpec::JsonSchema { .. });
-            let task = tokio::spawn(drive_response(
-                response,
-                sender,
-                cancellation,
-                request_id,
-                structured,
-                prepared.matched_replay,
-                max_event_bytes,
-                max_stream_bytes,
-                deadline,
-            ));
-            Ok(Box::pin(ReceiverModelStream { receiver, task }) as ModelEventStream)
+            Ok(bounds.spawn(
+                response.bytes_stream(),
+                NdjsonParser::new(max_event_bytes, max_stream_bytes),
+                OllamaChatAssembly::new(request_id, structured, prepared.matched_replay),
+            ))
         })
-    }
-}
-
-struct ReceiverModelStream {
-    receiver: mpsc::Receiver<Result<ModelStreamItem, ModelError>>,
-    task: tokio::task::JoinHandle<()>,
-}
-
-impl Stream for ReceiverModelStream {
-    type Item = Result<ModelStreamItem, ModelError>;
-
-    fn poll_next(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.receiver.poll_recv(context)
-    }
-}
-
-impl Drop for ReceiverModelStream {
-    fn drop(&mut self) {
-        self.task.abort();
-    }
-}
-
-#[expect(
-    clippy::too_many_arguments,
-    reason = "stream driver keeps timeout, limits, and replay on one task"
-)]
-async fn drive_response(
-    response: reqwest::Response,
-    sender: mpsc::Sender<Result<ModelStreamItem, ModelError>>,
-    cancellation: finstack_ai_runtime::ports::model::CancellationSignal,
-    request_id: String,
-    structured: bool,
-    matched_replay: Option<Vec<ReplayEntry>>,
-    max_event_bytes: usize,
-    max_stream_bytes: usize,
-    deadline: tokio::time::Instant,
-) {
-    let mut body = response.bytes_stream();
-    let mut parser = NdjsonParser::new(max_event_bytes, max_stream_bytes);
-    let mut assembly = OllamaChatAssembly::new(
-        request_id,
-        structured,
-        matched_replay.map(|entries| {
-            entries
-                .into_iter()
-                .map(|entry| OllamaReplayEntry {
-                    thinking: entry.thinking,
-                    digest: entry.digest,
-                })
-                .collect()
-        }),
-    );
-    // Lines left after EOF (a final line without its newline), or empty once
-    // `done: true` has been observed mid-stream.
-    let leftover = loop {
-        let chunk = tokio::select! {
-            () = cancellation.cancelled() => {
-                let _ = sender.send(Err(cancelled_error())).await;
-                return;
-            }
-            () = tokio::time::sleep_until(deadline) => {
-                let _ = sender.send(Err(timeout_error())).await;
-                return;
-            }
-            () = sender.closed() => return,
-            chunk = body.next() => chunk,
-        };
-        let chunk = match chunk {
-            None => break parser.finish(),
-            Some(Ok(chunk)) => chunk,
-            Some(Err(source)) => {
-                let _ = sender.send(Err(transport_error(&source))).await;
-                return;
-            }
-        };
-        let lines = match parser.push(&chunk) {
-            Ok(lines) => lines,
-            Err(error) => {
-                let _ = sender.send(Err(error)).await;
-                return;
-            }
-        };
-        match consume_lines(&mut assembly, lines, &sender).await {
-            Ok(true) => break Ok(Vec::new()),
-            Ok(false) => {}
-            Err(error) => {
-                let _ = sender.send(Err(error)).await;
-                return;
-            }
-        }
-    };
-    let outcome = match leftover {
-        Ok(lines) => consume_lines(&mut assembly, lines, &sender).await,
-        Err(error) => Err(error),
-    };
-    let terminal = match outcome {
-        Ok(_) if !assembly.done => Err(stream_error("Ollama NDJSON stream ended before done:true")),
-        Ok(_) => assembly
-            .finish()
-            .map(ModelStreamItem::Completed)
-            .map_err(map_norm),
-        Err(error) => Err(error),
-    };
-    let _ = sender.send(terminal).await;
-}
-
-async fn consume_lines(
-    assembly: &mut OllamaChatAssembly,
-    lines: Vec<String>,
-    sender: &mpsc::Sender<Result<ModelStreamItem, ModelError>>,
-) -> Result<bool, ModelError> {
-    for line in lines {
-        let items = assembly.consume(&line).map_err(map_norm)?;
-        for item in items {
-            if sender.send(Ok(item)).await.is_err() {
-                return Ok(assembly.done);
-            }
-        }
-        if assembly.done {
-            return Ok(true);
-        }
-    }
-    Ok(false)
-}
-
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "map_err passes the normalization error by value"
-)]
-fn map_norm(error: StreamNormError) -> ModelError {
-    match error.kind {
-        StreamNormKind::Limit => stream_limit_error(),
-        StreamNormKind::Stream => stream_error(error.message),
-        StreamNormKind::Response | StreamNormKind::Incomplete => response_error(error.message),
-    }
-}
-
-fn cancelled_error() -> ModelError {
-    error(
-        CANCELLED,
-        ErrorCategory::Cancellation,
-        false,
-        "Ollama request was cancelled",
-    )
-}
-
-fn timeout_error() -> ModelError {
-    error(
-        TIMEOUT,
-        ErrorCategory::Deadline,
-        true,
-        "Ollama request timed out",
-    )
-}
-
-fn request_limit_error() -> ModelError {
-    error(
-        STREAM_LIMIT_EXCEEDED,
-        ErrorCategory::Limit,
-        false,
-        "Ollama request exceeded the configured byte limit",
-    )
-}
-
-fn transport_error(source: &reqwest::Error) -> ModelError {
-    if source.is_timeout() {
-        timeout_error()
-    } else {
-        error(
-            TRANSPORT_ERROR,
-            ErrorCategory::Model,
-            true,
-            "Ollama transport failed",
-        )
     }
 }
 
 #[cfg(test)]
 mod tests {
     use finstack_ai_kernel::ContentBlock;
-    use finstack_ai_runtime::ports::model::{MediaResolver, ResolvedMedia};
+    use finstack_ai_provider_wire::StreamNormKind;
+    use finstack_ai_runtime::ports::model::{MediaResolver, ModelStreamItem, ResolvedMedia};
 
     use super::*;
 

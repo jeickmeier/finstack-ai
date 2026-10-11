@@ -246,6 +246,20 @@ async fn start_rejects_empty_prompt() {
 }
 
 #[tokio::test]
+async fn start_rejects_oversized_prompt() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let toolset = test_toolset("success", dir.path()).await;
+    let prompt = "x".repeat(256 * 1_024 + 1);
+    let output = call_tool(
+        &toolset,
+        "codex_start",
+        &serde_json::json!({ "prompt": prompt }).to_string(),
+    )
+    .await;
+    assert_eq!(output["code"], "codex_invalid_arguments");
+}
+
+#[tokio::test]
 async fn cancel_stops_a_hanging_run() {
     let dir = tempfile::tempdir().expect("tempdir");
     let toolset = test_toolset("hang", dir.path()).await;

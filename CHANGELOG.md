@@ -16,6 +16,137 @@ unpublished.
 
 ### Changed
 
+- `finstack-ai-runtime`: `RunCallContext` gains `deadline_remaining(now)`,
+  `deadline_elapsed(now)`, `is_interrupted(now)`, and `native-tokio`-only
+  `wait_deadline()` / `interrupted()`; toolsets now use them instead of private
+  copies (a clock failure fails closed as elapsed).
+- `finstack-ai-net-guard`: `is_forbidden_destination` also blocks `0.0.0.0/8`,
+  `100.64.0.0/10`, `192.0.0.0/24`, and `240.0.0.0/4` and un-embeds NAT64
+  (`64:ff9b::/96`) and 6to4 (`2002::/16`) destinations. Teredo and
+  `198.18.0.0/15` are deliberately not blocked.
+- `Agent::linked` gateway endpoints may be an origin or the wire protocol's
+  canonical request path (`/v1/responses`, `/v1/messages`, `/api/chat`;
+  `gemini_generate_content` takes an origin only); any other path is a
+  configuration error instead of being silently replaced.
+- `finstack-ai-provider-wire` gains `native` (Tokio/reqwest streaming driver
+  `BoundedRequest`, `StreamProtocol`/`StreamAssembler`, `DataSseParser`/
+  `NamedSseParser`) and `vendored-tls` features plus shared request-phase error
+  constructors, `parse_settings`/`raw_value`/`render_text`/`system_prefix_len`,
+  and `catalog_from_models`/`unknown_model_capabilities`; default features stay
+  target-neutral. Provider leaves now take stream driving, SSE/NDJSON framing,
+  media/cancel/timeout/transport error mapping, and catalog validation from the
+  wire crate (about 710 lines removed); framing and early-EOF error messages
+  drop the vendor prefix (codes, categories, retryability unchanged) and the
+  leaves no longer depend directly on `tokio`.
+- Provider leaves (`anthropic`, `gemini`, `ollama`, `openai`, `openrouter`)
+  adopt shared `finstack-ai-provider-wire` adapter-error and config-rule
+  helpers. Base URLs must be root-only (`*_config_invalid` otherwise). HTTP
+  failures read "<Vendor> <endpoint> returned HTTP <status>" with an
+  `http_status` metadata member; the body is never retained. Streams that stop
+  at the output token limit (`max_tokens`, `MAX_TOKENS`, `done_reason: length`,
+  `response.incomplete`) fail with `*_response_invalid` under the `Limit`
+  category instead of completing truncated. In-stream upstream errors carry
+  retryability (`overloaded_error`, `api_error`, `rate_limit_error`,
+  `server_error`, `rate_limit_exceeded`).
+- Anthropic thinking and `redacted_thinking` blocks are returned in
+  `continuation_state` and replayed at the head of the last assistant turn when
+  thinking is enabled, instead of an opaque block that was dropped on replay.
+  Unknown SSE event names, block types, and delta kinds are ignored; reserved
+  settings are the Messages-API keys only.
+- OpenAI and OpenRouter requests with reasoning send
+  `include: ["reasoning.encrypted_content"]` (`include` is reserved) and
+  replayed `reasoning` items drop their server id. OpenRouter support for
+  `include` is unverified. Gemini folds consecutive text replay parts and
+  validates model context profiles at catalog time.
+- `finstack-ai-store-sqlite` schema is `user_version` 2: `sessions` gains
+  `batch_count`/`record_count`, maintained by append and prune and backfilled
+  from a v1 file on open (one-way; older binaries fail closed). Test fault
+  hooks and `sqlite_fault_helper` sit behind a new `fault-injection` feature.
+  sqlite and Postgres omit the post-prune boundary batch like the in-memory
+  store; `finstack-ai-test` gains `check_prune_boundary_conformance`.
+- `finstack-ai-store-artifact`: pin, unpin, and GC update a small owner sidecar
+  and never rewrite envelope bytes; `get_by_blob` resolves through a blob index
+  with a listing-scan fallback; GC commits through a sidecar mark before
+  deleting envelope, sidecar, and index; a held local lock reports
+  `artifact_busy` instead of treating the artifact as stored; local listings
+  page in filename order; S3 GET buffering is bounded to the artifact ceiling.
+- `finstack-ai-memory`: SQLite schema is `user_version` 4 (`source_digest`
+  column and `memory_counters` row, backfilled in place); pending-embedding,
+  coverage, and capacity checks no longer scan every record; semantic search
+  fetches only the winners; full-text ties order by id. `CandidateMemory.id`
+  is a required `MemoryId`. Recall bounds keyword tokens (64 x 128 B),
+  truncates the full-text query, treats a lexical `InvalidRequest` as no
+  candidates, and keeps the tier-winning score on merge.
+- `finstack-ai-search-core` gains an off-by-default `sqlite` feature with the
+  worker shell the index crates previously copied; `fuse` no longer
+  revalidates hits. `SearchEngine::search` reports a source that rejects a
+  query as a failed leg; `SearchContextProvider` truncates long user turns and
+  degrades non-scope engine errors to an empty contribution
+  (`search_query_limit` is no longer emitted).
+- `finstack-ai-workflow-worker`: `WorkerBuilder::new(journal, wake, inbox)`;
+  cron is opt-in via `WorkerBuilder::cron(cron, fires, fire_retention)`, which
+  purges started fires. Wake dueness is evaluated by the store so parked rows
+  are due only with a buffered response or a passed deadline (new pending
+  index, no schema bump). Unserved kinds are skipped unclaimed, the inbox entry
+  is re-read under the lease, and only unknown locators, invalid commands,
+  kernel decisions, and undecodable payloads dead-letter immediately; other
+  failures back off under `max_response_attempts` (default 8).
+- `finstack-ai` (`durable-host`): `DurableHost::tick` fails with
+  `durable_descriptor_missing` when a scheduled row of a kind it serves has no
+  recovery descriptor, before any dispatch, now that parked rows are driven only on a
+  response or deadline.
+- `finstack-ai-workflow-media-pipeline`: render tables are versioned through
+  a `finstack_workflow_media_pipeline_schema` singleton (v1, existing files
+  adopted). A compose-spec failure persists `failed` with its reason and a
+  transcript-staging failure releases the tick claim instead of leaving
+  `advancing`.
+- `finstack-ai-tools-mcp`: server-initiated JSON-RPC requests are answered
+  `-32601` and surfaced to the observer instead of poisoning the transport;
+  notifications drain unconditionally under a 256-entry cap; a poisoned stdio
+  transport respawns on `reconstruct`; dropping a stdio transport terminates
+  the server process group; SSE responses are parsed incrementally;
+  `with_inline_result_bytes` is clamped to the `RawJson` ceiling.
+- `finstack-ai-tools-video-compose`: each call renders in its own scratch
+  subdirectory; clip inputs are container-sniffed and pinned with `-f`;
+  `-fs` and a pre-read size check cap the output; trims and transitions are
+  validated against probed durations; one wall-clock budget covers every probe
+  and the render; stderr is bounded and probe failures omit it.
+- `finstack-ai-tools-filesystem`: entries are classified with `statat` and
+  only directories are opened (sockets no longer abort listings); open
+  descriptors are bounded by depth; glob walks only the literal prefix;
+  `filesystem_search` skips oversize files and reports `skipped_oversize`.
+- `finstack-ai-tools-shell` clamps timeouts to the call deadline;
+  `finstack-ai-tools-skills` runs host callbacks inside the call future;
+  `finstack-ai-tools-subagent` reclaims terminal child slots before reporting
+  the limit; `calculator`, `elicitation`, `fetch`, and `document` report a
+  principal scope mismatch as `tool_policy_denied` via `verify_authority`.
+- `finstack-ai-sandbox-e2b` deletes the sandbox after every run attempt and
+  maps client timeouts to `e2b_timeout`. `e2b`, `openai-media`,
+  `openrouter-media`, and `observer-notify` validate operator endpoints
+  through `validate_fixed_endpoint` (plaintext only to loopback; userinfo,
+  query, and fragment rejected). `openai-media` builds its Authorization
+  header once from a `SecretString` and reports the HTTP status on rejection;
+  both media toolsets split artifact-store failures into `*_limit_exceeded`
+  (Limit) and `*_transport_failed`; `openrouter-media` admits plaintext
+  loopback download URLs only in tests and serializes the transcription body
+  once. `tools-document` classifies spill failures, loads PDFs once, and denies
+  panics.
+- `finstack-ai-middleware-redaction` replaces the quadratic PEM detector with
+  a linear pattern and redacts inner `AddContext`, `AddInstructions`, and
+  `CompactContext` outcomes in wrapping mode (failing closed when a projection
+  cannot be rebuilt). `finstack-ai-middleware-compaction` drops a multi-call
+  assistant message together with every tool-result message. `tool-policy` compiles jailbreak
+  triggers into an Aho-Corasick automaton once; `verify` memoizes bounced
+  findings. `document-ingest` consults its parse memo before the store and
+  parses on the blocking pool natively.
+- Observers: `metrics` keys effect starts by `EffectId`, releases them on every
+  terminal event, and caps the map; `billing` reads only the `model` field;
+  `otel` no longer force-flushes per batch.
+- Interop: `remote-child` evicts the oldest accepted child when its table
+  fills and labels tool cancels `ParentRun`; `codex-child` delivers the prompt
+  over stdin (capped at 256 KiB), leads its own process group, and terminates
+  the group on cancel.
+
 - Staged 2.0 direct context, middleware, and observer registration derives exact
   identities from descriptors. Models, toolsets, and journals retain explicit
   versioned identities. Linked constructors work with individual provider
@@ -28,6 +159,31 @@ unpublished.
   media fields. Existing tool identities, approval rules, and schemas remain.
 
 ### Added
+
+- `finstack-ai-net-guard`: `validate_fixed_endpoint` validates an
+  operator-configured endpoint once at construction.
+- `finstack-ai-provider-wire`: `ProviderErrorCodes`, `adapter_error`,
+  `http_error`, `incomplete_error`, `stream_norm_error`, `config_rules`,
+  `StreamNormError::retryable`, `OllamaReplayEntry: Deserialize`,
+  `parse_ollama_continuation`, and `ollama_content_digest`.
+- `finstack-ai-search-core`: `sqlite::{Database, DatabaseSpec, Migration}`
+  behind the `sqlite` feature.
+- `finstack-ai-store-artifact`: owner sidecar `artifacts/owners/v1/` and blob
+  index `artifacts/by-blob/v1/`, with compatibility fixture
+  `fixtures/compatibility/artifact/v2/envelope/valid--pinned-owner.bin`.
+- `finstack-ai-workflow-worker`: `TickOutcome`, `WorkerHandle::last_tick()`,
+  `WorkerBuilder::cron`, `WorkerBuilder::max_response_attempts`,
+  `WakeIndexStore::load_due_scoped`; codes `cron_not_configured`,
+  `fire_retention_zero`, `fire_retention_overflow`,
+  `max_response_attempts_zero`.
+- `finstack-ai-workflow-media-pipeline`: `MediaPipelineDriver::release_claim`,
+  `RenderState::failure`, code `media_pipeline_schema_version`.
+- `finstack-ai-tools-mcp`: code `mcp_transport_poisoned`.
+- `finstack-ai-middleware-document-ingest`: codes
+  `document_ingest_lookup_failed` and `document_ingest_integrity_mismatch`.
+- `finstack-ai-observer-otel`: `OtelObserver::try_new_with_provider` (the
+  Python binding does not yet expose provider injection).
+- `finstack-ai-store-sqlite`: `fault-injection` feature.
 
 - Rust-owned evaluation and typed `finstack_ai.eval`: frozen experiments,
   durable reservations/reconciliation, built-in and custom scoring, separate
@@ -329,6 +485,12 @@ unpublished.
 
 ### Removed
 
+- `finstack-ai-tools-shell`: `CommandSandbox`, `ShellToolset::with_sandbox`,
+  and the public `SandboxedCommand`/`SandboxedOutput` types; the runner is
+  always the in-crate `ProcessCommandSandbox`.
+- `finstack-ai` (`durable-host`) and `finstack-ai-workflow-hitl` no longer
+  depend on `finstack-ai-workflow-local`.
+
 - Removed the `McpToolsetFactory::reconstruct*` aliases and the public
   `native_tokio_enabled` test probe. An isolated CI fixture now verifies the
   `wasm-host`-only feature graph directly.
@@ -356,6 +518,26 @@ unpublished.
 - Removed the non-engine `finstack-ai-workflow-temporal` shim.
 
 ### Fixed
+
+- Structured-output turns that only emit tool calls complete on OpenAI,
+  OpenRouter, and Gemini instead of failing on empty JSON text. Ollama tool
+  calls split across NDJSON chunks receive distinct indices. Anthropic
+  `tool_use` blocks that reuse a content-block index are rejected.
+- A long user turn no longer aborts the run through the search or memory
+  context providers. Compaction no longer aborts the run on histories with
+  parallel tool calls.
+- A transient journal failure no longer dead-letters a buffered human
+  resolution in the workflow worker.
+- E2B sandboxes are deleted on success and on transport failures, not only
+  on timeout. `remote-child` no longer refuses every new start after 1024
+  accepted children.
+- A directory containing a Unix socket, an oversize file, or thousands of
+  subdirectories no longer fails `filesystem_list`, `filesystem_search`, or
+  `filesystem_glob`.
+- Concurrent identical `stage_put` calls against the local artifact driver
+  return `artifact_busy` instead of `NotFound`.
+- `SqliteJournalStore::list_sessions` reports an integrity error instead of
+  head 0 on an unrepresentable sequence.
 
 - Remote-server authentication now rejects invalid local verifier/session
   configuration at construction, enforces bearer and loopback transport policy

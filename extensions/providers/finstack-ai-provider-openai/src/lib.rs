@@ -25,7 +25,6 @@ mod config;
 mod error;
 mod provider;
 mod request;
-mod sse;
 
 pub use config::{OpenAiConfig, OpenAiModelConfig, SecretHeader};
 pub use finstack_ai_runtime::ports::model::{

@@ -719,3 +719,100 @@ async fn version_one_migrates_ordered_indexes_without_changing_evidence() {
     let reopened = GraphSearchSource::try_open(&path, config, vec![source]).unwrap();
     assert_eq!(query(&reopened, "Acme", neighborhood(2)).await, expected);
 }
+
+#[tokio::test]
+async fn scoped_source_removal_matches_rebuilt_graph() {
+    let store = Arc::new(InProcessMemoryStore::new());
+    for (id, text) in [
+        ("a", "Acme owns Beta. Beta owns Gamma."),
+        ("b", "Beta owns Gamma. Gamma owns Delta."),
+        ("c", "Acme owns Epsilon."),
+    ] {
+        store.put(id.into(), record(id, text)).await.unwrap();
+    }
+    let incremental = open(Path::new(":memory:"), store.clone());
+    let mut counts = Vec::new();
+    for id in ["a", "b", "c"] {
+        let report = incremental
+            .index_reference("memory", reference(id))
+            .await
+            .unwrap();
+        counts.push((report.entities, report.edges, report.removed));
+    }
+    assert_eq!(counts, vec![(3, 2, false), (3, 2, false), (2, 1, false)]);
+    let labels = |result: &SourceResult| {
+        result
+            .hits
+            .iter()
+            .map(|hit| {
+                (
+                    hit.entity_label.as_deref().unwrap_or_default().to_owned(),
+                    hit.score,
+                    hit.provenance.citations.len(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    let before = query(&incremental, "Beta", neighborhood(2)).await;
+    assert_eq!(
+        labels(&before),
+        vec![
+            ("beta".to_owned(), u32::MAX, 2),
+            ("acme".to_owned(), u32::MAX - 1, 3),
+            ("gamma".to_owned(), u32::MAX - 1, 2),
+            ("epsilon".to_owned(), u32::MAX - 2, 3),
+            ("delta".to_owned(), u32::MAX - 2, 2),
+        ]
+    );
+    store
+        .forget(
+            "forget".into(),
+            MemoryScope::try_new("tenant").unwrap(),
+            MemoryId::parse("b").unwrap(),
+        )
+        .await
+        .unwrap();
+    let removed = incremental
+        .index_reference("memory", reference("b"))
+        .await
+        .unwrap();
+    assert!(removed.removed && removed.entities == 0 && removed.edges == 0);
+    // Facts only `b` supported (Delta, Gamma owns Delta) are gone; shared facts
+    // keep their other support, exactly as a graph built without `b`.
+    let fresh = open(Path::new(":memory:"), store.clone());
+    for id in ["a", "c"] {
+        fresh
+            .index_reference("memory", reference(id))
+            .await
+            .unwrap();
+    }
+    let after = query(&incremental, "Beta", neighborhood(2)).await;
+    assert_eq!(after.status, SourceStatus::Completed);
+    assert_eq!(
+        labels(&after),
+        vec![
+            ("beta".to_owned(), u32::MAX, 1),
+            ("acme".to_owned(), u32::MAX - 1, 2),
+            ("gamma".to_owned(), u32::MAX - 1, 1),
+            ("epsilon".to_owned(), u32::MAX - 2, 2),
+        ]
+    );
+    assert!(
+        query(&incremental, "Delta", GraphQuery::Entity)
+            .await
+            .hits
+            .is_empty()
+    );
+    for (text, graph) in [
+        ("Beta", neighborhood(2)),
+        ("Acme", neighborhood(1)),
+        ("Delta", GraphQuery::Entity),
+        ("Gamma", GraphQuery::Entity),
+    ] {
+        assert_eq!(
+            query(&incremental, text, graph.clone()).await,
+            query(&fresh, text, graph).await,
+            "{text}"
+        );
+    }
+}

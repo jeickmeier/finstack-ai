@@ -24,3 +24,5 @@ pub fn finstack_ai_middleware_document_ingest::DocumentIngestMiddleware::fmt(&se
 impl finstack_ai_runtime::ports::middleware::port::Middleware for finstack_ai_middleware_document_ingest::DocumentIngestMiddleware
 pub fn finstack_ai_middleware_document_ingest::DocumentIngestMiddleware::descriptor(&self) -> finstack_ai_runtime::ports::middleware::types::MiddlewareDescriptor
 pub fn finstack_ai_middleware_document_ingest::DocumentIngestMiddleware::invoke(&self, finstack_ai_runtime::ports::middleware::types::MiddlewareContext, finstack_ai_runtime::ports::middleware::types::StageInput) -> finstack_ai_runtime::ports::PortFuture<core::result::Result<finstack_ai_runtime::ports::middleware::types::StageOutcome, finstack_ai_runtime::ports::middleware::error::MiddlewareError>>
+pub const finstack_ai_middleware_document_ingest::DOCUMENT_INGEST_INTEGRITY_MISMATCH: &str
+pub const finstack_ai_middleware_document_ingest::DOCUMENT_INGEST_LOOKUP_FAILED: &str

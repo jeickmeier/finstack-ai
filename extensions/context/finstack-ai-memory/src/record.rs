@@ -80,6 +80,13 @@ impl MemoryId {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// Identifier derived from a digest: its 64-character lowercase hex
+    /// form, which is non-empty, NUL-free, and within
+    /// [`MEMORY_ID_MAX_BYTES`] by construction.
+    pub(crate) fn from_digest(digest: &finstack_ai_kernel::Digest) -> Self {
+        Self(Arc::from(digest.to_hex()))
+    }
 }
 
 /// Scope filter/binding for a memory record: tenant is required, the rest

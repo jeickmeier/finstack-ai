@@ -12,18 +12,22 @@ publish = false
 
 [features]
 default = []
+sqlite = ["dep:rusqlite", "dep:tokio"]
 test-support = []
 
 [dependencies]
 finstack-ai-kernel.workspace = true
 finstack-ai-runtime.workspace = true
 regex.workspace = true
+rusqlite = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 serde_json_canonicalizer.workspace = true
 thiserror.workspace = true
+tokio = { workspace = true, optional = true }
 
 [dev-dependencies]
+tempfile.workspace = true
 tokio.workspace = true
 
 [lints]

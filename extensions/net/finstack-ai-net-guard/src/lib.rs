@@ -66,7 +66,7 @@ pub enum NetGuardError {
 }
 
 mod vet;
-pub use vet::{UrlPolicy, VettedUrl, is_loopback_host, parse_and_vet_url};
+pub use vet::{UrlPolicy, VettedUrl, is_loopback_host, parse_and_vet_url, validate_fixed_endpoint};
 
 mod resolve;
 pub use resolve::{

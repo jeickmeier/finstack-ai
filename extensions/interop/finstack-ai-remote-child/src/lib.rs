@@ -35,17 +35,17 @@ pub use route::RemoteChildRoute;
 mod tests {
     use std::sync::Arc;
 
-    use finstack_ai_kernel::BudgetRequest;
     use finstack_ai_kernel::{
         AgentId, BundleId, ChildPlacement, ChildRunLocator, ComponentId, ComponentRef,
         ContentBlock, Digest, EffectId, ExternalHandleRef, LaneId, Metadata, OperationLocator,
         RawJson, RemoteRouteRef, RunId, SessionId, TextBlock, Version,
     };
+    use finstack_ai_kernel::{BudgetRequest, CancellationInitiator};
     use finstack_ai_protocol::{
         FRAME_LENGTH_BYTES, POST_AUTH_FRAME_MAX_BYTES, PRE_AUTH_FRAME_MAX_BYTES,
-        PROTOCOL_VERSION_V1, PayloadFamily, ProtocolEnvelope, RemoteCommandResult, RemotePostAuth,
-        RemotePreAuth, VersionOffer, decode_envelope, decode_frame_len, encode_envelope,
-        encode_frame,
+        PROTOCOL_VERSION_V1, PayloadFamily, ProtocolEnvelope, RemoteCommand, RemoteCommandPayload,
+        RemoteCommandResult, RemotePostAuth, RemotePreAuth, VersionOffer, decode_envelope,
+        decode_frame_len, encode_envelope, encode_frame,
     };
     use finstack_ai_runtime::child::{
         AgentInvoker, ChildRunContext, ChildRunRequest, ChildRunStatus,
@@ -135,6 +135,44 @@ mod tests {
             .await
             .expect("repeat cancel");
         server.await.expect("server");
+    }
+
+    /// A cancel issued through the invoker is cascade cancellation from the
+    /// parent run, and the wire payload says so.
+    #[tokio::test]
+    async fn tool_cancel_is_labelled_parent_run() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let endpoint = listener.local_addr().expect("addr").to_string();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.expect("accept start");
+            serve_one_command(stream).await;
+            let (stream, _) = listener.accept().await.expect("accept cancel");
+            serve_one_command(stream).await
+        });
+
+        let invoker = RemoteChildInvoker::try_new(RemoteChildRoute {
+            endpoint,
+            service: "finstack.remote.worker".into(),
+            route: "route-1".into(),
+            token: None,
+        })
+        .expect("invoker");
+        let request = child_request();
+        let context = child_context();
+        let parent_run_id = context.parent.run_id;
+        invoker
+            .start_or_attach(context, request.clone())
+            .await
+            .expect("start");
+        invoker.cancel(request.locator()).await.expect("cancel");
+        let cancel = server.await.expect("server");
+        let RemoteCommandPayload::Cancel(cancel) = cancel.payload() else {
+            panic!("expected cancel command");
+        };
+        assert_eq!(
+            cancel.initiator,
+            CancellationInitiator::ParentRun { parent_run_id }
+        );
     }
 
     #[tokio::test]
@@ -316,7 +354,8 @@ mod tests {
         write_post(stream, &RemotePostAuth::SyncBarrier { sequence: 0 }).await;
     }
 
-    async fn serve_one_command(mut stream: tokio::net::TcpStream) {
+    /// Accept one command, acknowledge it, and hand it back for inspection.
+    async fn serve_one_command(mut stream: tokio::net::TcpStream) -> RemoteCommand {
         handshake_stream(&mut stream).await;
         let RemotePostAuth::Command { command } = read_post(&mut stream).await else {
             panic!("expected command");
@@ -335,6 +374,7 @@ mod tests {
             },
         )
         .await;
+        command
     }
 
     async fn read_pre(stream: &mut tokio::net::TcpStream) -> RemotePreAuth {

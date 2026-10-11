@@ -40,6 +40,8 @@ pub struct CodexExecConfig {
     pub sandbox: CodexSandboxMode,
     /// Pass `--skip-git-repo-check` (needed when the root is not a repo).
     pub skip_git_repo_check: bool,
-    /// Extra frozen arguments inserted before the prompt separator.
+    /// Extra frozen arguments appended after the fixed flags. The prompt is
+    /// never part of argv (it is written to the child's stdin), so these
+    /// must be flags, not a positional prompt.
     pub extra_args: Vec<String>,
 }

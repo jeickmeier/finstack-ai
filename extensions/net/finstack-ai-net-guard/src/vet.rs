@@ -105,3 +105,60 @@ pub fn parse_and_vet_url(value: &str, policy: &UrlPolicy) -> Result<VettedUrl, N
         is_loopback: http && loopback,
     })
 }
+
+/// Validate an operator-configured fixed endpoint (a provider base URL, a
+/// webhook sink, a sandbox API host) once at construction time.
+///
+/// This applies every rule of [`parse_and_vet_url`] (https only, plaintext
+/// `http` iff `policy.allow_loopback_http` and the host is loopback, no
+/// userinfo, no fragment, https port 443 unless
+/// `policy.allow_nonstandard_https_port`) and additionally rejects any query
+/// component, including a bare trailing `?`. A fixed endpoint is a base that
+/// the caller appends paths to; a query string on it would be silently
+/// inherited by every request or dropped by path joining, so it is an
+/// operator mistake either way.
+///
+/// No private-address deny list is applied. Destination vetting
+/// ([`reject_literal_destination`](crate::reject_literal_destination),
+/// [`resolve_and_pin`](crate::resolve_and_pin)) exists for model-supplied
+/// URLs; an operator pointing a provider at `https://10.0.0.5/` is
+/// legitimate. `localhost` stays accepted because [`is_loopback_host`]
+/// treats it as loopback, which is the only way plaintext `http` passes.
+///
+/// # Errors
+///
+/// Returns `NetGuardError::InvalidUrl { reason: "query_forbidden" }` when
+/// the URL carries a query, and every `InvalidUrl` reason that
+/// [`parse_and_vet_url`] produces otherwise.
+///
+/// # Examples
+///
+/// ```
+/// use finstack_ai_net_guard::{NetGuardError, UrlPolicy, validate_fixed_endpoint};
+///
+/// let policy = UrlPolicy {
+///     allow_loopback_http: false,
+///     allow_nonstandard_https_port: false,
+/// };
+/// let endpoint = validate_fixed_endpoint("https://api.example.com/v1", &policy)
+///     .expect("fixed https endpoint");
+/// assert_eq!(endpoint.host, "api.example.com");
+///
+/// let rejected = validate_fixed_endpoint("https://api.example.com/v1?key=x", &policy);
+/// assert_eq!(
+///     rejected.err(),
+///     Some(NetGuardError::InvalidUrl {
+///         reason: "query_forbidden"
+///     })
+/// );
+/// ```
+pub fn validate_fixed_endpoint(
+    value: &str,
+    policy: &UrlPolicy,
+) -> Result<VettedUrl, NetGuardError> {
+    let vetted = parse_and_vet_url(value, policy)?;
+    if vetted.url.query().is_some() {
+        return Err(invalid("query_forbidden"));
+    }
+    Ok(vetted)
+}

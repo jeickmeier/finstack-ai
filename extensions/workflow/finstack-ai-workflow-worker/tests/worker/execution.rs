@@ -10,10 +10,9 @@ use finstack_ai_runtime::ports::model::Model;
 use finstack_ai_runtime::run::RunHandle;
 use finstack_ai_runtime::workflow::{WorkflowSession, WorkflowWait, classify_wait};
 use finstack_ai_test::{ScriptedModel, ScriptedModelAction, ScriptedModelPlan};
-use finstack_ai_workflow_local::MemoryCronStore;
 use finstack_ai_workflow_worker::{
-    FireStore, InboxStore, MemoryWorkerStore, PortsFactory, WakeIndexStore, WorkerBuilder,
-    WorkerError, WorkflowExecution, park_for_wake,
+    InboxStore, MemoryWorkerStore, PortsFactory, WakeIndexStore, WorkerBuilder, WorkerError,
+    WorkflowExecution, park_for_wake,
 };
 
 use crate::helpers::{
@@ -90,9 +89,7 @@ async fn exercise(lose_lease: bool) {
     });
     let worker = WorkerBuilder::new(
         journal,
-        Arc::new(MemoryCronStore::new()),
         Arc::clone(&store) as Arc<dyn WakeIndexStore>,
-        Arc::clone(&store) as Arc<dyn FireStore>,
         Arc::clone(&store) as Arc<dyn InboxStore>,
     )
     .clock(clock)

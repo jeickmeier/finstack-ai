@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use finstack_ai_kernel::{
     Digest, ErrorCategory, ExternalHandleRef, KernelState, Metadata, OutputSpec, ProviderIds,
-    RawJson, ReconciliationPolicy, RetrySafety, RunPhase, Usage,
+    RawJson, ReconciliationPolicy, RetrySafety, RunPhase, Timestamp, Usage,
 };
 
 use crate::ports::PortFuture;
@@ -606,4 +606,191 @@ fn model_resume_maps_reconcile_results_to_documented_actions() {
             native_capabilities: BTreeSet::new(),
         }
     ));
+}
+
+fn run_context(deadline: Option<Timestamp>) -> RunCallContext {
+    RunCallContext {
+        locator: finstack_ai_kernel::OperationLocator::try_new("tenant-a", id(1), id(2), id(3))
+            .expect("locator"),
+        authorization: AuthorizationContext {
+            principal: finstack_ai_kernel::PrincipalRef::try_new(
+                "issuer-a",
+                "subject-a",
+                Some("tenant-a"),
+            )
+            .expect("principal"),
+            authentication_method: Arc::from("test"),
+            assurance_level: Arc::from("low"),
+            roles: Arc::from([]),
+            permitted_scopes: Arc::from([]),
+            safe_claims: Metadata::empty(),
+            policy_version: Arc::from("1"),
+            decision_id: Arc::from("decision-1"),
+        },
+        effect_id: id(4),
+        attempt: 1,
+        deadline,
+        budget_scope_id: None,
+        cancellation: CancellationSignal::new(),
+        relation_depth: 0,
+    }
+}
+
+fn at(ms: i64) -> Timestamp {
+    Timestamp::from_unix_ms(ms).expect("timestamp")
+}
+
+#[test]
+fn deadline_remaining_is_zero_once_elapsed() {
+    let context = run_context(Some(at(1_400)));
+    assert_eq!(
+        context.deadline_remaining(at(1_000)),
+        Some(core::time::Duration::from_millis(400))
+    );
+    assert!(!context.deadline_elapsed(at(1_399)));
+    assert_eq!(
+        context.deadline_remaining(at(1_400)),
+        Some(core::time::Duration::ZERO)
+    );
+    assert!(context.deadline_elapsed(at(1_400)));
+    assert_eq!(
+        context.deadline_remaining(at(5_000)),
+        Some(core::time::Duration::ZERO)
+    );
+    assert!(context.deadline_elapsed(at(5_000)));
+}
+
+#[test]
+fn deadline_remaining_is_none_without_deadline() {
+    let context = run_context(None);
+    assert_eq!(context.deadline_remaining(at(1_000)), None);
+    assert!(!context.deadline_elapsed(at(i64::from(i32::MAX))));
+    assert!(!context.is_interrupted(at(i64::from(i32::MAX))));
+}
+
+#[test]
+fn is_interrupted_reflects_cancellation() {
+    let context = run_context(Some(at(1_400)));
+    assert!(!context.is_interrupted(at(1_000)));
+    assert!(context.is_interrupted(at(1_400)));
+
+    let context = run_context(None);
+    assert!(!context.is_interrupted(at(1_000)));
+    context.cancellation.cancel();
+    assert!(context.is_interrupted(at(1_000)));
+}
+
+#[cfg(feature = "native-tokio")]
+mod native_deadline {
+    use std::sync::atomic::AtomicI64;
+    use std::time::Duration as StdDuration;
+
+    use crate::ids::{Clock, IdGenerationError};
+
+    use super::*;
+
+    struct FixedClock(AtomicI64);
+
+    impl Clock for FixedClock {
+        fn now(&self) -> Result<Timestamp, IdGenerationError> {
+            Timestamp::from_unix_ms(self.0.load(Ordering::Acquire)).map_err(IdGenerationError::Time)
+        }
+    }
+
+    struct BrokenClock;
+
+    impl Clock for BrokenClock {
+        fn now(&self) -> Result<Timestamp, IdGenerationError> {
+            Err(IdGenerationError::Source("no clock".into()))
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn wait_deadline_fires_at_deadline() {
+        let clock = FixedClock(AtomicI64::new(1_000));
+        let context = run_context(Some(at(1_400)));
+        let wait = context.wait_deadline_with(&clock);
+        tokio::pin!(wait);
+
+        // First poll reads the clock and arms the 400ms sleep at paused t=0.
+        assert!(
+            tokio::time::timeout(StdDuration::ZERO, &mut wait)
+                .await
+                .is_err()
+        );
+        tokio::time::advance(StdDuration::from_millis(399)).await;
+        assert!(
+            tokio::time::timeout(StdDuration::ZERO, &mut wait)
+                .await
+                .is_err()
+        );
+        tokio::time::advance(StdDuration::from_millis(1)).await;
+        assert!(
+            tokio::time::timeout(StdDuration::ZERO, &mut wait)
+                .await
+                .is_ok()
+        );
+
+        // Already elapsed resolves immediately.
+        clock.0.store(1_400, Ordering::Release);
+        assert!(
+            tokio::time::timeout(StdDuration::ZERO, context.wait_deadline_with(&clock))
+                .await
+                .is_ok()
+        );
+
+        // A broken clock fails closed: the deadline counts as elapsed.
+        assert!(
+            tokio::time::timeout(StdDuration::ZERO, context.wait_deadline_with(&BrokenClock))
+                .await
+                .is_ok()
+        );
+
+        // Without a deadline the wait pends even when the clock is broken.
+        let unbounded = run_context(None);
+        assert!(
+            tokio::time::timeout(StdDuration::from_secs(1), unbounded.wait_deadline())
+                .await
+                .is_err()
+        );
+        assert!(
+            tokio::time::timeout(
+                StdDuration::from_secs(1),
+                unbounded.wait_deadline_with(&BrokenClock)
+            )
+            .await
+            .is_err()
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn interrupted_resolves_on_cancel_first() {
+        let far_deadline = crate::ids::SystemClock
+            .now()
+            .expect("system clock")
+            .as_unix_ms()
+            .saturating_add(60_000);
+        let context = run_context(Some(at(far_deadline)));
+        assert!(
+            tokio::time::timeout(StdDuration::ZERO, context.interrupted())
+                .await
+                .is_err()
+        );
+
+        context.cancellation.cancel();
+        assert!(
+            tokio::time::timeout(StdDuration::ZERO, context.interrupted())
+                .await
+                .is_ok()
+        );
+
+        // Cancellation also unblocks a call without any deadline.
+        let unbounded = run_context(None);
+        let signal = unbounded.cancellation.clone();
+        let waiter = tokio::spawn(async move { unbounded.interrupted().await });
+        tokio::task::yield_now().await;
+        assert!(!waiter.is_finished());
+        signal.cancel();
+        waiter.await.expect("interrupted task");
+    }
 }

@@ -255,6 +255,12 @@ enum Command {
         embedder_id: Arc<str>,
         reply: oneshot::Sender<Result<(), MemoryStoreError>>,
     },
+    /// Test-only read probe over the worker-owned connection; the probe
+    /// carries its own reply channel.
+    #[cfg(test)]
+    Inspect {
+        probe: Box<dyn FnOnce(&Connection) + Send>,
+    },
 }
 
 impl SqliteMemoryStore {
@@ -338,6 +344,21 @@ impl SqliteMemoryStore {
                 .await
                 .map_err(|_| sqlite_unavailable())?;
             receive.await.map_err(|_| sqlite_unavailable())?
+        })
+    }
+
+    /// Run `probe` on the worker thread against the store's own connection
+    /// and return its result, so tests can audit internal tables of an
+    /// in-memory database no second connection can open.
+    #[cfg(test)]
+    pub(crate) fn inspect<T: Send + 'static>(
+        &self,
+        probe: impl FnOnce(&Connection) -> T + Send + 'static,
+    ) -> PortFuture<Result<T, MemoryStoreError>> {
+        self.dispatch(move |reply| Command::Inspect {
+            probe: Box::new(move |connection| {
+                let _ = reply.send(Ok(probe(connection)));
+            }),
         })
     }
 
@@ -476,8 +497,10 @@ fn run_worker(
                 let _ = reply.send(store_embedding(&mut connection, &write, now, limits));
             }
             Command::ForgetEmbeddingSpace { embedder_id, reply } => {
-                let _ = reply.send(forget_embedding_space(&connection, &embedder_id));
+                let _ = reply.send(forget_embedding_space(&mut connection, &embedder_id));
             }
+            #[cfg(test)]
+            Command::Inspect { probe } => probe(&connection),
         }
     }
 }

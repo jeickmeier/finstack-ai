@@ -94,14 +94,23 @@ const API_KEY_PATTERN: &str = "sk-[A-Za-z0-9_-]{16,}\
 
 const JWT_PATTERN: &str = "eyJ[A-Za-z0-9_-]{4,}\\.eyJ[A-Za-z0-9_-]{4,}\\.[A-Za-z0-9_-]{4,}";
 
-/// A whole PEM block when the end marker is present (leftmost-first
-/// alternation prefers it). The header-only fallback also consumes any
-/// directly following base64 lines, so a block whose `END` line was
-/// truncated does not leave its key material behind in cleartext — only
-/// whole newline-led base64 lines are consumed, never same-line prose.
+/// A PEM block as a single line-class walk: the `BEGIN` header; the two
+/// optional RFC 1421 encrypted-PEM header lines (`Proc-Type: 4,ENCRYPTED`,
+/// `DEK-Info: …`, bounded to 256 bytes each) with the blank line that
+/// separates them from the body; any run of newline-led base64 lines; and
+/// finally an optional `END` line. Every line class is anchored to the
+/// newline that introduces it and never crosses into same-line prose, so
+/// the scan stops at the first line that is not part of the block and the
+/// work per match is proportional to the block itself: a flood of `BEGIN`
+/// headers without any `END` costs linear time, where a lazy `.*?…END`
+/// reach would have rescanned the whole remainder of the text for each
+/// header. A block whose `END` line was truncated still has its key
+/// material consumed.
 const PRIVATE_KEY_PATTERN: &str = "-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----\
-    (?s:.*?)-----END [A-Z0-9 ]*PRIVATE KEY-----\
-    |-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----(?:\\r?\\n[A-Za-z0-9+/=]+)*";
+    (?:\\r?\\n(?:Proc-Type|DEK-Info): [^\\r\\n]{0,256})*\
+    (?:\\r?\\n\\r?\\n[A-Za-z0-9+/=]+)?\
+    (?:\\r?\\n[A-Za-z0-9+/=]+)*\
+    (?:\\r?\\n-----END [A-Z0-9 ]*PRIVATE KEY-----)?";
 
 /// 13–24 characters of digits with optional space/dash separators, starting
 /// and ending on a digit. Length and separator uniformity are enforced by

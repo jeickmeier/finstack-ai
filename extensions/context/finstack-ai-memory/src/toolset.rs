@@ -135,6 +135,18 @@ impl Default for MemoryPolicy {
     }
 }
 
+impl MemoryPolicy {
+    /// Whether the tool named `model_name` is enabled by this policy.
+    pub(crate) fn permits(self, model_name: &str) -> bool {
+        match model_name {
+            SEARCH_NAME | INSPECT_NAME => self.read,
+            REMEMBER_NAME => self.write,
+            FORGET_NAME | CORRECT_NAME => self.manage,
+            _ => false,
+        }
+    }
+}
+
 /// Capability-gated tool surface over a [`MemoryStore`].
 #[derive(Clone)]
 pub struct MemoryToolset {
@@ -146,6 +158,9 @@ pub struct MemoryToolset {
     embedder: Option<Arc<dyn TextEmbedder>>,
     descriptor: ToolsetDescriptor,
     specs: Arc<[ToolSpec]>,
+    /// `specs` filtered by `policy` once at construction: what `tools()`
+    /// advertises.
+    permitted_specs: Arc<[ToolSpec]>,
 }
 
 impl std::fmt::Debug for MemoryToolset {
@@ -214,7 +229,7 @@ impl MemoryToolset {
         } else {
             (SEARCH_DESCRIPTION, SEARCH_INPUT_SCHEMA)
         };
-        let specs = Arc::from([
+        let specs: Arc<[ToolSpec]> = Arc::from([
             build_spec(
                 REMEMBER_TOOL_ID,
                 REMEMBER_NAME,
@@ -266,6 +281,11 @@ impl MemoryToolset {
                 SideEffectClass::IdempotentWrite,
             )?,
         ]);
+        let permitted_specs: Arc<[ToolSpec]> = specs
+            .iter()
+            .filter(|spec| policy.permits(spec.model_name.as_ref()))
+            .cloned()
+            .collect();
         Ok(Self {
             store,
             artifact_store,
@@ -278,6 +298,7 @@ impl MemoryToolset {
                 metadata: Metadata::empty(),
             },
             specs,
+            permitted_specs,
         })
     }
 }
@@ -335,13 +356,7 @@ impl Toolset for MemoryToolset {
     }
 
     fn tools(&self) -> Arc<[ToolSpec]> {
-        let filtered: Vec<ToolSpec> = self
-            .specs
-            .iter()
-            .filter(|spec| self.tool_permitted(spec.model_name.as_ref()))
-            .cloned()
-            .collect();
-        Arc::from(filtered)
+        Arc::clone(&self.permitted_specs)
     }
 
     fn call(
@@ -412,12 +427,7 @@ impl MemoryToolset {
     }
 
     fn tool_permitted(&self, model_name: &str) -> bool {
-        match model_name {
-            SEARCH_NAME | INSPECT_NAME => self.policy.read,
-            REMEMBER_NAME => self.policy.write,
-            FORGET_NAME | CORRECT_NAME => self.policy.manage,
-            _ => false,
-        }
+        self.policy.permits(model_name)
     }
 
     async fn dispatch(

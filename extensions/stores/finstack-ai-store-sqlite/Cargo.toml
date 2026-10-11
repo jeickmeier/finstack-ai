@@ -10,6 +10,12 @@ authors.workspace = true
 description = "Durable local SQLite journal store for finstack-ai"
 publish = false
 
+[features]
+# Test-only fault hooks on `SqliteJournalStore` (page-count caps, rollback
+# journal, padding blobs, append-then-rollback) and the process-kill helper
+# binary. Off by default; nothing in the product surface depends on it.
+fault-injection = []
+
 [dependencies]
 finstack-ai-kernel = { workspace = true }
 finstack-ai-protocol = { workspace = true }
@@ -32,6 +38,7 @@ harness = false
 [[bin]]
 name = "sqlite_fault_helper"
 path = "src/bin/sqlite_fault_helper.rs"
+required-features = ["fault-injection"]
 
 [[bin]]
 name = "sqlite_ops"

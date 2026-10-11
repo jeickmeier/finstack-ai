@@ -5,10 +5,15 @@ use finstack_ai_runtime::ports::journal::StoreError;
 use crate::config::{SqliteDurability, SqliteSynchronous};
 use crate::error::map_sqlite_error;
 
-/// Applied `PRAGMA user_version` for the v1 schema. Other versions fail closed.
-pub const SCHEMA_USER_VERSION: i32 = 1;
+/// Applied `PRAGMA user_version` for the current schema. Files at version
+/// 0 and 1 are migrated forward on open; every other version fails closed
+/// with `sqlite_schema_unsupported`.
+pub const SCHEMA_USER_VERSION: i32 = 2;
 
-const V1_DDL: &str = "
+/// Version-1 schema, retained verbatim so a v1 file can be fabricated by
+/// migration tests and so the v2 migration always starts from the exact
+/// shape it was written against.
+pub(crate) const V1_DDL: &str = "
 CREATE TABLE sessions (
   session_id BLOB PRIMARY KEY,
   current_sequence INTEGER NOT NULL,
@@ -55,6 +60,16 @@ CREATE TABLE snapshots (
 );
 CREATE INDEX records_batch_id ON records(batch_id);
 CREATE INDEX batches_session_first ON batches(session_id, first_sequence);
+";
+
+/// Version-2 migration: per-session committed-footprint counters, backfilled
+/// from the existing rows so append admission no longer counts on every call.
+pub(crate) const V2_DDL: &str = "
+ALTER TABLE sessions ADD COLUMN batch_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE sessions ADD COLUMN record_count INTEGER NOT NULL DEFAULT 0;
+UPDATE sessions SET
+  batch_count = (SELECT COUNT(*) FROM batches b WHERE b.session_id = sessions.session_id),
+  record_count = (SELECT COUNT(*) FROM records r WHERE r.session_id = sessions.session_id);
 ";
 
 pub(crate) fn apply_durability(
@@ -109,6 +124,13 @@ pub(crate) fn apply_schema(connection: &Connection) -> Result<(), StoreError> {
         match version {
             0 => {
                 connection.execute_batch(V1_DDL).map_err(map_sqlite_error)?;
+                connection.execute_batch(V2_DDL).map_err(map_sqlite_error)?;
+                connection
+                    .pragma_update(None, "user_version", SCHEMA_USER_VERSION)
+                    .map_err(map_sqlite_error)
+            }
+            1 => {
+                connection.execute_batch(V2_DDL).map_err(map_sqlite_error)?;
                 connection
                     .pragma_update(None, "user_version", SCHEMA_USER_VERSION)
                     .map_err(map_sqlite_error)

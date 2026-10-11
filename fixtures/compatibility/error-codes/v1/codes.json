@@ -297,6 +297,16 @@
       "value": "memory_tool_unavailable"
     },
     {
+      "crate": "finstack-ai-middleware-document-ingest",
+      "name": "DOCUMENT_INGEST_INTEGRITY_MISMATCH",
+      "value": "document_ingest_integrity_mismatch"
+    },
+    {
+      "crate": "finstack-ai-middleware-document-ingest",
+      "name": "DOCUMENT_INGEST_LOOKUP_FAILED",
+      "value": "document_ingest_lookup_failed"
+    },
+    {
       "crate": "finstack-ai-middleware-tool-policy",
       "name": "TOOL_POLICY_JAILBREAK_TRIGGERED",
       "value": "tool_policy_jailbreak_triggered"
@@ -1032,6 +1042,11 @@
       "value": "mcp_transport_error"
     },
     {
+      "crate": "finstack-ai-tools-mcp",
+      "name": "MCP_TRANSPORT_POISONED",
+      "value": "mcp_transport_poisoned"
+    },
+    {
       "crate": "finstack-ai-tools-openai-media",
       "name": "OPENAI_MEDIA_CREDENTIAL_REQUIRED",
       "value": "openai_media_credential_required"
@@ -1265,6 +1280,11 @@
       "crate": "finstack-ai-workflow-media-pipeline",
       "name": "MEDIA_PIPELINE_PLAN_INVALID",
       "value": "media_pipeline_plan_invalid"
+    },
+    {
+      "crate": "finstack-ai-workflow-media-pipeline",
+      "name": "MEDIA_PIPELINE_SCHEMA_VERSION",
+      "value": "media_pipeline_schema_version"
     },
     {
       "crate": "finstack-ai-workflow-media-pipeline",

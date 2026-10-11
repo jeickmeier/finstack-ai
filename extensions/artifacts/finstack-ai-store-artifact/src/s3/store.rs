@@ -61,6 +61,17 @@ impl S3ObjectStore {
             })?;
         Ok(Self { client, config })
     }
+
+    /// Clone this store with a different single-object ceiling, sharing the
+    /// HTTP client. No I/O: the artifact store uses it to keep GET buffering
+    /// bounded by the artifact ceiling rather than the S3 protocol maximum.
+    #[must_use]
+    pub(crate) fn with_max_object_bytes(&self, max_object_bytes: u64) -> Self {
+        Self {
+            client: self.client.clone(),
+            config: self.config.clone().with_max_object_bytes(max_object_bytes),
+        }
+    }
 }
 
 impl ObjectDriver for S3ObjectStore {
@@ -82,6 +93,16 @@ impl ObjectDriver for S3ObjectStore {
         let client = self.client.clone();
         let config = self.config.clone();
         Box::pin(async move { get_impl(&client, &config, scope, key).await })
+    }
+
+    fn head(
+        &self,
+        scope: ObjectScope,
+        key: ObjectKey,
+    ) -> PortFuture<Result<ObjectRef, ObjectError>> {
+        let client = self.client.clone();
+        let config = self.config.clone();
+        Box::pin(async move { head_impl(&client, &config, scope, key).await })
     }
 
     fn delete(&self, scope: ObjectScope, key: ObjectKey) -> PortFuture<Result<(), ObjectError>> {
@@ -409,14 +430,49 @@ async fn get_impl(
     Ok(bytes)
 }
 
-async fn current_digest_and_etag(
+/// `HEAD` one object: scope-checked reference built from the metadata
+/// headers, with no body transferred.
+async fn head_impl(
     client: &reqwest::Client,
     config: &S3ObjectStoreConfig,
-    scope: &ObjectScope,
-    key: &ObjectKey,
-) -> Result<(Digest, String), ObjectError> {
+    scope: ObjectScope,
+    key: ObjectKey,
+) -> Result<ObjectRef, ObjectError> {
     let scope_digest = scope.digest()?;
-    let physical = physical_object_key(config.key_prefix(), &scope_digest, key);
+    let response = send_head(client, config, &scope_digest, &key).await?;
+    parse_scope_digest(&header_value(&response, HEADER_SCOPE)?, scope_digest)?;
+    let content_digest =
+        Digest::from_hex(&header_value(&response, HEADER_DIGEST)?).map_err(|_error| {
+            ObjectError::Integrity {
+                message: Arc::from("malformed_digest_header"),
+            }
+        })?;
+    let length = header_value(&response, "content-length")?
+        .parse::<u64>()
+        .map_err(|_error| ObjectError::Integrity {
+            message: Arc::from("malformed_length_header"),
+        })?;
+    let media_type = response
+        .headers()
+        .get("content-type")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("application/octet-stream");
+    Ok(ObjectRef {
+        key,
+        scope_digest,
+        content_digest,
+        length,
+        media_type: Arc::from(media_type),
+    })
+}
+
+async fn send_head(
+    client: &reqwest::Client,
+    config: &S3ObjectStoreConfig,
+    scope_digest: &Digest,
+    key: &ObjectKey,
+) -> Result<Response, ObjectError> {
+    let physical = physical_object_key(config.key_prefix(), scope_digest, key);
     let target = object_url(config, &physical)?;
     let params = signing_params(config, UtcStamp::now())?;
     let empty_hash = payload_sha256_hex(b"");
@@ -436,6 +492,17 @@ async fn current_digest_and_etag(
     if !response.status().is_success() {
         return Err(map_status_error(response.status()));
     }
+    Ok(response)
+}
+
+async fn current_digest_and_etag(
+    client: &reqwest::Client,
+    config: &S3ObjectStoreConfig,
+    scope: &ObjectScope,
+    key: &ObjectKey,
+) -> Result<(Digest, String), ObjectError> {
+    let scope_digest = scope.digest()?;
+    let response = send_head(client, config, &scope_digest, key).await?;
     parse_scope_digest(&header_value(&response, HEADER_SCOPE)?, scope_digest)?;
     let digest = Digest::from_hex(&header_value(&response, HEADER_DIGEST)?).map_err(|_error| {
         ObjectError::Integrity {

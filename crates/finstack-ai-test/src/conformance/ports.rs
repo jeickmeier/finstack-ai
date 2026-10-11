@@ -7,11 +7,18 @@
 use std::fmt;
 use std::sync::Arc;
 
-use finstack_ai_kernel::{AppendRequest, CommittedBatch, RunEvent, ValidatedToolCall};
+use finstack_ai_kernel::{
+    AppendRequest, CommittedBatch, KernelState, RecordEnvelope, RunEvent, UNIX_EPOCH,
+    ValidatedToolCall,
+};
+use finstack_ai_protocol::encode_snapshot;
 use finstack_ai_runtime::ports::context::{
     ContextCallContext, ContextContribution, ContextProvider, ContextRequest,
 };
-use finstack_ai_runtime::ports::journal::JournalStore;
+use finstack_ai_runtime::ports::journal::{
+    IdempotencyHorizon, JournalStore, LoadFromRequest, LoadRequest, LoadWindow, LoadedSession,
+    OpaqueSnapshot, PruneRequest, SnapshotRequest,
+};
 use finstack_ai_runtime::ports::middleware::{
     Middleware, MiddlewareContext, StageInput, StageOutcome, validate_stage_outcome,
 };
@@ -441,6 +448,175 @@ pub async fn check_journal_store_conformance(
         "loaded session does not contain the exact committed batch",
     )?;
     Ok(committed)
+}
+
+/// Public inputs for one `JournalStore` prune-boundary conformance call.
+///
+/// Three consecutive append requests for one session. `boundary` is the
+/// batch the prune ends on, so it should be a single-record batch: that is
+/// the shape on which backends historically disagreed (a multi-record
+/// boundary batch is truncated by the prune and was already omitted by the
+/// sql backends; a single-record one was not).
+#[derive(Debug, Clone)]
+pub struct PruneBoundaryConformanceCase {
+    /// First batch, pruned away entirely.
+    pub prefix: AppendRequest,
+    /// Batch the snapshot and prune end on; its last record is retained as
+    /// the chain anchor but the batch itself is not reported after prune.
+    pub boundary: AppendRequest,
+    /// Batch after the boundary; the only batch a post-prune load reports.
+    pub tail: AppendRequest,
+    /// Caller-side snapshot byte ceiling (at most the store's own limit).
+    pub snapshot_bytes: usize,
+}
+
+/// Run one deterministic `JournalStore` prune-boundary conformance case.
+///
+/// Appends the three batches, writes a snapshot aligned on the end of
+/// `boundary`, prunes, and checks that every backend reports the retained
+/// journal in the same shape: the boundary batch is *omitted* from
+/// `committed_batches` (its surviving last record still anchors chain
+/// verification), the head is unchanged, and the snapshot-plus-tail window
+/// reports exactly the tail batch.
+///
+/// # Errors
+///
+/// Names the exact append, snapshot, prune, or post-prune load contract
+/// that failed.
+pub async fn check_prune_boundary_conformance(
+    store: &dyn JournalStore,
+    case: PruneBoundaryConformanceCase,
+) -> Result<LoadedSession, PortConformanceFailure> {
+    let session_id = case.prefix.session_id();
+    ensure(
+        case.boundary.session_id() == session_id && case.tail.session_id() == session_id,
+        "JournalStore",
+        "store.prune.case.one_session",
+        "all three batches must target one session",
+    )?;
+    let mut appended = Vec::with_capacity(3);
+    for request in [&case.prefix, &case.boundary, &case.tail] {
+        appended.push(store.append(request.clone()).await.map_err(|error| {
+            PortConformanceFailure::new(
+                "JournalStore",
+                "store.prune.case.append",
+                error.to_string(),
+            )
+        })?);
+    }
+    let [_, boundary, tail] = <[CommittedBatch; 3]>::try_from(appended).map_err(|_| {
+        PortConformanceFailure::new(
+            "JournalStore",
+            "store.prune.case.append",
+            "three appends did not yield three committed batches",
+        )
+    })?;
+    let snapshot = aligned_snapshot(&boundary, case.snapshot_bytes)?;
+    store
+        .write_snapshot(SnapshotRequest {
+            session_id,
+            snapshot,
+        })
+        .await
+        .map_err(|error| {
+            PortConformanceFailure::new("JournalStore", "store.snapshot.aligned", error.to_string())
+        })?;
+    let receipt = store
+        .prune(PruneRequest {
+            session_id,
+            horizon: IdempotencyHorizon {
+                expire_at: UNIX_EPOCH,
+            },
+        })
+        .await
+        .map_err(|error| {
+            PortConformanceFailure::new("JournalStore", "store.prune.accepted", error.to_string())
+        })?;
+    ensure(
+        receipt.pruned_through_sequence == boundary.last_sequence,
+        "JournalStore",
+        "store.prune.receipt",
+        "prune receipt does not end on the snapshot sequence",
+    )?;
+    let loaded = store
+        .load(LoadRequest { session_id })
+        .await
+        .map_err(|error| {
+            PortConformanceFailure::new("JournalStore", "store.prune.load", error.to_string())
+        })?;
+    ensure(
+        loaded.head_sequence == tail.last_sequence
+            && loaded.head_checksum == tail.records.last().map(RecordEnvelope::checksum),
+        "JournalStore",
+        "store.prune.load.head",
+        "post-prune load reports a different head than the last append",
+    )?;
+    ensure(
+        loaded.committed_batches.as_ref() == [tail.clone()],
+        "JournalStore",
+        "store.prune.load.boundary_batch_omitted",
+        "post-prune load must report exactly the batches after the boundary (the boundary batch is omitted)",
+    )?;
+    let windowed = store
+        .load_from(LoadFromRequest {
+            session_id,
+            window: LoadWindow::SnapshotPlusTail,
+        })
+        .await
+        .map_err(|error| {
+            PortConformanceFailure::new("JournalStore", "store.prune.load_from", error.to_string())
+        })?;
+    ensure(
+        windowed.accelerated.is_some() && windowed.committed_batches.as_ref() == [tail],
+        "JournalStore",
+        "store.prune.load_from.tail",
+        "snapshot-plus-tail window must accelerate from the snapshot and report exactly the tail batch",
+    )?;
+    Ok(loaded)
+}
+
+/// A minimal but genuinely decodable snapshot ending on `boundary`: prune
+/// admission decodes it to count retained outstanding work and tombstones.
+fn aligned_snapshot(
+    boundary: &CommittedBatch,
+    snapshot_bytes: usize,
+) -> Result<OpaqueSnapshot, PortConformanceFailure> {
+    let boundary_checksum = boundary
+        .records
+        .last()
+        .map(RecordEnvelope::checksum)
+        .ok_or_else(|| {
+            PortConformanceFailure::new(
+                "JournalStore",
+                "store.prune.case.append",
+                "boundary batch committed no records",
+            )
+        })?;
+    let mut state = KernelState::default();
+    state.set_last_applied_sequence(boundary.last_sequence);
+    let (bytes, digest) = encode_snapshot(
+        &state,
+        boundary.last_sequence,
+        boundary_checksum,
+        None,
+        None,
+    )
+    .map_err(|error| {
+        PortConformanceFailure::new(
+            "JournalStore",
+            "store.prune.case.snapshot",
+            error.to_string(),
+        )
+    })?;
+    OpaqueSnapshot::try_new(boundary.last_sequence, digest, bytes, snapshot_bytes).map_err(
+        |error| {
+            PortConformanceFailure::new(
+                "JournalStore",
+                "store.prune.case.snapshot",
+                error.to_string(),
+            )
+        },
+    )
 }
 
 fn ensure(

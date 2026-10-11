@@ -3,7 +3,7 @@ pub mod finstack_ai_memory::extract
 pub struct finstack_ai_memory::extract::CandidateMemory
 pub finstack_ai_memory::extract::CandidateMemory::body: alloc::sync::Arc<str>
 pub finstack_ai_memory::extract::CandidateMemory::confidence: u8
-pub finstack_ai_memory::extract::CandidateMemory::id: core::option::Option<finstack_ai_memory::record::MemoryId>
+pub finstack_ai_memory::extract::CandidateMemory::id: finstack_ai_memory::record::MemoryId
 pub finstack_ai_memory::extract::CandidateMemory::keywords: alloc::vec::Vec<alloc::sync::Arc<str>>
 pub finstack_ai_memory::extract::CandidateMemory::sensitivity: finstack_ai_kernel::primitives::diagnostic::Sensitivity
 pub finstack_ai_memory::extract::CandidateMemory::source_ref: core::option::Option<alloc::sync::Arc<str>>

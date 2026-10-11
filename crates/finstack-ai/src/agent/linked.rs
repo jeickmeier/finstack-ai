@@ -241,7 +241,11 @@ pub struct OllamaAgentSpec {
 
 /// Arguments for [`LinkedProviderSpec::Gateway`].
 pub struct GatewayAgentSpec {
-    /// Provider endpoint URL. HTTPS is required off loopback.
+    /// Provider endpoint URL. HTTPS is required off loopback. The path must
+    /// be empty or the wire protocol's canonical request path
+    /// (`/v1/responses`, `/v1/messages`, `/api/chat`); `gemini_generate_content`
+    /// takes an origin only. Any other path is a configuration error rather
+    /// than being silently replaced.
     pub endpoint: String,
     /// Configured model name.
     pub model: String,
@@ -569,9 +573,10 @@ async fn gateway_inner(spec: GatewayAgentSpec) -> Result<LinkedAgent, AgentRunEr
                 "gateway credential_name is invalid",
             )
         })?;
+    let base_url = gateway_base_url(&spec.wire_protocol, &spec.endpoint)?;
     let (provider, model_name) = gateway_provider(
         &spec.wire_protocol,
-        &spec.endpoint,
+        &base_url,
         &spec.model,
         hard_input_bytes,
         store,
@@ -898,6 +903,56 @@ fn gateway_authentication(
         (Some(_), _) => Err(AgentRunError::configuration(
             AGENT_RUN_INVALID_CONFIGURATION,
             "gateway auth must be none, bearer, or api_key",
+        )),
+    }
+}
+
+#[cfg(any(
+    feature = "provider-openai",
+    feature = "provider-openrouter",
+    feature = "provider-anthropic",
+    feature = "provider-gemini",
+    feature = "provider-ollama"
+))]
+/// Reduce a gateway endpoint to the base URL the provider leaf expects.
+///
+/// Leaves own their request paths, so the endpoint may carry no path or
+/// exactly the protocol's canonical path; anything else is rejected instead
+/// of being overwritten.
+#[cfg(any(
+    feature = "provider-openai",
+    feature = "provider-openrouter",
+    feature = "provider-anthropic",
+    feature = "provider-gemini",
+    feature = "provider-ollama"
+))]
+fn gateway_base_url(wire_protocol: &str, endpoint: &str) -> Result<String, AgentRunError> {
+    let mut parsed = url::Url::parse(endpoint).map_err(|_| {
+        AgentRunError::configuration(
+            AGENT_RUN_INVALID_CONFIGURATION,
+            "provider endpoint must be a valid http or https URL",
+        )
+    })?;
+    let canonical = match wire_protocol {
+        "openai_responses" => Some("/v1/responses"),
+        "anthropic_messages" => Some("/v1/messages"),
+        "ollama_chat" => Some("/api/chat"),
+        _ => None,
+    };
+    match parsed.path() {
+        "" | "/" => Ok(endpoint.to_owned()),
+        path if canonical == Some(path) => {
+            parsed.set_path("/");
+            Ok(parsed.to_string())
+        }
+        _ => Err(AgentRunError::configuration(
+            AGENT_RUN_INVALID_CONFIGURATION,
+            match canonical {
+                Some(path) => {
+                    format!("gateway endpoint path must be empty or `{path}` for {wire_protocol}")
+                }
+                None => format!("gateway endpoint must not carry a path for {wire_protocol}"),
+            },
         )),
     }
 }
@@ -1241,6 +1296,39 @@ mod tests {
         assert!(error.to_string().contains("hard_input_bytes"));
     }
 
+    #[test]
+    fn gateway_base_url_accepts_origin_or_canonical_path_only() {
+        assert_eq!(
+            gateway_base_url("openai_responses", "https://gw.test/v1/responses")
+                .expect("canonical"),
+            "https://gw.test/"
+        );
+        assert_eq!(
+            gateway_base_url("anthropic_messages", "https://gw.test").expect("origin"),
+            "https://gw.test"
+        );
+        for (protocol, endpoint) in [
+            ("openai_responses", "https://gw.test/openai/v1/responses"),
+            ("openai_responses", "https://gw.test/v1/messages"),
+            ("gemini_generate_content", "https://gw.test/v1/responses"),
+        ] {
+            let error = gateway_base_url(protocol, endpoint).expect_err(endpoint);
+            assert_eq!(error.code(), AGENT_RUN_INVALID_CONFIGURATION);
+        }
+    }
+
+    #[tokio::test]
+    async fn gateway_rejects_a_custom_endpoint_path() {
+        let mut spec = gateway_spec();
+        spec.endpoint = "https://api.example.test/openai/v1/responses".into();
+        let error = Agent::linked(LinkedProviderSpec::Gateway(spec))
+            .await
+            .err()
+            .expect("custom path");
+        assert_eq!(error.code(), AGENT_RUN_INVALID_CONFIGURATION);
+        assert!(error.to_string().contains("/v1/responses"));
+    }
+
     #[tokio::test]
     async fn gateway_rejects_plaintext_non_loopback() {
         let mut spec = gateway_spec();
@@ -1300,6 +1388,7 @@ mod tests {
     async fn gateway_gemini_generate_content_constructs_without_a_network_request() {
         let mut spec = gateway_spec();
         spec.wire_protocol = "gemini_generate_content".into();
+        spec.endpoint = "https://api.example.test".into();
         let built = Agent::linked(LinkedProviderSpec::Gateway(spec))
             .await
             .expect("gateway gemini construct");

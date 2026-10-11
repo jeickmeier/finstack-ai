@@ -31,7 +31,9 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use finstack_ai_kernel::{Digest, ErrorCategory, Metadata, RawJson, ValidatedToolCall};
+use finstack_ai_kernel::{
+    Digest, ErrorCategory, Metadata, RAW_JSON_MAX_BYTES, RawJson, ValidatedToolCall,
+};
 use finstack_ai_runtime::ports::PortFuture;
 use finstack_ai_runtime::ports::model::{ReconcileContext, ToolSpec};
 use finstack_ai_runtime::ports::tool::{
@@ -70,6 +72,12 @@ pub const MCP_PROTOCOL_VIOLATION: &str = "mcp_protocol_violation";
 pub const MCP_SERVER_NOT_ALLOWLISTED: &str = "mcp_server_not_allowlisted";
 /// Stable transport-failure code.
 pub const MCP_TRANSPORT_ERROR: &str = "mcp_transport_error";
+/// Stable code for a request issued on a transport that already lost
+/// request/response alignment (framing, i/o, or timeout failure on an
+/// earlier round trip). Distinct from [`MCP_PROTOCOL_VIOLATION`], which
+/// names the malformed frame itself. Recover through `Toolset::reconstruct`,
+/// which respawns the server from the retained configuration.
+pub const MCP_TRANSPORT_POISONED: &str = "mcp_transport_poisoned";
 /// Stable cancellation/deadline code for an interrupted MCP request.
 pub const MCP_TIMEOUT: &str = "mcp_timeout";
 /// Stable catalog-drift code.
@@ -116,9 +124,12 @@ impl McpPrompt {
 
 /// Non-semantic observer for mid-run MCP `list_changed` notifications.
 ///
+/// Also receives one `client/request_rejected:<method>` marker for every
+/// server-initiated JSON-RPC request the client answered with `-32601`
+/// (`<method>` is server-supplied text, bounded to 128 characters).
 /// Implementations must not mutate the frozen catalog or lock.
 pub trait McpListChangedObserver: Send + Sync {
-    /// Observe one notification method name.
+    /// Observe one notification method name or rejection marker.
     fn on_list_changed(&self, method: &str);
 }
 
@@ -239,9 +250,14 @@ impl McpConfig {
     }
 
     /// Client-side result ceiling. Oversize output is truncated with a marker.
+    ///
+    /// The value is clamped to `1..=` [`RAW_JSON_MAX_BYTES`] (1 MiB): a tool
+    /// result is journaled as a [`RawJson`] and can never exceed that bound,
+    /// so a larger ceiling would only defer the failure to serialization.
     #[must_use]
     pub fn with_inline_result_bytes(mut self, bytes: u64) -> Self {
-        self.inline_result_bytes = bytes.max(1);
+        let ceiling = u64::try_from(RAW_JSON_MAX_BYTES).unwrap_or(u64::MAX);
+        self.inline_result_bytes = bytes.clamp(1, ceiling);
         self
     }
 
@@ -429,15 +445,41 @@ impl McpToolsetFactory {
     }
 
     fn open_transport(&self) -> Result<Arc<dyn McpTransport>, McpError> {
-        match &self.config.server {
-            Some(McpServerSpec::Stdio(config)) => Ok(Arc::new(StdioTransport::try_spawn(config)?)),
-            Some(McpServerSpec::Http(config)) => Ok(Arc::new(HttpTransport::try_new(config)?)),
-            None => Err(McpError::stable(
-                MCP_SERVER_NOT_ALLOWLISTED,
-                "MCP factory requires an allowlisted server",
-            )),
-        }
+        open_transport(&self.config)
     }
+}
+
+/// Spawn or connect the transport bound in `config`.
+fn open_transport(config: &McpConfig) -> Result<Arc<dyn McpTransport>, McpError> {
+    match &config.server {
+        Some(McpServerSpec::Stdio(stdio)) => Ok(Arc::new(StdioTransport::try_spawn(stdio)?)),
+        Some(McpServerSpec::Http(http)) => Ok(Arc::new(HttpTransport::try_new(http)?)),
+        None => Err(McpError::stable(
+            MCP_SERVER_NOT_ALLOWLISTED,
+            "MCP factory requires an allowlisted server",
+        )),
+    }
+}
+
+/// Transport to reconstruct on: the live one while it is healthy, or a
+/// fresh one rebuilt from the retained server configuration once it is
+/// poisoned. A poisoned transport with no retained configuration (only the
+/// in-memory test transport) cannot be rebuilt and fails with
+/// [`MCP_TRANSPORT_POISONED`].
+pub(crate) fn reopen_if_poisoned(
+    config: &McpConfig,
+    current: &Arc<dyn McpTransport>,
+) -> Result<Arc<dyn McpTransport>, McpError> {
+    if !current.is_poisoned() {
+        return Ok(Arc::clone(current));
+    }
+    if config.server.is_none() {
+        return Err(McpError::stable(
+            MCP_TRANSPORT_POISONED,
+            "poisoned MCP transport has no server configuration to respawn from",
+        ));
+    }
+    open_transport(config)
 }
 
 /// Frozen MCP tool catalog backed by one transport.
@@ -580,7 +622,7 @@ impl Toolset for McpToolset {
                     serde_json::json!(ctx.run.effect_id.to_string()),
                     "tools/call",
                     params,
-                    RequestControl::new(ctx.run.cancellation.clone(), ctx.run.deadline),
+                    RequestControl::from_run(&ctx.run),
                 )
                 .await
                 .map_err(tool_error_from_mcp)?;
@@ -622,12 +664,17 @@ impl Toolset for McpToolset {
         })
     }
 
+    /// Re-enumerate the catalog and verify it against the frozen invocation
+    /// digest. A poisoned stdio transport is respawned from the retained
+    /// [`StdioConfig`] / [`HttpConfig`] first, so a crashed or misframing
+    /// server is recoverable without re-running the factory.
     fn reconstruct(&self) -> PortFuture<Result<Option<Arc<dyn Toolset>>, ToolError>> {
-        let transport = Arc::clone(&self.transport);
+        let current = Arc::clone(&self.transport);
         let config = self.config.clone();
         let list_changed = self.list_changed.clone();
         let frozen = self.invocation_digest;
         Box::pin(async move {
+            let transport = reopen_if_poisoned(&config, &current).map_err(tool_error_from_mcp)?;
             let toolset = McpToolset::connect(transport, config, list_changed)
                 .await
                 .map_err(tool_error_from_mcp)?;
@@ -659,7 +706,7 @@ impl Toolset for McpToolset {
                     serde_json::json!(ctx.run.effect_id.to_string()),
                     "sampling/createMessage",
                     params,
-                    RequestControl::new(ctx.run.cancellation.clone(), ctx.run.deadline),
+                    RequestControl::from_run(&ctx.run),
                 )
                 .await
                 .map_err(tool_error_from_mcp)?;
@@ -806,17 +853,25 @@ fn interaction_required_error(request: &InteractionRequest) -> ToolError {
     .unwrap_or_else(Into::into)
 }
 
+/// Drain the transport's notification queue after every round trip and
+/// forward the `list_changed` family plus `client/request_rejected:*`
+/// markers to the observer when one is bound.
+///
+/// Draining is unconditional so a host without an observer never accumulates
+/// notifications between calls; the transport queue is additionally bounded.
 pub(crate) fn emit_list_changed(
     transport: &dyn McpTransport,
     observer: Option<&dyn McpListChangedObserver>,
 ) {
+    let notifications = transport.take_notifications();
     let Some(observer) = observer else {
         return;
     };
-    for method in transport.take_notifications() {
+    for method in notifications {
         if method == "notifications/tools/list_changed"
             || method == "notifications/resources/list_changed"
             || method == "notifications/prompts/list_changed"
+            || method.starts_with(transport::REQUEST_REJECTED_PREFIX)
         {
             observer.on_list_changed(&method);
         }
@@ -826,7 +881,9 @@ pub(crate) fn emit_list_changed(
 fn tool_error_from_mcp(error: McpError) -> ToolError {
     let category = match error.code {
         MCP_LIMIT_EXCEEDED | MCP_ARTIFACT_REQUIRED => ErrorCategory::Limit,
-        MCP_SERVER_NOT_ALLOWLISTED | MCP_TRANSPORT_ERROR => ErrorCategory::Tool,
+        MCP_SERVER_NOT_ALLOWLISTED | MCP_TRANSPORT_ERROR | MCP_TRANSPORT_POISONED => {
+            ErrorCategory::Tool
+        }
         _ => ErrorCategory::Validation,
     };
     ToolError::try_new(

@@ -7,15 +7,14 @@
 //! base64 payloads are returned only when they fit the result cap.
 //!
 //! Caller-supplied download URLs (`audio_url`) are fetched with redirects
-//! disabled. Production downloads must be HTTPS; plaintext HTTP is allowed
-//! only when both the toolset endpoint and the download host are loopback
-//! fixtures. Before connecting, the host is resolved with
+//! disabled. Downloads must be HTTPS; plaintext HTTP to a loopback fixture
+//! is admitted only in this crate's own test build, independent of where
+//! the toolset endpoint points. Before connecting, the host is resolved with
 //! [`tokio::net::lookup_host`]. Loopback, link-local, RFC1918, and IPv6
 //! unique-local addresses are rejected (plus literal-IP and `localhost`
-//! checks before resolution) unless the loopback-fixture exception applies.
-//! The download client pins the vetted address with
-//! [`reqwest::ClientBuilder::resolve`] so a later DNS answer cannot rebind
-//! the TCP connection to a private address.
+//! checks before resolution). The download client pins the vetted address
+//! with [`reqwest::ClientBuilder::resolve`] so a later DNS answer cannot
+//! rebind the TCP connection to a private address.
 //!
 //! This file is closed to new behavior. Add a media endpoint in the
 //! per-modality modules (`image`, `speech`, `video`, `transcribe`, `http`).
@@ -67,9 +66,7 @@ use finstack_ai_runtime::ports::tool::{
 use futures_util::stream;
 use reqwest::header::HeaderValue;
 
-use crate::config::{
-    DEFAULT_ENDPOINT, MAX_RESULT_BYTES_CEILING, endpoint_host, is_loopback_host, validate_endpoint,
-};
+use crate::config::{DEFAULT_ENDPOINT, MAX_RESULT_BYTES_CEILING, validate_endpoint};
 use crate::http::{DeliveredMedia, REQUEST_TIMEOUT, Route, invalid_arguments, tool_error};
 use crate::image::{IMAGE_TOOL_ID, IMAGE_TOOL_NAME, handle_image};
 use crate::speech::{SPEECH_TOOL_ID, SPEECH_TOOL_NAME, handle_speech};
@@ -234,12 +231,11 @@ impl OpenRouterMediaToolset {
                 }
             }
         })?;
-        let authorization =
-            HeaderValue::from_str(&format!("Bearer {}", secret.expose())).map_err(|_| {
-                OpenRouterMediaError::EndpointInvalid {
-                    reason: "api_key is invalid",
-                }
+        let mut authorization = HeaderValue::from_str(&format!("Bearer {}", secret.expose()))
+            .map_err(|_| OpenRouterMediaError::EndpointInvalid {
+                reason: "api_key is invalid",
             })?;
+        authorization.set_sensitive(true);
         if config.max_result_bytes == 0 || config.max_result_bytes > MAX_RESULT_BYTES_CEILING {
             return Err(OpenRouterMediaError::EndpointInvalid {
                 reason: "result cap out of range",
@@ -252,10 +248,6 @@ impl OpenRouterMediaToolset {
         };
         validate_endpoint(&endpoint)?;
         let endpoint = endpoint.trim_end_matches('/').to_owned();
-        let endpoint_is_loopback = endpoint
-            .split_once("://")
-            .and_then(|(_, rest)| endpoint_host(rest))
-            .is_some_and(is_loopback_host);
 
         let max_result_bytes_u64 = u64::try_from(config.max_result_bytes).unwrap_or(u64::MAX);
         let tools = TOOL_DEFS
@@ -290,7 +282,6 @@ impl OpenRouterMediaToolset {
                 client,
                 authorization,
                 endpoint,
-                endpoint_is_loopback,
                 referer: config.referer,
                 title: config.title,
                 max_result_bytes: config.max_result_bytes,
@@ -389,9 +380,9 @@ mod tests {
     use std::sync::Arc;
 
     use finstack_ai_kernel::{
-        Digest, EffectId, EffectOutputContract, EffectOutputKind, LaneId, Metadata,
-        OperationLocator, PrincipalRef, RawJson, RunId, Sensitivity, SessionId, ToolBatchId,
-        ToolCallBlock, ToolCallId, ToolCallPlan, ToolFailurePolicy, ValidatedToolCall,
+        ArtifactRef, Digest, EffectId, EffectOutputContract, EffectOutputKind, ErrorCategory,
+        LaneId, Metadata, OperationLocator, PrincipalRef, RawJson, RunId, Sensitivity, SessionId,
+        ToolBatchId, ToolCallBlock, ToolCallId, ToolCallPlan, ToolFailurePolicy, ValidatedToolCall,
     };
     use finstack_ai_runtime::ports::model::{
         AuthorizationContext, CancellationSignal, RunCallContext,
@@ -411,15 +402,18 @@ mod tests {
         VIDEO_DOWNLOAD_TOOL_NAME, VIDEO_STATUS_TOOL_NAME, VIDEO_TOOL_NAME,
     };
 
+    use finstack_ai_runtime::Bytes;
     use finstack_ai_runtime::artifact::{
-        ArtifactMetadata, ArtifactScope, InProcessArtifactStore, stage_required_artifact,
+        ArtifactError, ArtifactMetadata, ArtifactScope, InProcessArtifactStore,
+        stage_required_artifact,
     };
+    use finstack_ai_runtime::ports::PortFuture;
 
     use base64::Engine as _;
 
     use crate::ArtifactStore;
     use crate::http::{BASE64_STANDARD, base64_encoded_len};
-    use crate::url::validate_download_url;
+    use crate::url::{download_url_policy, validate_download_url, validate_download_url_with};
 
     const CANARY: &str = "or-media-secret-canary-046";
 
@@ -1520,7 +1514,6 @@ mod tests {
         // rejected as a "forbidden component".
         validate_download_url(
             "https://example-bucket.s3.amazonaws.com/a.mp3?X-Amz-Signature=abc123&X-Amz-Expires=900",
-            false,
         )
         .expect("https download url with a query string is accepted");
     }
@@ -1532,7 +1525,7 @@ mod tests {
         // audio_url; net-guard's own default is 443-only, but this crate's
         // download policy opts back in to the crate's prior any-port
         // behavior.
-        validate_download_url("https://media.example.com:8443/a.mp3", false)
+        validate_download_url("https://media.example.com:8443/a.mp3")
             .expect("https download url on a non-standard port is accepted");
     }
 
@@ -1550,11 +1543,16 @@ mod tests {
 
     #[test]
     fn validate_download_url_rejects_https_loopback_and_link_local() {
-        validate_download_url("https://127.0.0.1/a.mp3", false)
+        // Loopback is admitted only by the test-build fixture policy; assert
+        // the production policy explicitly.
+        let production = download_url_policy(false);
+        validate_download_url_with("https://127.0.0.1/a.mp3", production)
             .expect_err("https loopback must fail");
-        validate_download_url("https://169.254.169.254/latest/meta-data", false)
+        validate_download_url_with("https://localhost/a.mp3", production)
+            .expect_err("localhost must fail");
+        // Link-local is blocked under every policy.
+        validate_download_url("https://169.254.169.254/latest/meta-data")
             .expect_err("link-local metadata must fail");
-        validate_download_url("https://localhost/a.mp3", false).expect_err("localhost must fail");
     }
 
     #[test]
@@ -1652,6 +1650,76 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Store whose `stage_put` always fails with the configured error.
+    struct FailingStore(fn() -> ArtifactError);
+
+    impl ArtifactStore for FailingStore {
+        fn stage_put(
+            &self,
+            _scope: ArtifactScope,
+            _content: Bytes,
+            _metadata: ArtifactMetadata,
+        ) -> PortFuture<Result<ArtifactRef, ArtifactError>> {
+            let error = (self.0)();
+            Box::pin(async move { Err(error) })
+        }
+
+        fn get(
+            &self,
+            _scope: ArtifactScope,
+            _artifact: ArtifactRef,
+        ) -> PortFuture<Result<Bytes, ArtifactError>> {
+            Box::pin(async { Err(ArtifactError::NotFound) })
+        }
+    }
+
+    async fn stage_image_through(store: Arc<dyn ArtifactStore>) -> crate::ToolError {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let (seen_tx, _seen_rx) = mpsc::unbounded_channel();
+        let server = tokio::spawn(async move {
+            respond(
+                &listener,
+                &seen_tx,
+                200,
+                br#"{"data":[{"b64_json":"aGVsbG8=","media_type":"image/png"}]}"#,
+                "application/json",
+            )
+            .await;
+        });
+        let tools = OpenRouterMediaToolset::try_new(base_config(format!("http://{addr}")))
+            .expect("tools")
+            .with_artifact_store(store);
+        let spec = find_spec(&tools.tools(), IMAGE_TOOL_NAME);
+        let call = call_for(&spec, br#"{"model":"m","prompt":"a cat"}"#);
+        let Err(error) = tools.call(tool_context(), call).await else {
+            panic!("expected staging failure");
+        };
+        server.await.expect("server");
+        error
+    }
+
+    #[tokio::test]
+    async fn oversized_artifact_maps_to_limit_code() {
+        let error = stage_image_through(Arc::new(FailingStore(|| ArtifactError::TooLarge {
+            len: 5,
+            max: 4,
+        })))
+        .await;
+        assert_eq!(error.code(), crate::OPENROUTER_MEDIA_LIMIT_EXCEEDED);
+        assert_eq!(error.category(), ErrorCategory::Limit);
+    }
+
+    #[tokio::test]
+    async fn store_failure_maps_to_transport_code() {
+        let error = stage_image_through(Arc::new(FailingStore(|| ArtifactError::Unavailable {
+            message: Arc::from("store offline"),
+        })))
+        .await;
+        assert_eq!(error.code(), crate::OPENROUTER_MEDIA_TRANSPORT_FAILED);
+        assert_eq!(error.category(), ErrorCategory::Tool);
     }
 
     fn host_allow_catalog(toolset: Arc<dyn Toolset>) -> ResolvedToolCatalog {

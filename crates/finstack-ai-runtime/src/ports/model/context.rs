@@ -164,6 +164,100 @@ pub struct RunCallContext {
     pub relation_depth: u16,
 }
 
+impl RunCallContext {
+    /// Time left before [`RunCallContext::deadline`] at semantic time `now`.
+    ///
+    /// Returns `None` when the call carries no deadline. Returns
+    /// `Some(Duration::ZERO)` once the deadline has elapsed (`now >= deadline`),
+    /// so callers can treat a zero remainder as "already due" without a second
+    /// comparison. Time is passed explicitly; this never reads an ambient clock.
+    #[must_use]
+    pub fn deadline_remaining(&self, now: Timestamp) -> Option<core::time::Duration> {
+        let deadline = self.deadline?;
+        let remaining_ms = deadline.as_unix_ms().saturating_sub(now.as_unix_ms());
+        Some(u64::try_from(remaining_ms).map_or(
+            core::time::Duration::ZERO,
+            core::time::Duration::from_millis,
+        ))
+    }
+
+    /// Whether [`RunCallContext::deadline`] has elapsed at semantic time `now`.
+    ///
+    /// A call without a deadline never elapses. The deadline instant itself
+    /// counts as elapsed (`now >= deadline`).
+    #[must_use]
+    pub fn deadline_elapsed(&self, now: Timestamp) -> bool {
+        self.deadline
+            .is_some_and(|deadline| now.as_unix_ms() >= deadline.as_unix_ms())
+    }
+
+    /// Whether the call should stop: cancelled, or its deadline has elapsed.
+    ///
+    /// Combines [`CancellationSignal::is_cancelled`] on
+    /// [`RunCallContext::cancellation`] with [`RunCallContext::deadline_elapsed`].
+    /// Callers that must report cancellation and deadline distinctly should
+    /// check each source separately.
+    #[must_use]
+    pub fn is_interrupted(&self, now: Timestamp) -> bool {
+        self.cancellation.is_cancelled() || self.deadline_elapsed(now)
+    }
+}
+
+#[cfg(feature = "native-tokio")]
+impl RunCallContext {
+    /// Sleep until [`RunCallContext::deadline`] using the system wall clock.
+    ///
+    /// Pends forever when the call carries no deadline, which makes it a
+    /// neutral branch inside a `select!`. The remaining time is read once from
+    /// [`crate::ids::SystemClock`] when the future is first polled; later wall
+    /// clock changes do not extend the sleep. If the clock cannot produce a
+    /// timestamp the deadline is treated as already elapsed (fail closed).
+    ///
+    /// Available only with the `native-tokio` feature.
+    pub async fn wait_deadline(&self) {
+        self.wait_deadline_with(&crate::ids::SystemClock).await;
+    }
+
+    /// Resolve when the call is cancelled or its deadline elapses, whichever
+    /// comes first.
+    ///
+    /// Cancellation is checked first when both are ready. Pends forever when
+    /// the call has neither a deadline nor a pending cancellation. See
+    /// [`RunCallContext::wait_deadline`] for the clock semantics.
+    ///
+    /// Available only with the `native-tokio` feature.
+    pub async fn interrupted(&self) {
+        tokio::select! {
+            biased;
+            () = self.cancellation.cancelled() => {}
+            () = self.wait_deadline() => {}
+        }
+    }
+
+    /// [`RunCallContext::wait_deadline`] over an injected clock.
+    ///
+    /// The clock is read exactly once; tests inject a fake clock so the sleep
+    /// length is deterministic under paused tokio time.
+    pub(crate) async fn wait_deadline_with(&self, clock: &impl crate::ids::Clock) {
+        if self.deadline.is_none() {
+            core::future::pending::<()>().await;
+            return;
+        }
+        let Ok(now) = clock.now() else {
+            // A clock that cannot tell the time cannot promise the deadline
+            // has not passed; treat it as elapsed.
+            return;
+        };
+        let Some(remaining) = self.deadline_remaining(now) else {
+            return;
+        };
+        if remaining.is_zero() {
+            return;
+        }
+        tokio::time::sleep(remaining).await;
+    }
+}
+
 /// Model-specific call context.
 #[derive(Debug, Clone)]
 pub struct ModelCallContext {

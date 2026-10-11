@@ -31,6 +31,7 @@ pub fn finstack_ai_observer_otel::OtelObserver::force_flush(&self)
 pub fn finstack_ai_observer_otel::OtelObserver::last_diagnostic(&self) -> core::option::Option<finstack_ai_runtime::ports::observer::ObserverDiagnostic>
 pub fn finstack_ai_observer_otel::OtelObserver::snapshot(&self) -> core::result::Result<alloc::vec::Vec<finstack_ai_observer_otel::CapturedSpan>, finstack_ai_runtime::ports::observer::ObserverError>
 pub fn finstack_ai_observer_otel::OtelObserver::try_new(finstack_ai_runtime::ports::observer::ObserverPayloadMode, usize) -> core::result::Result<Self, finstack_ai_observer_otel::OtelObserverError>
+pub fn finstack_ai_observer_otel::OtelObserver::try_new_with_provider(finstack_ai_runtime::ports::observer::ObserverPayloadMode, usize, opentelemetry_sdk::trace::provider::SdkTracerProvider) -> core::result::Result<Self, finstack_ai_observer_otel::OtelObserverError>
 pub fn finstack_ai_observer_otel::OtelObserver::try_redacted(usize) -> core::result::Result<Self, finstack_ai_observer_otel::OtelObserverError>
 impl finstack_ai_runtime::ports::observer::Observer for finstack_ai_observer_otel::OtelObserver
 pub fn finstack_ai_observer_otel::OtelObserver::descriptor(&self) -> finstack_ai_runtime::ports::observer::ObserverDescriptor

@@ -34,7 +34,7 @@
 // Allow expect() in doc tests (they are test code)
 #![doc(test(attr(allow(clippy::expect_used))))]
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use finstack_ai_kernel::{
@@ -50,8 +50,18 @@ use finstack_ai_runtime::ports::middleware::{
     StageOutcome,
 };
 use finstack_ai_runtime::ports::model::{CancellationSignal, ModelRequestDraft};
-use finstack_ai_tools_document::parser::{self, DocumentFormat, DocumentLimits};
+use finstack_ai_tools_document::parser::{
+    self, DocumentFormat, DocumentLimits, DocumentParseError, ParsedDocument,
+};
 use thiserror::Error;
+
+/// Stable code: the attachment's blob could not be resolved through the
+/// artifact store inside the run's scope (missing, out of scope, or the
+/// store itself failed).
+pub const DOCUMENT_INGEST_LOOKUP_FAILED: &str = "document_ingest_lookup_failed";
+/// Stable code: the store resolved the blob, but the wire reference or the
+/// fetched content does not match what the attachment declared.
+pub const DOCUMENT_INGEST_INTEGRITY_MISMATCH: &str = "document_ingest_integrity_mismatch";
 
 const COMPONENT_ID: &str = "finstack.middleware.document-ingest";
 const INGEST_VERSION: Version = Version {
@@ -69,31 +79,41 @@ const PARSE_CACHE_CAPACITY: usize = 32;
 /// Static skip-note used when a generated note cannot be constructed.
 const FALLBACK_NOTE_TEXT: &str = "[attached document note unavailable]";
 
-/// Key identifying one pure parse-to-note computation.
+/// Key identifying one validated attachment and its parse-derived note.
 ///
-/// `digest` is the digest of the *fetched* bytes (verified against the wire
-/// blob's declared digest when present), so a hit is exactly equivalent to
-/// re-running the parse on the same bytes. `media_type` and `name` are
-/// included because both feed the generated note text (`media_type` also
-/// selects the format hint).
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+/// The key is consulted *before* the artifact store is read, so it must
+/// carry everything the skipped fetch would have checked:
+///
+/// - `tenant_scope` is the committed run's tenant. The store resolves blobs
+///   inside that scope, so a note computed for one tenant must never be
+///   served to another, even for byte-identical content.
+/// - `blob` is the exact wire [`BlobRef`] (id, media type, length, declared
+///   digest, name). Its digest (required by [`DocumentIngestMiddleware`]
+///   before any lookup) is what makes a hit equivalent to re-parsing the
+///   same bytes; the remaining fields feed the note text and reproduce the
+///   reference-equality check the fetch path performs. A reference that
+///   differs in any field misses and goes through the store again.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct ParseCacheKey {
-    digest: Digest,
-    media_type: String,
-    name: String,
+    tenant_scope: Arc<str>,
+    blob: BlobRef,
 }
 
 /// Bounded FIFO memo of parse-derived note text, shared across the clones
 /// of one middleware instance.
 ///
-/// Only the pure `bytes -> note text` computation is cached: the blob is
-/// still fetched and digest-verified on every invocation, so fail-soft
-/// semantics for store failures and digest mismatches are unchanged. Cached
-/// and recomputed notes are byte-identical because the note is a
-/// deterministic function of the key (the configured [`DocumentLimits`] are
-/// fixed per instance). New keys append, reinsertion refreshes the value
-/// without changing eviction order, and a poisoned lock is recovered. Plain
-/// `std::sync::Mutex`, no tokio, so this stays usable on `wasm32` hosts.
+/// A hit skips the artifact fetch, the integrity check, and the parse for
+/// an attachment this instance has already resolved and verified under the
+/// same tenant: multi-cycle runs hit `BeforeModel` once per cycle with the
+/// same attachments, and every cycle after the first costs one map lookup.
+/// Only successful resolutions are memoized; lookup and integrity failures
+/// are never cached, so a transient store failure is retried on the next
+/// cycle. Cached and recomputed notes are byte-identical because the note
+/// is a deterministic function of the key (the configured
+/// [`DocumentLimits`] are fixed per instance). New keys append, reinsertion
+/// refreshes the value without changing eviction order, and a poisoned lock
+/// is recovered. Plain `std::sync::Mutex`, no tokio, so this stays usable on
+/// `wasm32` hosts.
 #[derive(Debug, Default)]
 struct ParseCache {
     state: Mutex<ParseCacheState>,
@@ -101,7 +121,7 @@ struct ParseCache {
 
 #[derive(Debug, Default)]
 struct ParseCacheState {
-    entries: BTreeMap<ParseCacheKey, String>,
+    entries: HashMap<ParseCacheKey, String>,
     insertion_order: VecDeque<ParseCacheKey>,
 }
 
@@ -279,10 +299,18 @@ impl Middleware for DocumentIngestMiddleware {
                 ..before_model.request.clone()
             };
             let bytes = serde_json_canonicalizer::to_vec(&draft).map_err(|_| {
-                stable_error("document ingest replacement could not be canonicalized")
+                stable_error(
+                    MIDDLEWARE_OUTCOME_NOT_ALLOWED,
+                    "document ingest replacement could not be canonicalized",
+                )
             })?;
             Ok(StageOutcome::Replace(RawJson::parse(bytes).map_err(
-                |_| stable_error("document ingest replacement could not be normalized"),
+                |_| {
+                    stable_error(
+                        MIDDLEWARE_OUTCOME_NOT_ALLOWED,
+                        "document ingest replacement could not be normalized",
+                    )
+                },
             )?))
         })
     }
@@ -348,21 +376,23 @@ impl DocumentIngestMiddleware {
                 "[document_ingest:digest_required attachment=\"{name}\"]"
             ));
         }
-        let (bytes, digest) = self.fetch_blob(scope, blob, cancellation).await?;
-        // Memoize only the pure `bytes -> note text` computation; the fetch
-        // failures above are transient and stay uncached.
+        // The key carries the tenant and the exact wire reference, so a hit
+        // is an attachment this instance already fetched, verified, and
+        // parsed for this tenant: no store read is needed.
         let key = ParseCacheKey {
-            digest,
-            media_type: blob.media_type().to_owned(),
-            name: name.clone(),
+            tenant_scope: Arc::clone(&scope.tenant_scope),
+            blob: blob.clone(),
         };
         if let Some(note) = self.parse_cache.lookup(&key) {
             return attachment_note_block(&note, blob);
         }
+        let bytes = self.fetch_blob(scope, blob, cancellation).await?;
         if cancellation.is_cancelled() {
             return Err(cancelled_error());
         }
-        let note = match parser::parse(&bytes, Some(blob.media_type()), &self.limits) {
+        let parsed =
+            parse_offloaded(bytes, blob.media_type().to_owned(), self.limits.clone()).await;
+        let note = match parsed {
             Ok(parsed) if parsed.requires_ocr && parsed.markdown.is_empty() => format!(
                 "[Attached document \"{name}\" is a scanned PDF; text extraction requires OCR, which is not enabled.]"
             ),
@@ -390,20 +420,21 @@ impl DocumentIngestMiddleware {
         attachment_note_block(&note, blob)
     }
 
-    /// Resolve a `BlobRef` to its exact reference and bytes through the
-    /// artifact store. Also returns the fetched
-    /// content's digest, which doubles as the parse-memo key.
+    /// Resolve a `BlobRef` to its exact reference and verified bytes through
+    /// the artifact store.
     ///
     /// # Errors
     ///
-    /// Returns a stable middleware error when lookup, scope, reference, or
-    /// content integrity validation fails.
+    /// Returns [`DOCUMENT_INGEST_LOOKUP_FAILED`] when the store cannot
+    /// resolve the blob in the run's scope, and
+    /// [`DOCUMENT_INGEST_INTEGRITY_MISMATCH`] when the store-owned reference
+    /// or the fetched content's digest differs from the wire reference.
     async fn fetch_blob(
         &self,
         scope: &ArtifactScope,
         blob: &BlobRef,
         cancellation: &CancellationSignal,
-    ) -> Result<(Bytes, Digest), MiddlewareError> {
+    ) -> Result<Bytes, MiddlewareError> {
         if cancellation.is_cancelled() {
             return Err(cancelled_error());
         }
@@ -411,21 +442,56 @@ impl DocumentIngestMiddleware {
             .store
             .get_by_blob(scope.clone(), blob.clone())
             .await
-            .map_err(|_| stable_error("document ingest artifact lookup failed"))?;
+            .map_err(|_| {
+                stable_error(
+                    DOCUMENT_INGEST_LOOKUP_FAILED,
+                    "document ingest artifact lookup failed",
+                )
+            })?;
         if cancellation.is_cancelled() {
             return Err(cancelled_error());
         }
         if read.reference.blob() != blob {
-            return Err(stable_error("document ingest artifact reference mismatch"));
+            return Err(stable_error(
+                DOCUMENT_INGEST_INTEGRITY_MISMATCH,
+                "document ingest artifact reference mismatch",
+            ));
         }
-        let digest = Digest::blob_content(&read.content);
         if let Some(expected) = blob.digest()
-            && digest != *expected
+            && Digest::blob_content(&read.content) != *expected
         {
-            return Err(stable_error("document ingest artifact integrity mismatch"));
+            return Err(stable_error(
+                DOCUMENT_INGEST_INTEGRITY_MISMATCH,
+                "document ingest artifact integrity mismatch",
+            ));
         }
-        Ok((read.content, digest))
+        Ok(read.content)
     }
+}
+
+/// Run the parser off the async thread on native hosts; inline on `wasm32`,
+/// where there is no blocking pool and no tokio dependency. `bytes` is the
+/// store's shared buffer and moves into the worker without copying.
+///
+/// A worker that cannot report back (panic or runtime shutdown) is a parse
+/// failure, which the caller turns into the fail-soft `parse_failed` note.
+async fn parse_offloaded(
+    bytes: Bytes,
+    media_type: String,
+    limits: DocumentLimits,
+) -> Result<ParsedDocument, DocumentParseError> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        tokio::task::spawn_blocking(move || parser::parse(&bytes, Some(&media_type), &limits))
+            .await
+            .unwrap_or_else(|_| {
+                Err(DocumentParseError::ParseFailed {
+                    message: "document parser worker failed".to_owned(),
+                })
+            })
+    }
+    #[cfg(target_arch = "wasm32")]
+    parser::parse(&bytes, Some(&media_type), &limits)
 }
 
 /// Rebuild a message with new content blocks, preserving role, id, model,
@@ -497,7 +563,12 @@ fn skip_note_message(message: &Message) -> Result<Message, MiddlewareError> {
         message.provider_ids().clone(),
         message.metadata().clone(),
     )
-    .map_err(|_| stable_error("document ingest message could not be constructed"))
+    .map_err(|_| {
+        stable_error(
+            MIDDLEWARE_OUTCOME_NOT_ALLOWED,
+            "document ingest message could not be constructed",
+        )
+    })
 }
 
 /// Map the committed run context to the exact pre-run attachment scope.
@@ -525,7 +596,12 @@ fn attachment_note_block(
         "attachment",
         blob,
     )]))
-    .map_err(|_| stable_error("document attachment reference encoding failed"))?;
+    .map_err(|_| {
+        stable_error(
+            MIDDLEWARE_OUTCOME_NOT_ALLOWED,
+            "document attachment reference encoding failed",
+        )
+    })?;
     note_block(&format!("Document source reference: {reference}\n{note}"))
 }
 
@@ -551,18 +627,18 @@ fn note_block(text: &str) -> Result<ContentBlock, MiddlewareError> {
 ///
 /// Returns a stable [`MiddlewareError`] when the static literal is rejected.
 fn fallback_text_block() -> Result<TextBlock, MiddlewareError> {
-    TextBlock::try_new(FALLBACK_NOTE_TEXT)
-        .map_err(|_| stable_error("document ingest note could not be constructed"))
+    TextBlock::try_new(FALLBACK_NOTE_TEXT).map_err(|_| {
+        stable_error(
+            MIDDLEWARE_OUTCOME_NOT_ALLOWED,
+            "document ingest note could not be constructed",
+        )
+    })
 }
 
-fn stable_error(message: &'static str) -> MiddlewareError {
-    MiddlewareError::try_new(
-        MIDDLEWARE_OUTCOME_NOT_ALLOWED,
-        ErrorCategory::Middleware,
-        message,
-        Metadata::empty(),
-    )
-    .unwrap_or_else(Into::into)
+/// Build a stable, source-free middleware error under `code`.
+fn stable_error(code: &'static str, message: &'static str) -> MiddlewareError {
+    MiddlewareError::try_new(code, ErrorCategory::Middleware, message, Metadata::empty())
+        .unwrap_or_else(Into::into)
 }
 
 fn cancelled_error() -> MiddlewareError {

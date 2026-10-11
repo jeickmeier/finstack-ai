@@ -46,9 +46,8 @@ use finstack_ai_test::{
     ScriptedModel, ScriptedModelAction, ScriptedModelPlan, ScriptedToolAction, ScriptedToolPlan,
     ScriptedToolset,
 };
-use finstack_ai_workflow_local::MemoryCronStore;
 use finstack_ai_workflow_worker::{
-    FireStore, InboxStore, MemoryWorkerStore, PortsFactory, WakeIndexStore, WakeReason, WakeRow,
+    InboxStore, MemoryWorkerStore, PortsFactory, WakeIndexStore, WakeReason, WakeRow,
     WorkerBuilder, WorkerError, WorkflowWorker, park_for_wake,
 };
 
@@ -178,31 +177,43 @@ fn approval_model() -> Arc<dyn Model> {
     ))
 }
 
+/// Ports factory for the synthetic rows below. It is registered so a due
+/// row is claimed, but never reached: the journal holds no such session, so
+/// the attach preceding `bind` fails first.
+struct NeverBinds;
+
+impl PortsFactory for NeverBinds {
+    fn bind(&self, _session: WorkflowSession) -> Result<WorkflowSession, WorkerError> {
+        Err(WorkerError::InvalidConfiguration {
+            code: "never_binds",
+        })
+    }
+}
+
 /// A worker over `store` with no journal-backed run behind it: every claim it
-/// makes lands on an unregistered workflow kind, so a claim is observable as
+/// makes fails at session attach, so a claim is observable as
 /// `failures == 1` and a skip as an all-zero report.
 fn bare_worker(store: &Arc<MemoryWorkerStore>, clock: &ExternalClock) -> WorkflowWorker {
     WorkerBuilder::new(
         memory_store() as Arc<dyn JournalStore>,
-        Arc::new(MemoryCronStore::new()),
         Arc::clone(store) as Arc<dyn WakeIndexStore>,
-        Arc::clone(store) as Arc<dyn FireStore>,
         Arc::clone(store) as Arc<dyn InboxStore>,
     )
     .clock(clock.clone())
     .drive_timeout(Duration::from_millis(200))
+    .register_ports("bare-kind", Arc::new(NeverBinds))
     .build()
     .expect("worker")
 }
 
-/// Synthetic interaction row: no inbox entry, no registered ports factory.
+/// Synthetic interaction row: no inbox entry, no run behind it.
 fn interaction_row(session: u64, expires_at: Option<Timestamp>) -> WakeRow {
     WakeRow {
         tenant_scope: Arc::from("tenant-a"),
         session_id: id(session),
         lane_id: id(2),
         run_id: id(3),
-        workflow_kind: Arc::from("unregistered-kind"),
+        workflow_kind: Arc::from("bare-kind"),
         reason: WakeReason::Interaction,
         wake_at: None,
         expires_at,
@@ -228,7 +239,7 @@ async fn an_interaction_before_its_deadline_is_never_claimed() {
     assert_eq!(report.sessions_resumed, 0);
     assert_eq!(
         report.failures, 0,
-        "a claim would have failed on the unregistered kind; nothing was claimed"
+        "a claim would have failed at session attach; nothing was claimed"
     );
 }
 
@@ -372,9 +383,7 @@ async fn park_on_approval(seed: u64) -> Parked {
 
     let worker = WorkerBuilder::new(
         Arc::clone(&journal) as Arc<dyn JournalStore>,
-        Arc::new(MemoryCronStore::new()),
         Arc::clone(&store) as Arc<dyn WakeIndexStore>,
-        Arc::clone(&store) as Arc<dyn FireStore>,
         Arc::clone(&store) as Arc<dyn InboxStore>,
     )
     .clock(clock.clone())

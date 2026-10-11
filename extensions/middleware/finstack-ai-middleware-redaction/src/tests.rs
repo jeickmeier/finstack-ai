@@ -993,3 +993,390 @@ fn oversized_rewrite_uses_bounded_marker() {
     };
     assert_eq!(block.text(), super::OVERSIZED_MARKER);
 }
+
+// Linear PEM scanning
+
+#[test]
+fn sixteen_thousand_pem_headers_scan_in_bounded_time() {
+    let input = "-----BEGIN PRIVATE KEY-----\n".repeat(16_000);
+    let started = std::time::Instant::now();
+    let output = redacted(&input);
+    let elapsed = started.elapsed();
+    assert_eq!(
+        output.matches("[REDACTED:private-key]").count(),
+        16_000,
+        "every header must be redacted"
+    );
+    assert!(!output.contains("BEGIN"), "no header may survive");
+    assert!(
+        elapsed < std::time::Duration::from_secs(2),
+        "16k unterminated PEM headers must scan in linear time, took {elapsed:?}"
+    );
+}
+
+#[test]
+fn encrypted_pem_block_is_redacted_whole() {
+    let block = "-----BEGIN RSA PRIVATE KEY-----\n\
+        Proc-Type: 4,ENCRYPTED\n\
+        DEK-Info: AES-128-CBC,0123456789ABCDEF0123456789ABCDEF\n\
+        \n\
+        MIIEowIBAAKCAQEAvq\n\
+        QEFAAOCAQ8A==\n\
+        -----END RSA PRIVATE KEY-----";
+    assert_eq!(
+        redacted(&format!("cfg:\n{block}\ndone")),
+        "cfg:\n[REDACTED:private-key]\ndone"
+    );
+}
+
+// Wrapping composition: non-Replace content outcomes
+
+use finstack_ai_runtime::ports::context::{
+    ContextAuthority, ContextItem, ContextItemKind, ContextProvenance,
+};
+use finstack_ai_runtime::ports::middleware::{
+    CompactedSummary, CompactionCheckpoint, CompactionEvidence, CompactionResult,
+    CompactionSourceEntry, PromptCacheImpact, compaction_projection_digest,
+    compaction_protected_set_digest, compaction_source_digest, compaction_summary_digest,
+};
+
+fn context_item(kind: ContextItemKind, content: Vec<ContentBlock>) -> ContextItem {
+    ContextItem::try_new(
+        kind,
+        content,
+        ContextProvenance {
+            source_id: Arc::from("stub-ingest"),
+            source_ref: Some(Arc::from("doc-1")),
+            external: true,
+        },
+        ContextAuthority::Untrusted,
+        3,
+        42,
+        finstack_ai_kernel::Sensitivity::Confidential,
+        true,
+    )
+    .expect("context item")
+}
+
+fn assert_item_identity_preserved(after: &ContextItem, before: &ContextItem) {
+    assert_eq!(after.kind, before.kind);
+    assert_eq!(after.provenance, before.provenance);
+    assert_eq!(after.authority, before.authority);
+    assert_eq!(after.priority, before.priority);
+    assert_eq!(after.estimated_tokens, before.estimated_tokens);
+    assert_eq!(after.sensitivity, before.sensitivity);
+    assert_eq!(after.protected, before.protected);
+    assert_eq!(
+        after.bytes,
+        u64::try_from(
+            serde_json_canonicalizer::to_vec(&after.content)
+                .expect("canonical")
+                .len()
+        )
+        .expect("len"),
+        "rebuilt item must carry the byte count of its redacted content"
+    );
+}
+
+#[test]
+fn wrapper_redacts_inner_add_context() {
+    let secret = context_item(
+        ContextItemKind::QuotedSource,
+        vec![text("doc says key sk-proj-abcdefghij0123456789 here")],
+    );
+    let clean = context_item(ContextItemKind::Reference, vec![text("clean reference")]);
+    let inner = StubInner::before_model(StageOutcome::AddContext(Arc::from([
+        secret.clone(),
+        clean.clone(),
+    ])));
+    let wrapper =
+        RedactionMiddleware::try_wrapping(inner, RedactionConfig::default()).expect("wrap");
+    let outcome = invoke(
+        &wrapper,
+        before_model_input(vec![message(1, MessageRole::User, vec![text("clean")])]),
+    );
+    let StageOutcome::AddContext(items) = outcome else {
+        panic!("expected AddContext, got {outcome:?}");
+    };
+    assert_eq!(items.len(), 2);
+    let ContentBlock::Text(block) = &items[0].content[0] else {
+        panic!("expected text");
+    };
+    assert_eq!(block.text(), "doc says key [REDACTED:api-key] here");
+    assert_item_identity_preserved(&items[0], &secret);
+    assert_eq!(items[1], clean, "unchanged items are carried verbatim");
+}
+
+#[test]
+fn wrapper_redacts_inner_add_instructions() {
+    let secret = context_item(
+        ContextItemKind::Instruction,
+        vec![text("contact jane@example.com for access")],
+    );
+    let inner = StubInner::before_model(StageOutcome::AddInstructions(Arc::from([secret.clone()])));
+    let wrapper =
+        RedactionMiddleware::try_wrapping(inner, RedactionConfig::default()).expect("wrap");
+    let outcome = invoke(
+        &wrapper,
+        before_model_input(vec![message(1, MessageRole::User, vec![text("clean")])]),
+    );
+    let StageOutcome::AddInstructions(items) = outcome else {
+        panic!("expected AddInstructions, got {outcome:?}");
+    };
+    let ContentBlock::Text(block) = &items[0].content[0] else {
+        panic!("expected text");
+    };
+    assert_eq!(block.text(), "contact [REDACTED:email] for access");
+    assert_item_identity_preserved(&items[0], &secret);
+}
+
+fn source_entry(ordinal: u64, message: Message, protected: bool) -> CompactionSourceEntry {
+    CompactionSourceEntry {
+        entry_id: id(ordinal),
+        message,
+        sensitivity: finstack_ai_kernel::Sensitivity::Internal,
+        provenance_digest: Digest::raw_json(b"src"),
+        protected,
+    }
+}
+
+/// A self-consistent compaction projection over `entries`, retaining every
+/// message, with one inline derived summary and a matching checkpoint.
+fn compaction_fixture(
+    entries: Vec<CompactionSourceEntry>,
+    summary_text: &str,
+) -> (StageInput, CompactionResult) {
+    let entries: Arc<[CompactionSourceEntry]> = entries.into();
+    let messages: Arc<[Message]> = entries
+        .iter()
+        .map(|entry| entry.message.clone())
+        .collect::<Vec<_>>()
+        .into();
+    let summary = ContextItem::try_new(
+        ContextItemKind::DerivedSummary,
+        vec![text(summary_text)],
+        ContextProvenance {
+            source_id: Arc::from("stub-compactor"),
+            source_ref: None,
+            external: false,
+        },
+        ContextAuthority::Untrusted,
+        0,
+        8,
+        finstack_ai_kernel::Sensitivity::Internal,
+        false,
+    )
+    .expect("summary");
+    let summaries: Arc<[ContextItem]> = Arc::from([summary]);
+    let checkpoint_summary = CompactedSummary::Inline(Arc::clone(&summaries));
+    let summary_digest = compaction_summary_digest(&checkpoint_summary).expect("summary digest");
+    let source_digest = compaction_source_digest(&entries).expect("source digest");
+    let entry_ids = entries
+        .iter()
+        .map(|entry| entry.entry_id)
+        .collect::<Vec<_>>();
+    let protected_ids = entries
+        .iter()
+        .filter(|entry| entry.protected)
+        .map(|entry| entry.entry_id)
+        .collect::<Vec<_>>();
+    let result = CompactionResult {
+        replacement_messages: Arc::clone(&messages),
+        derived_summaries: summaries,
+        evidence: CompactionEvidence {
+            strategy_id: Arc::from("stub.window"),
+            strategy_version: 1,
+            configuration_digest: Digest::raw_json(b"stub"),
+            model_context_profile_digest: Digest::raw_json(b"profile"),
+            source_digest,
+            protected_item_set_digest: compaction_protected_set_digest(&protected_ids)
+                .expect("protected digest"),
+            covered_entry_ids: entry_ids.clone().into(),
+            retained_entry_ids: entry_ids.clone().into(),
+            projection_digest: compaction_projection_digest(&messages).expect("projection"),
+            estimated_tokens_before: 900,
+            estimated_tokens_after: 800,
+            summary_digest: Some(summary_digest),
+            cache_impact: PromptCacheImpact::CacheInvalidated,
+        },
+        checkpoint: Some(CompactionCheckpoint {
+            component_id: ComponentId::parse("finstack.middleware.stub-ingest").expect("id"),
+            strategy_id: Arc::from("stub.window"),
+            strategy_version: 1,
+            configuration_digest: Digest::raw_json(b"stub"),
+            model_context_profile_digest: Digest::raw_json(b"profile"),
+            covered_through_entry_id: *entry_ids.last().expect("entries"),
+            source_digest,
+            summary: checkpoint_summary,
+            summary_digest,
+            sensitivity: finstack_ai_kernel::Sensitivity::Internal,
+        }),
+    };
+    let input = StageInput::BeforeModel(Box::new(BeforeModelInput {
+        request: draft_with_messages(messages.to_vec()),
+        source_entries: entries,
+        model_context_profile_digest: Digest::raw_json(b"profile"),
+        hard_input_tokens: 10_000,
+        checkpoint: None,
+    }));
+    (input, result)
+}
+
+#[test]
+fn wrapper_redacts_inner_compact_context() {
+    let (input, result) = compaction_fixture(
+        vec![
+            source_entry(
+                20,
+                message(10, MessageRole::System, vec![text("policy")]),
+                true,
+            ),
+            source_entry(
+                21,
+                message(
+                    11,
+                    MessageRole::User,
+                    vec![text("old note: token sk-proj-abcdefghij0123456789")],
+                ),
+                false,
+            ),
+            source_entry(
+                22,
+                message(12, MessageRole::User, vec![text("current")]),
+                true,
+            ),
+        ],
+        "summary mentions jane@example.com",
+    );
+    let inner = StubInner::before_model(StageOutcome::CompactContext(Box::new(result.clone())));
+    let wrapper =
+        RedactionMiddleware::try_wrapping(inner, RedactionConfig::default()).expect("wrap");
+    let outcome = invoke(&wrapper, input);
+    let StageOutcome::CompactContext(redacted) = outcome else {
+        panic!("expected CompactContext, got {outcome:?}");
+    };
+    let ContentBlock::Text(block) = &redacted.replacement_messages[1].content()[0] else {
+        panic!("expected text");
+    };
+    assert_eq!(block.text(), "old note: token [REDACTED:api-key]");
+    assert_eq!(
+        redacted.replacement_messages[0], result.replacement_messages[0],
+        "untouched messages are carried verbatim"
+    );
+    assert_eq!(
+        redacted.evidence.projection_digest,
+        compaction_projection_digest(&redacted.replacement_messages).expect("digest"),
+        "projection digest must be rebuilt over the redacted messages"
+    );
+    assert_ne!(
+        redacted.evidence.projection_digest,
+        result.evidence.projection_digest
+    );
+    let ContentBlock::Text(summary) = &redacted.derived_summaries[0].content[0] else {
+        panic!("expected summary text");
+    };
+    assert_eq!(summary.text(), "summary mentions [REDACTED:email]");
+    let checkpoint = redacted.checkpoint.as_ref().expect("checkpoint");
+    assert_eq!(
+        checkpoint.summary,
+        CompactedSummary::Inline(Arc::clone(&redacted.derived_summaries)),
+        "checkpoint summary must follow the redacted derived summaries"
+    );
+    assert_eq!(
+        checkpoint.summary_digest,
+        compaction_summary_digest(&checkpoint.summary).expect("summary digest")
+    );
+    assert_eq!(
+        redacted.evidence.summary_digest,
+        Some(checkpoint.summary_digest)
+    );
+    // Everything that carries no content is preserved exactly.
+    assert_eq!(
+        redacted.evidence.source_digest,
+        result.evidence.source_digest
+    );
+    assert_eq!(
+        redacted.evidence.retained_entry_ids,
+        result.evidence.retained_entry_ids
+    );
+    assert_eq!(
+        redacted.evidence.estimated_tokens_after,
+        result.evidence.estimated_tokens_after
+    );
+}
+
+#[test]
+fn wrapper_fails_closed_on_unrebuildable_compact_context() {
+    // The secret sits in a *protected* source entry: the runtime requires
+    // protected entries to be retained byte-identical, so a redacted
+    // projection could never validate and the wrapper must fail closed
+    // rather than emit either the secret or an invalid projection.
+    let (input, result) = compaction_fixture(
+        vec![
+            source_entry(
+                20,
+                message(10, MessageRole::System, vec![text("policy")]),
+                true,
+            ),
+            source_entry(
+                21,
+                message(
+                    11,
+                    MessageRole::User,
+                    vec![text("pinned token sk-proj-abcdefghij0123456789")],
+                ),
+                true,
+            ),
+        ],
+        "clean summary",
+    );
+    let inner = StubInner::before_model(StageOutcome::CompactContext(Box::new(result)));
+    let wrapper =
+        RedactionMiddleware::try_wrapping(inner, RedactionConfig::default()).expect("wrap");
+    let error = invoke_result(&wrapper, input).expect_err("must fail closed");
+    assert_eq!(error.code(), super::REDACTION_REWRITE_CODE);
+}
+
+#[test]
+fn wrapper_passes_through_clean_compact_context_unchanged() {
+    let (input, result) = compaction_fixture(
+        vec![
+            source_entry(
+                20,
+                message(10, MessageRole::System, vec![text("policy")]),
+                true,
+            ),
+            source_entry(
+                21,
+                message(11, MessageRole::User, vec![text("current")]),
+                true,
+            ),
+        ],
+        "clean summary",
+    );
+    let inner = StubInner::before_model(StageOutcome::CompactContext(Box::new(result.clone())));
+    let wrapper =
+        RedactionMiddleware::try_wrapping(inner, RedactionConfig::default()).expect("wrap");
+    assert_eq!(
+        invoke(&wrapper, input),
+        StageOutcome::CompactContext(Box::new(result))
+    );
+}
+
+#[test]
+fn wrapper_passes_through_inner_filter_tools() {
+    let tools: Arc<[finstack_ai_kernel::ToolId]> =
+        Arc::from([finstack_ai_kernel::ToolId::parse("finstack.tools.read").expect("tool")]);
+    let inner = StubInner::before_model(StageOutcome::FilterTools(Arc::clone(&tools)));
+    let wrapper =
+        RedactionMiddleware::try_wrapping(inner, RedactionConfig::default()).expect("wrap");
+    let outcome = invoke(
+        &wrapper,
+        before_model_input(vec![message(
+            1,
+            MessageRole::User,
+            vec![text("mail jane@example.com")],
+        )]),
+    );
+    assert_eq!(outcome, StageOutcome::FilterTools(tools));
+}

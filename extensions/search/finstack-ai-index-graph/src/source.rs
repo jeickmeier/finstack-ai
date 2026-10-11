@@ -147,11 +147,11 @@ impl GraphSearchSource {
             descriptors.push(descriptor);
         }
         descriptors.sort_by(|a, b| a.source_id.cmp(&b.source_id));
-        let database = Database::open(path)?;
+        let database = crate::database::open(path)?;
         let compiled = Arc::new(Compiled::new(&config.vocabulary)?);
         let extraction_digest = configuration_digest("graph-extraction", &(1, &config.vocabulary))?;
         let digest =
-            configuration_digest("graph-search", &(&config, descriptors, database.identity))?;
+            configuration_digest("graph-search", &(&config, descriptors, database.identity()))?;
         let descriptor = SearchSourceDescriptor {
             source_id: config.source_id.clone(),
             kind: "graph".into(),

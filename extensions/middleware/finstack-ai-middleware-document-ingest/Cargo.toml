@@ -18,6 +18,9 @@ serde = { workspace = true }
 serde_json_canonicalizer = { workspace = true }
 thiserror = { workspace = true }
 
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { workspace = true, features = ["rt"] }
+
 [dev-dependencies]
 criterion = { workspace = true }
 serde_json = { workspace = true }

@@ -12,22 +12,21 @@ readme = "README.md"
 
 [features]
 default = []
-vendored-tls = ["reqwest/native-tls-vendored"]
+vendored-tls = ["reqwest/native-tls-vendored", "finstack-ai-provider-wire/vendored-tls"]
 
 [dependencies]
 base64 = { workspace = true }
 finstack-ai-kernel = { workspace = true }
 finstack-ai-runtime = { workspace = true, default-features = false, features = ["native-tokio"] }
-finstack-ai-provider-wire = { workspace = true }
-futures-util = { workspace = true }
+finstack-ai-provider-wire = { workspace = true, features = ["native"] }
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-tokio = { workspace = true }
 
 [dev-dependencies]
 criterion = { workspace = true, features = ["async_tokio"] }
 finstack-ai-test = { workspace = true }
+futures-util = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "net", "rt-multi-thread"] }
 
 [[bench]]

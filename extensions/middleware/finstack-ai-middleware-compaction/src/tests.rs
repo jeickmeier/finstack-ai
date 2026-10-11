@@ -895,3 +895,255 @@ async fn sliding_window_terminates_on_five_thousand_entries() {
         other => panic!("sliding window did not terminate cleanly: {other:?}"),
     }
 }
+
+fn entry(ordinal: u64, message: Message, protected: bool) -> CompactionSourceEntry {
+    CompactionSourceEntry {
+        entry_id: id::<EntryTag>(ordinal),
+        message,
+        sensitivity: Sensitivity::Internal,
+        provenance_digest: Digest::raw_json(b"fixture"),
+        protected,
+    }
+}
+
+fn tool_call(call_id: Id<ToolCallTag>, query: &str) -> ContentBlock {
+    ContentBlock::ToolCall(
+        ToolCallBlock::try_new(
+            call_id,
+            "lookup",
+            RawJson::parse(format!("{{\"q\":\"{query}\"}}")).expect("args"),
+        )
+        .expect("call"),
+    )
+}
+
+fn tool_result(call_id: Id<ToolCallTag>, body: &str) -> Vec<ContentBlock> {
+    vec![ContentBlock::ToolResult(
+        ToolResultBlock::try_new(call_id, text(&body.repeat(40)), false).expect("result"),
+    )]
+}
+
+/// System, droppable user turn, one assistant message with two tool calls,
+/// one `Tool` message per result, then the protected current user turn.
+fn multi_call_history() -> BeforeModelInput {
+    let first = id::<ToolCallTag>(80);
+    let second = id::<ToolCallTag>(81);
+    let entries: Arc<[CompactionSourceEntry]> = Arc::from([
+        entry(
+            50,
+            message(10, MessageRole::System, text("system policy")),
+            true,
+        ),
+        entry(
+            51,
+            message(11, MessageRole::User, text(&"droppable ".repeat(40))),
+            false,
+        ),
+        entry(
+            52,
+            message(
+                12,
+                MessageRole::Assistant,
+                vec![tool_call(first, "first"), tool_call(second, "second")],
+            ),
+            false,
+        ),
+        entry(
+            53,
+            message(13, MessageRole::Tool, tool_result(first, "first-body-")),
+            false,
+        ),
+        entry(
+            54,
+            message(14, MessageRole::Tool, tool_result(second, "second-body-")),
+            false,
+        ),
+        entry(
+            55,
+            message(15, MessageRole::User, text("current question")),
+            true,
+        ),
+    ]);
+    BeforeModelInput {
+        request: ModelRequestDraft {
+            model: ModelName::try_new("preview-model").expect("model"),
+            messages: entries
+                .iter()
+                .map(|entry| entry.message.clone())
+                .collect::<Vec<_>>()
+                .into(),
+            tools: Arc::from([]),
+            output: OutputSpec::PlainText,
+            settings: ModelSettings {
+                values: RawJson::parse(b"{}").expect("settings"),
+            },
+            limits: ModelRequestLimits {
+                max_input_bytes: 1_000_000,
+                max_input_tokens: 10_000,
+                max_output_tokens: 1_000,
+            },
+        },
+        source_entries: entries,
+        model_context_profile_digest: Digest::raw_json(b"profile"),
+        hard_input_tokens: 10_000,
+        checkpoint: None,
+    }
+}
+
+#[tokio::test]
+async fn sliding_window_drops_multi_call_component_atomically() {
+    let middleware =
+        CompactionMiddleware::try_new(CompactionConfig::sliding_window(80, 0)).expect("middleware");
+    let input = multi_call_history();
+    let outcome = invoke(&middleware, input.clone(), None)
+        .await
+        .expect("invoke");
+    let StageOutcome::CompactContext(result) = outcome else {
+        panic!("expected compact context");
+    };
+    let retained = result
+        .replacement_messages
+        .iter()
+        .map(|message| *message.id())
+        .collect::<Vec<_>>();
+    // The old user turn, the two-call assistant message, and both of its
+    // tool-result messages are gone together; only protected entries stay.
+    for index in 1..=4 {
+        assert!(
+            !retained.contains(input.source_entries[index].message.id()),
+            "entry {index} must be dropped with its component"
+        );
+    }
+    assert_eq!(
+        retained,
+        vec![
+            *input.source_entries[0].message.id(),
+            *input.source_entries[5].message.id(),
+        ]
+    );
+    validate_compaction_result(&middleware.descriptor(), &input, &result)
+        .expect("atomic component drop validates");
+    validate_stage_outcome(
+        &middleware.descriptor(),
+        &StageInput::BeforeModel(Box::new(input)),
+        &StageOutcome::CompactContext(result),
+    )
+    .expect("stage");
+}
+
+#[tokio::test]
+async fn sliding_window_keeps_multi_call_component_whole_and_passes_conformance() {
+    // Pin the threshold just under the canonical estimate so dropping the
+    // old user turn alone satisfies the target and the two-call component
+    // is retained intact; the public suite then proves it atomic.
+    let input = multi_call_history();
+    let before = estimate_request(&input.request, &input.request.messages, 0).expect("estimate");
+    let old_user = estimate_message(&input.source_entries[1].message);
+    let threshold = before - old_user / 2;
+    let middleware = CompactionMiddleware::try_new(CompactionConfig::sliding_window(threshold, 0))
+        .expect("middleware");
+    let outcome = invoke(&middleware, input.clone(), None)
+        .await
+        .expect("invoke");
+    let StageOutcome::CompactContext(result) = outcome else {
+        panic!("expected compact context");
+    };
+    let retained = result
+        .replacement_messages
+        .iter()
+        .map(|message| *message.id())
+        .collect::<Vec<_>>();
+    assert!(!retained.contains(input.source_entries[1].message.id()));
+    for index in [2, 3, 4] {
+        assert!(
+            retained.contains(input.source_entries[index].message.id()),
+            "entry {index} must stay with its component"
+        );
+    }
+    let projection: Arc<[u8]> = serde_json_canonicalizer::to_vec(&result.replacement_messages)
+        .expect("canonical")
+        .into();
+    check_compaction_conformance(&CompactionConformanceCase {
+        descriptor: middleware.descriptor(),
+        input,
+        result: *result,
+        shared_projections: Arc::from([SharedCompactionProjection {
+            target: Arc::from("rust"),
+            bytes: projection,
+        }]),
+    })
+    .expect("conformance");
+}
+
+#[test]
+fn pair_index_groups_a_call_with_every_result_message() {
+    let input = multi_call_history();
+    let pairs = PairIndex::collect(&input.source_entries);
+    assert_eq!(pairs.component(2), &[2, 3, 4]);
+    assert_eq!(pairs.component(3), &[2, 3, 4]);
+    assert_eq!(pairs.component(4), &[2, 3, 4]);
+    assert_eq!(pairs.component(0), &[0]);
+    assert_eq!(pairs.component(1), &[1]);
+    assert_eq!(pairs.component(5), &[5]);
+    assert!(pairs.component(99).is_empty());
+    assert!(pairs.unmatched_calls.is_empty());
+    let unpaired = PairIndex::collect(&unpaired_history().source_entries);
+    assert_eq!(unpaired.unmatched_calls, BTreeSet::from([4]));
+    assert_eq!(unpaired.component(2), &[2, 3]);
+}
+
+#[test]
+fn pair_index_merges_components_through_a_shared_result_message() {
+    // One Tool message answering two different assistant calls joins both
+    // call messages into a single component; every member must resolve to
+    // the same fully compressed leader.
+    let first = id::<ToolCallTag>(90);
+    let second = id::<ToolCallTag>(91);
+    let entries: Arc<[CompactionSourceEntry]> = Arc::from([
+        entry(
+            60,
+            message(10, MessageRole::System, text("system policy")),
+            true,
+        ),
+        entry(
+            61,
+            message(11, MessageRole::Assistant, vec![tool_call(first, "first")]),
+            false,
+        ),
+        entry(
+            62,
+            message(
+                12,
+                MessageRole::Assistant,
+                vec![tool_call(second, "second")],
+            ),
+            false,
+        ),
+        entry(
+            63,
+            message(
+                13,
+                MessageRole::Tool,
+                vec![
+                    ContentBlock::ToolResult(
+                        ToolResultBlock::try_new(second, text("second output"), false)
+                            .expect("result"),
+                    ),
+                    ContentBlock::ToolResult(
+                        ToolResultBlock::try_new(first, text("first output"), false)
+                            .expect("result"),
+                    ),
+                ],
+            ),
+            false,
+        ),
+        entry(64, message(14, MessageRole::User, text("current")), true),
+    ]);
+    let pairs = PairIndex::collect(&entries);
+    for index in [1, 2, 3] {
+        assert_eq!(pairs.component(index), &[1, 2, 3], "member {index}");
+    }
+    assert_eq!(pairs.component(0), &[0]);
+    assert_eq!(pairs.component(4), &[4]);
+    assert!(pairs.unmatched_calls.is_empty());
+}

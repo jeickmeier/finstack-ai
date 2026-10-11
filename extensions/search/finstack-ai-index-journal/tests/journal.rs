@@ -629,3 +629,173 @@ fn journal_index_rejects_foreign_and_future_database_schemas() {
             .is_err()
     );
 }
+
+#[tokio::test]
+#[allow(clippy::too_many_lines)]
+async fn keyword_ranking_and_multi_session_coverage_match_golden() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = memory();
+    let first = Session::create(store.clone(), "tenant").await.unwrap();
+    let second = Session::create(store.clone(), "tenant").await.unwrap();
+    let lane = first.lane("main").await.unwrap();
+    for text in [
+        "retention policy keeps records seven years",
+        "unrelated budget note",
+        "records retention retention schedule",
+        "retention",
+    ] {
+        lane.append_text(text).await.unwrap();
+    }
+    second
+        .lane("main")
+        .await
+        .unwrap()
+        .append_text("retention in the second session")
+        .await
+        .unwrap();
+    let source = JournalSearchSource::try_open(
+        &dir.path().join("index.sqlite"),
+        store.clone(),
+        JournalIndexConfig::new(
+            "journal",
+            SearchScope::try_new("tenant").unwrap(),
+            vec![first.session_id(), second.session_id()],
+        ),
+    )
+    .unwrap();
+    source.sync_session(first.session_id(), 512).await.unwrap();
+    let describe = |result: &SourceResult| {
+        (
+            result.status,
+            result.examined,
+            result.historical_complete,
+            result
+                .reasons
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            result
+                .hits
+                .iter()
+                .map(|hit| {
+                    let SourceRef::JournalSpan { session, .. } = &hit.reference else {
+                        panic!("journal reference");
+                    };
+                    (
+                        *session == first.session_id(),
+                        hit.score,
+                        hit.preview.to_string(),
+                    )
+                })
+                .collect::<Vec<_>>(),
+        )
+    };
+    let scope = source.config().scope.clone();
+    let schedule = "records retention retention schedule";
+    let policy = "retention policy keeps records seven years";
+    let bare = "retention";
+    let keyword = SearchQuery::lexical("retention records", LexicalKind::Bm25);
+    let full = source
+        .search(scope.clone(), keyword.clone(), 8)
+        .await
+        .unwrap();
+    assert_eq!(
+        describe(&full),
+        (
+            SourceStatus::Truncated,
+            4,
+            false,
+            vec!["journal_index_pending".to_owned()],
+            vec![
+                (true, u32::MAX, schedule.to_owned()),
+                (true, u32::MAX - 1, policy.to_owned()),
+                (true, u32::MAX - 2, bare.to_owned()),
+            ]
+        )
+    );
+    let top = source
+        .search(scope.clone(), keyword.clone(), 2)
+        .await
+        .unwrap();
+    assert_eq!(
+        describe(&top),
+        (
+            SourceStatus::Truncated,
+            4,
+            false,
+            vec![
+                "journal_index_pending".to_owned(),
+                "journal_scan_or_result_limit".to_owned()
+            ],
+            vec![
+                (true, u32::MAX, schedule.to_owned()),
+                (true, u32::MAX - 1, policy.to_owned()),
+            ]
+        )
+    );
+    let literal = source
+        .search(
+            scope.clone(),
+            SearchQuery::lexical("retention", LexicalKind::Literal),
+            2,
+        )
+        .await
+        .unwrap();
+    // Literal scans order by committed entry id, which is time-based, so only
+    // the retained set is stable across runs.
+    let (status, examined, complete, reasons, mut hits) = describe(&literal);
+    hits.sort();
+    assert_eq!(
+        (status, examined, complete, reasons),
+        (
+            SourceStatus::Truncated,
+            4,
+            false,
+            vec![
+                "journal_index_pending".to_owned(),
+                "journal_scan_or_result_limit".to_owned()
+            ]
+        )
+    );
+    assert_eq!(hits.len(), 2);
+    assert!(hits.iter().all(|(own, score, preview)| *own
+        && *score == 0
+        && [schedule, policy, bare].contains(&preview.as_str())));
+    source.sync_session(second.session_id(), 512).await.unwrap();
+    let both = source
+        .search(scope.clone(), keyword.clone(), 8)
+        .await
+        .unwrap();
+    assert_eq!(
+        describe(&both),
+        (
+            SourceStatus::Completed,
+            5,
+            true,
+            vec![],
+            vec![
+                (true, u32::MAX, schedule.to_owned()),
+                (true, u32::MAX - 1, policy.to_owned()),
+                (true, u32::MAX - 2, bare.to_owned()),
+                (
+                    false,
+                    u32::MAX - 3,
+                    "retention in the second session".to_owned()
+                ),
+            ]
+        )
+    );
+    // A session that moved past its checkpoint is still served, marked pending.
+    lane.append_text("retention appended later").await.unwrap();
+    let behind = source.search(scope, keyword, 8).await.unwrap();
+    assert_eq!(
+        describe(&behind),
+        (
+            SourceStatus::Truncated,
+            5,
+            true,
+            vec!["journal_index_pending".to_owned()],
+            describe(&both).4
+        )
+    );
+}

@@ -1,12 +1,24 @@
 //! A real `SQLite` write lock must not block the current-thread executor.
 use super::*;
-use crate::{FireStore, InboxStore, WorkerBuilder};
+use crate::{InboxStore, PortsFactory, WorkerBuilder};
 use finstack_ai_runtime::ids::ExternalClock;
+use finstack_ai_runtime::workflow::WorkflowSession;
 use finstack_ai_store_memory::{MemoryJournalStore, MemoryStoreLimits};
-use finstack_ai_workflow_local::MemoryCronStore;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 static CONTENDED: tokio::sync::Notify = tokio::sync::Notify::const_new();
+
+/// Registered so the row is claimed; the resume then fails before any
+/// journal work because the journal holds no such session.
+struct NeverBinds;
+
+impl PortsFactory for NeverBinds {
+    fn bind(&self, _session: WorkflowSession) -> Result<WorkflowSession, WorkerError> {
+        Err(WorkerError::InvalidConfiguration {
+            code: "never_binds",
+        })
+    }
+}
 
 #[tokio::test(flavor = "current_thread")]
 async fn tick_remains_responsive_during_sqlite_contention() {
@@ -19,9 +31,9 @@ async fn tick_remains_responsive_during_sqlite_contention() {
         session_id: SessionId::from_bytes([1; 16]),
         lane_id: LaneId::from_bytes([2; 16]),
         run_id: RunId::from_bytes([3; 16]),
-        workflow_kind: Arc::from("missing"),
+        workflow_kind: Arc::from("stuck"),
         reason: WakeReason::Runnable,
-        wake_at: None,
+        wake_at: Some(now),
         expires_at: None,
         pending_id: Arc::from("run"),
         leased_by: None,
@@ -51,12 +63,11 @@ async fn tick_remains_responsive_during_sqlite_contention() {
     );
     let worker = WorkerBuilder::new(
         journal,
-        Arc::new(MemoryCronStore::new()),
         store.clone() as Arc<dyn WakeIndexStore>,
-        store.clone() as Arc<dyn FireStore>,
         store.clone() as Arc<dyn InboxStore>,
     )
     .clock(ExternalClock::new(now))
+    .register_ports("stuck", Arc::new(NeverBinds))
     .build()
     .expect("worker");
     let blocker = Connection::open(path).expect("blocker");
@@ -84,7 +95,7 @@ async fn tick_remains_responsive_during_sqlite_contention() {
     assert_eq!(
         tick.expect("tick").failures,
         1,
-        "unknown kind backs off after claiming"
+        "a session the journal does not hold backs off after claiming"
     );
     assert_eq!(store.load_tenant("tenant").expect("hint")[0].attempts, 1);
 }
