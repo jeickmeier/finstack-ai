@@ -126,7 +126,8 @@ def test_execution_rescore_budget_and_export(tmp_path: Path) -> None:
         ]
         assert len(rows) == 2
         assert rows[0]["usage"]["cost"]["micros"] == "7"
-        assert "target" not in rows[0] and "input" not in rows[0]
+        assert "target" not in rows[0]
+        assert "input" not in rows[0]
         assert (
             json.loads((tmp_path / "summary.json").read_text())["counts"]
             == result.report["counts"]
@@ -139,13 +140,14 @@ def test_execution_rescore_budget_and_export(tmp_path: Path) -> None:
         assert result.evaluate(gate)["incomplete"]
         assert not result.evaluate(gate)["passed"]
         assert store.snapshot().report == result.report
+        diverged = ev.EvalRunner(
+            replace(configuration, repetitions=2),
+            store,
+            [binding],
+            [ev.ExactMatchScorer()],
+        )
         with pytest.raises(ai.FinstackError) as failure:
-            await ev.EvalRunner(
-                replace(configuration, repetitions=2),
-                store,
-                [binding],
-                [ev.ExactMatchScorer()],
-            ).run()
+            await diverged.run()
         assert failure.value.code == "eval_spec_diverged"
 
     asyncio.run(exercise())
@@ -281,10 +283,11 @@ def test_explicit_cancellation_settles_subject_after_python_await_is_cancelled()
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
+        contender = ev.EvalRunner(
+            configuration, store, [binding], [ev.ExactMatchScorer()]
+        )
         with pytest.raises(ai.FinstackError) as busy:
-            await ev.EvalRunner(
-                configuration, store, [binding], [ev.ExactMatchScorer()]
-            ).resume()
+            await contender.resume()
         assert busy.value.code == "eval_runner_busy"
         runner.cancel()
         assert await asyncio.to_thread(cancelled.wait, 2)
@@ -373,7 +376,8 @@ def test_judge_rescoring_only_calls_graders_and_preserves_failed_subject_output(
         initial = await runner.run()
         assert initial.report["spending"]["total_micros"] == {"USD": "12"}
         rescored = await runner.rescore()
-        assert subject_calls == 1 and grader_calls == 2
+        assert subject_calls == 1
+        assert grader_calls == 2
         assert rescored.report["spending"]["grader_micros"] == {"USD": "10"}
         assert rescored.report["aggregates"][0]["statistics"]["mean"] == "1"
 

@@ -118,7 +118,7 @@ def manifest_digest(identity: str, version: str, worlds: list[str]) -> str:
 def convert_manifest(data: dict[str, object]) -> dict[str, object]:
     extra = set(data) - MANIFEST_KEYS
     if extra:
-        raise MigrateError(f"unknown manifest field: {sorted(extra)[0]}")
+        raise MigrateError(f"unknown manifest field: {min(extra)}")
     reject_denied_keys(data, "manifest")
     version = data.get("version")
     if version not in {"0.0.4", "1.0.0"}:
@@ -137,7 +137,7 @@ def convert_manifest(data: dict[str, object]) -> dict[str, object]:
 def convert_agent_spec(data: dict[str, object]) -> dict[str, object]:
     extra = set(data) - AGENT_SPEC_KEYS
     if extra:
-        raise MigrateError(f"unknown AgentSpec field: {sorted(extra)[0]}")
+        raise MigrateError(f"unknown AgentSpec field: {min(extra)}")
     reject_denied_keys(data, "agent_spec")
     if data.get("schema_version") != 1:
         raise MigrateError("AgentSpec schema_version must be 1")
@@ -151,7 +151,7 @@ def convert_journal_document(data: dict[str, object]) -> dict[str, object]:
         raise MigrateError("journal document must contain exactly one record-body kind")
     extra = set(data) - set(kinds)
     if extra:
-        raise MigrateError(f"unknown journal field: {sorted(extra)[0]}")
+        raise MigrateError(f"unknown journal field: {min(extra)}")
     return data
 
 

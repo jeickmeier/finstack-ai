@@ -349,7 +349,7 @@ def scripted_model(
     queue: list[dict[str, Any] | str] = list(responses)
     needs_index = index_attachment
 
-    async def callback(
+    def callback(
         context: finstack_ai.CallbackContext, request: dict[str, Any]
     ) -> dict[str, Any]:
         nonlocal needs_index

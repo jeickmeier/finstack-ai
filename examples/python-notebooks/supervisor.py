@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import threading
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from typing import Any
 
 import finstack_ai
@@ -17,7 +17,7 @@ import finstack_ai
 async def drain(run: finstack_ai.Run) -> None:
     """Keep event delivery independent from waiting for results."""
     async for _ in run.events():
-        pass
+        pass  # The observer callback records events; this loop only drains.
 
 
 async def definition(
@@ -26,7 +26,7 @@ async def definition(
     *,
     cancel: bool,
     summary: concurrent.futures.Future[str],
-    observer: Callable[[list[dict[str, Any]]], Awaitable[None]],
+    observer: Callable[[list[dict[str, Any]]], None],
 ) -> tuple[finstack_ai.Agent, threading.Event]:
     """Build one offline agent; ``answer=None`` is the supervisor awaiting ``summary``."""
     entered = threading.Event()
@@ -114,7 +114,7 @@ async def exercise(cancel: bool) -> None:
     events: list[dict[str, Any]] = []
     summary: concurrent.futures.Future[str] = concurrent.futures.Future()
 
-    async def observer(batch: list[dict[str, Any]]) -> None:
+    def observer(batch: list[dict[str, Any]]) -> None:
         events.extend(batch)
 
     supervisor, started = await definition(

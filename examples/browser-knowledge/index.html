@@ -22,6 +22,17 @@
         padding: 0.75rem;
         overflow: auto;
       }
+      .visually-hidden {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        margin: -1px;
+        padding: 0;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
     </style>
     <script type="importmap">
       {
@@ -44,6 +55,7 @@
       inspect/export, not shared sessions.
     </p>
     <p>
+      <label class="visually-hidden" for="question">Question</label>
       <input id="question" type="text" value="What are the six runtime ports?" />
       <button id="ask" type="button">Ask</button>
     </p>

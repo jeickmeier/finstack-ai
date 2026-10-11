@@ -35,8 +35,9 @@ FORBIDDEN_WORLD_TOKENS = (
     "lineage",
     "nested",
 )
-PACKAGE_RE = re.compile(r"^package\s+([^;]+);", re.MULTILINE)
+PACKAGE_RE = re.compile(r"^package\s+([^;\s][^;]*);", re.MULTILINE)
 IDENT_RE = re.compile(r"[A-Za-z][A-Za-z0-9-]*")
+FUNC_HEAD_RE = re.compile(r"([A-Za-z][A-Za-z0-9-]*)\s*:\s*func\s*\(")
 
 
 @dataclass
@@ -114,9 +115,11 @@ def rust_type(ty: str) -> str:
         if inner == "u8":
             return "Vec<u8>"
         return f"Vec<{rust_type(inner)}>"
-    result = re.fullmatch(r"result<(.+),\s*(.+)>", ty)
-    if result:
-        return f"Result<{rust_type(result.group(1))}, {rust_type(result.group(2))}>"
+    if ty.startswith("result<") and ty.endswith(">") and "," in ty:
+        ok, err = ty[len("result<") : -1].rsplit(",", 1)
+        err = err.lstrip()
+        if ok and err:
+            return f"Result<{rust_type(ok)}, {rust_type(err)}>"
     if IDENT_RE.fullmatch(ty):
         return kebab_to_pascal(ty)
     raise WitError(f"unsupported WIT type: {ty}")
@@ -161,16 +164,19 @@ def parse_fields(body: str) -> list[Field]:
 
 
 def parse_func(text: str) -> Func:
-    match = re.fullmatch(
-        r"([A-Za-z][A-Za-z0-9-]*)\s*:\s*func\s*\((.*)\)\s*(?:->\s*(.+))?",
-        text,
-        flags=re.DOTALL,
-    )
-    if match is None:
+    head = FUNC_HEAD_RE.match(text)
+    close = text.rfind(")")
+    if head is None or close < head.end():
         raise WitError(f"unsupported func: {text}")
-    params = parse_fields(match.group(2))
-    result = match.group(3).strip() if match.group(3) else "()"
-    return Func(name=match.group(1), params=params, result=result)
+    tail = text[close + 1 :].strip()
+    if not tail:
+        result = "()"
+    elif tail.startswith("->") and len(tail) > len("->"):
+        result = tail[len("->") :].strip()
+    else:
+        raise WitError(f"unsupported func: {text}")
+    params = parse_fields(text[head.end() : close])
+    return Func(name=head.group(1), params=params, result=result)
 
 
 def skip_whitespace(text: str, index: int) -> int:

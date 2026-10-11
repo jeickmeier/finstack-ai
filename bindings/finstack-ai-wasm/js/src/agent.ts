@@ -678,7 +678,7 @@ export class Run {
         let closed = signal?.aborted === true;
         const onAbort = (): void => {
           closed = true;
-          handle.closeEvents();
+          void handle.closeEvents();
         };
         signal?.addEventListener("abort", onAbort, { once: true });
         return {

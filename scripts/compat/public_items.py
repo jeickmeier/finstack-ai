@@ -187,7 +187,7 @@ def js_class_members() -> dict[str, set[str]]:
     classes: dict[str, set[str]] = {}
     declaration = re.compile(r"^export class ([A-Za-z_][A-Za-z0-9_]*) \{", re.M)
     member = re.compile(
-        r"^  (?:(?:static|async|get) )*([A-Za-z_][A-Za-z0-9_]*)\s*(?:\(|:)",
+        r"^ {2}(?:(?:static|async|get) )*([A-Za-z_][A-Za-z0-9_]*)\s*[(:]",
         re.M,
     )
     for match in declaration.finditer(text):

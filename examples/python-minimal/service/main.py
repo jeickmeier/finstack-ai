@@ -8,7 +8,7 @@ from typing import Any
 import finstack_ai
 
 
-async def model(
+def model(
     context: finstack_ai.CallbackContext, request: dict[str, Any]
 ) -> dict[str, Any]:
     """Return one deterministic offline model completion."""

@@ -14,7 +14,8 @@ _HANDLES_SPEC = importlib.util.spec_from_file_location(
     "finstack_ai_test_handles",
     Path(__file__).with_name("test_handles.py"),
 )
-assert _HANDLES_SPEC is not None and _HANDLES_SPEC.loader is not None
+assert _HANDLES_SPEC is not None
+assert _HANDLES_SPEC.loader is not None
 _handles = importlib.util.module_from_spec(_HANDLES_SPEC)
 _HANDLES_SPEC.loader.exec_module(_handles)
 _server = _handles._server

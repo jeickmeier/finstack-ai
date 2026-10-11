@@ -90,7 +90,8 @@ def test_artifact_path_survives_agent_restart(tmp_path: Path) -> None:
         ]
         assert not any(block["kind"] == "file" for block in blocks), blocks
         text = "".join(block["text"] for block in blocks if block["kind"] == "text")
-        assert "Q1" in text and "Q2" in text, text
+        assert "Q1" in text, text
+        assert "Q2" in text, text
 
     asyncio.run(exercise())
 

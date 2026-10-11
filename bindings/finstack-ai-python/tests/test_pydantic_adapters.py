@@ -294,10 +294,11 @@ def test_structured_output_rejects_non_object_root_precisely() -> None:
         del context, request
         return {"json": [1], "completion_id": "root-array"}
 
+    python_model = _model(model_callback)
     with pytest.raises(
         TypeError, match="structured_output schema root must be an object"
     ):
-        finstack_ai.Agent.from_python(_model(model_callback), output_type=list[int])
+        finstack_ai.Agent.from_python(python_model, output_type=list[int])
 
 
 async def _collect_event_json(run: finstack_ai.Run) -> list[str]:

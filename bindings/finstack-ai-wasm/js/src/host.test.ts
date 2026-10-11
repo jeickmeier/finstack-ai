@@ -141,31 +141,33 @@ test("constructs host wrappers and drives scripted model/tool DTOs", async ({
           is_error: false,
         }),
       };
-      new window.finstackTest.JsModel(modelHost, modelOptions);
-      new window.finstackTest.JsToolset(toolHost, toolOptions);
-      new window.finstackTest.JsContextProvider(
-        {
-          collect: async () => ({
-            items: [],
-            estimated_tokens: 0,
-            bytes: 0,
-            cache_key: null,
-          }),
-        },
-        { component: "js.context.fixture" },
-      );
-      new window.finstackTest.JsMiddleware(
-        { invoke: async () => "continue" },
-        { component: "js.middleware.fixture", stages: ["before_run"] },
-      );
-      new window.finstackTest.JsObserver(
-        { observe: async () => undefined },
-        { component: "js.observer.fixture" },
-      );
-      new window.finstackTest.JsClock(window.finstackTest.createHostClock());
-      new window.finstackTest.JsRandomSource(
-        window.finstackTest.createHostRandomSource(),
-      );
+      const hostWrappers: object[] = [
+        new window.finstackTest.JsModel(modelHost, modelOptions),
+        new window.finstackTest.JsToolset(toolHost, toolOptions),
+        new window.finstackTest.JsContextProvider(
+          {
+            collect: async () => ({
+              items: [],
+              estimated_tokens: 0,
+              bytes: 0,
+              cache_key: null,
+            }),
+          },
+          { component: "js.context.fixture" },
+        ),
+        new window.finstackTest.JsMiddleware(
+          { invoke: async () => "continue" },
+          { component: "js.middleware.fixture", stages: ["before_run"] },
+        ),
+        new window.finstackTest.JsObserver(
+          { observe: async () => undefined },
+          { component: "js.observer.fixture" },
+        ),
+        new window.finstackTest.JsClock(window.finstackTest.createHostClock()),
+        new window.finstackTest.JsRandomSource(
+          window.finstackTest.createHostRandomSource(),
+        ),
+      ];
       const artifactStore = window.finstackTest.createMemoryArtifactStore({
           storeId: "host-test",
           maxArtifactBytes: 4 * 1024 * 1024,
@@ -175,7 +177,7 @@ test("constructs host wrappers and drives scripted model/tool DTOs", async ({
           orphanGraceMs: 60_000,
           maxGcBatch: 32,
         });
-      new window.finstackTest.JsArtifactStore(artifactStore);
+      hostWrappers.push(new window.finstackTest.JsArtifactStore(artifactStore));
       const blob = JSON.stringify({ id: "blob-1" });
       const artifact = JSON.stringify({ blob: JSON.parse(blob) });
       await artifactStore.stagePut(
@@ -187,6 +189,7 @@ test("constructs host wrappers and drives scripted model/tool DTOs", async ({
       );
       const [, artifactBytes] = await artifactStore.getByBlob("{}", blob);
       return {
+        hostWrappers: hostWrappers.map((wrapper) => wrapper.constructor.name),
         model: await window.finstackTest.driveScriptedModelRequest(
           modelHost,
           modelOptions,
@@ -201,6 +204,16 @@ test("constructs host wrappers and drives scripted model/tool DTOs", async ({
     { modelOptions: MODEL_OPTIONS, toolOptions: TOOL_OPTIONS },
   );
 
+  expect(result.hostWrappers).toEqual([
+    "JsModel",
+    "JsToolset",
+    "JsContextProvider",
+    "JsMiddleware",
+    "JsObserver",
+    "JsClock",
+    "JsRandomSource",
+    "JsArtifactStore",
+  ]);
   expect(result.model).toEqual({
     ok: true,
     text: "hello from JS",
@@ -486,11 +499,15 @@ test("normalizes pre-beta shapes and applies scripted coordinator commands", asy
 test("scripted journal store is ready and never durable", async ({ page }) => {
   const result = await page.evaluate(async () => {
     const adapter = window.finstackTest.createMemoryJournalStore();
-    new window.finstackTest.JsJournalStore(adapter);
-    return window.finstackTest.driveScriptedJournalHealth(adapter);
+    const store = new window.finstackTest.JsJournalStore(adapter);
+    return {
+      wrapper: store.constructor.name,
+      health: await window.finstackTest.driveScriptedJournalHealth(adapter),
+    };
   });
 
-  expect(result).toMatchObject({
+  expect(result.wrapper).toBe("JsJournalStore");
+  expect(result.health).toMatchObject({
     ok: true,
     ready: true,
     durable: false,

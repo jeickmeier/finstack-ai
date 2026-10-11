@@ -23,7 +23,7 @@ async def phase(directory: Path, resume: bool) -> None:
     """Recreate host-supplied callbacks; no live run controller crosses processes."""
     writes = directory / "writes.txt"
 
-    async def model(
+    def model(
         context: finstack_ai.CallbackContext, request: dict[str, Any]
     ) -> dict[str, Any]:
         del context
@@ -38,7 +38,7 @@ async def phase(directory: Path, resume: bool) -> None:
             "tool_calls": [{"name": "write", "arguments": {"value": 7}}],
         }
 
-    async def tool(
+    def tool(
         context: finstack_ai.CallbackContext, request: dict[str, Any]
     ) -> dict[str, Any]:
         del context

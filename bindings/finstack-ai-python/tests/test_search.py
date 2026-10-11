@@ -113,10 +113,12 @@ def test_four_sources_real_tool_indexing_hints_and_expansion(tmp_path: Path) -> 
             "historical_complete"
         ] is False
         reports = await observer.drain(1, 100_000)
-        assert len(reports) == 1 and reports[0]["complete"]
+        assert len(reports) == 1
+        assert reports[0]["complete"]
         assert observer.dropped_hints == 0
         backfill = await journal.sync_session(session.session_id)
-        assert backfill["indexed"] == 0 and backfill["historical_complete"]
+        assert backfill["indexed"] == 0
+        assert backfill["historical_complete"]
 
         docs_config = s.DocumentIndexConfig("documents", SCOPE)
         docs = s.DocumentSearchSource(
@@ -175,7 +177,8 @@ def test_four_sources_real_tool_indexing_hints_and_expansion(tmp_path: Path) -> 
                 )
             ],
         )
-        assert indexed.text == "indexed" and receipt
+        assert indexed.text == "indexed"
+        assert receipt
         inputs = await docs.inputs()
         assert len(inputs) == 1
         first = await docs.index_document(inputs[0][1])
@@ -219,12 +222,14 @@ def test_four_sources_real_tool_indexing_hints_and_expansion(tmp_path: Path) -> 
         indexed_count = 0
         for _ in range(256):
             page = await rebuilt_graph.rebuild_step(cursor=cursor, limit=1)
-            assert page["indexed"] <= 1 and page["unavailable"] == 0
+            assert page["indexed"] <= 1
+            assert page["unavailable"] == 0
             indexed_count += page["indexed"]
             cursor = page["next_cursor"]
             if cursor is None:
                 break
-        assert cursor is None and indexed_count >= 3
+        assert cursor is None
+        assert indexed_count >= 3
         assert await rebuilt_graph.search(
             s.SearchQuery("Acme", s.Graph("entity"))
         ) == await graph.search(s.SearchQuery("Acme", s.Graph("entity")))
@@ -263,7 +268,8 @@ def test_four_sources_real_tool_indexing_hints_and_expansion(tmp_path: Path) -> 
         path = await graph.search(
             s.SearchQuery("Acme", s.Graph("path", target="Delta", depth=3))
         )
-        assert path["hits"] and any(h["entity_label"] == "delta" for h in path["hits"])
+        assert path["hits"]
+        assert any(h["entity_label"] == "delta" for h in path["hits"])
         assert all(
             c["scope"]["tenant"] == "python-local"
             for h in path["hits"]
@@ -323,14 +329,14 @@ def test_scope_errors_bounds_and_failure_outcomes(tmp_path: Path) -> None:
     async def exercise() -> None:
         memory = ai.MemoryExtension.in_process(tenant="t", user="u")
         for scope in [s.SearchScope("other", user="u"), s.SearchScope("t")]:
+            denied_config = s.MemorySearchConfig("memory", scope)
             with pytest.raises(ai.RuntimeError) as failed:
-                s.MemorySearchSource(memory, s.MemorySearchConfig("memory", scope))
+                s.MemorySearchSource(memory, denied_config)
             assert failed.value.code == "search_scope_denied"
+        unreadable = ai.MemoryExtension.in_process(read=False)
+        memory_config = s.MemorySearchConfig("memory", SCOPE)
         with pytest.raises(ai.RuntimeError) as failed:
-            s.MemorySearchSource(
-                ai.MemoryExtension.in_process(read=False),
-                s.MemorySearchConfig("memory", SCOPE),
-            )
+            s.MemorySearchSource(unreadable, memory_config)
         assert failed.value.code == "search_scope_denied"
         mem = s.MemorySearchSource(
             memory,
@@ -344,23 +350,26 @@ def test_scope_errors_bounds_and_failure_outcomes(tmp_path: Path) -> None:
             s.SearchConfig(s.SearchScope("t"), s.HybridPlan([s.HybridLeg("memory")])),
             [mem],
         )
+        literal = s.SearchRequest("x", strategy=s.Lexical("literal"))
         with pytest.raises(ai.RuntimeError) as failed:
-            await engine.search(s.SearchRequest("x", strategy=s.Lexical("literal")))
+            await engine.search(literal)
         assert failed.value.code == "search_no_successful_sources"
         assert failed.value.context["outcomes"][0]["status"] == "unsupported"
+        over_limit = s.SearchRequest("x", limit=257)
         with pytest.raises(ai.RuntimeError):
-            await engine.search(s.SearchRequest("x", limit=257))
+            await engine.search(over_limit)
+        too_deep = s.SearchRequest("x", strategy=s.Graph("neighborhood", depth=9))
         with pytest.raises(ai.RuntimeError):
-            await engine.search(
-                s.SearchRequest("x", strategy=s.Graph("neighborhood", depth=9))
-            )
+            await engine.search(too_deep)
         owner = await ai.Agent.from_python(model(answer), document_tools=False)
         docs = s.DocumentSearchSource(
             owner, str(tmp_path / "docs.sqlite"), s.DocumentIndexConfig("docs", SCOPE)
         )
+        reader_model = model(answer)
+        docs_toolset = docs.toolset()
         with pytest.raises(ai.RuntimeError) as failed:
             await ai.Agent.from_python(
-                model(answer), [docs.toolset()], document_tools=False
+                reader_model, [docs_toolset], document_tools=False
             )
         assert failed.value.code == "search_scope_denied"
         session = await owner.create_session("python-local")
@@ -375,10 +384,10 @@ def test_scope_errors_bounds_and_failure_outcomes(tmp_path: Path) -> None:
         foreign = tmp_path / "foreign.sqlite"
         with sqlite3.connect(foreign) as db:
             db.execute("PRAGMA user_version=999")
+        foreign_path = str(foreign)
+        foreign_config = s.DocumentIndexConfig("foreign", SCOPE)
         with pytest.raises(ai.RuntimeError):
-            s.DocumentSearchSource(
-                owner, str(foreign), s.DocumentIndexConfig("foreign", SCOPE)
-            )
+            s.DocumentSearchSource(owner, foreign_path, foreign_config)
 
     asyncio.run(exercise())
 

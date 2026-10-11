@@ -23,7 +23,7 @@ POLICY_FILE = "policy.csv"
 
 
 @dataclass
-class Answer:
+class PolicyAnswer:
     """The knowledge recipe's Rust-validated result schema."""
 
     answer: str
@@ -69,7 +69,7 @@ async def definition(
             context_window_tokens=131_072,
         ),
         tenant="local",
-        output_type=Answer,
+        output_type=PolicyAnswer,
     )
     return agent, entered
 
@@ -91,7 +91,7 @@ async def exercise(data_dir: Path) -> None:
     )
     events = asyncio.create_task(collect(run))
     result = await run.result()
-    assert result.output == Answer(ANSWER, [POLICY_FILE])
+    assert result.output == PolicyAnswer(ANSWER, [POLICY_FILE])
     assert "run_completed" in await events
     maintenance = await first.maintain(256)
     assert not maintenance["failures"]
@@ -104,7 +104,7 @@ async def exercise(data_dir: Path) -> None:
     lane = await session.lane("main")
     run = lane.run(second.agent, "What was the retention policy?")
     events = asyncio.create_task(collect(run))
-    assert (await run.result()).output == Answer(ANSWER, [POLICY_FILE])
+    assert (await run.result()).output == PolicyAnswer(ANSWER, [POLICY_FILE])
     assert "run_completed" in await events
     assert not (await second.maintain(256))["failures"]
     del run, lane, session, second
