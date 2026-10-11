@@ -112,6 +112,38 @@ struct ChildOutcome {
     stderr_tail: Vec<u8>,
 }
 
+/// How many times a transient `spawn` failure is attempted, including the first.
+const SPAWN_ATTEMPTS: u32 = 4;
+
+/// `posix_spawn` can fail transiently under process pressure. A missing or
+/// non-executable binary is not retried.
+fn transient_spawn_error(error: &std::io::Error) -> bool {
+    matches!(
+        error.kind(),
+        std::io::ErrorKind::Interrupted
+            | std::io::ErrorKind::WouldBlock
+            | std::io::ErrorKind::ResourceBusy
+            | std::io::ErrorKind::OutOfMemory
+            | std::io::ErrorKind::ExecutableFileBusy
+    )
+}
+
+async fn spawn_child(
+    command: &mut tokio::process::Command,
+) -> Result<tokio::process::Child, std::io::Error> {
+    let mut attempt = 0_u32;
+    loop {
+        match command.spawn() {
+            Ok(child) => return Ok(child),
+            Err(error) if transient_spawn_error(&error) && attempt + 1 < SPAWN_ATTEMPTS => {
+                attempt += 1;
+                tokio::time::sleep(Duration::from_millis(25 * u64::from(attempt))).await;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
 /// Spawn one child and wait for it within `budget` and `cancellation`.
 ///
 /// `stdout` is captured (bounded to [`PROBE_STDOUT_BYTES`]) only when
@@ -125,7 +157,8 @@ struct ChildOutcome {
 /// budget runs out, or `cancellation` fires (the child is killed);
 /// [`VIDEO_COMPOSE_CONFIG_INVALID`] when the binary cannot be spawned;
 /// [`VIDEO_COMPOSE_FFMPEG_FAILED`] when the wait itself fails after the
-/// child started.
+/// child started. A few transient spawn failures are retried; a missing or
+/// non-executable binary is not.
 async fn run_child(
     binary: &Path,
     args: &[OsString],
@@ -149,11 +182,11 @@ async fn run_child(
     });
     command.stderr(Stdio::piped());
 
-    let mut child = command.spawn().map_err(|_| {
+    let mut child = spawn_child(&mut command).await.map_err(|error| {
         tool_error(
             VIDEO_COMPOSE_CONFIG_INVALID,
             ErrorCategory::Configuration,
-            "compose binary failed to start",
+            format!("compose binary failed to start: {error}"),
         )
     })?;
     let stdout = child.stdout.take();
@@ -471,6 +504,24 @@ mod tests {
         assert_eq!(spent.remaining(), Duration::ZERO);
         let fresh = budget(Duration::from_mins(1));
         assert!(fresh.remaining() > Duration::from_secs(59));
+    }
+
+    #[tokio::test]
+    async fn missing_binary_is_config_invalid() {
+        let error = render(
+            Path::new("/no/such/compose-binary"),
+            &[],
+            &budget(Duration::from_secs(5)),
+            &CancellationSignal::new(),
+        )
+        .await
+        .expect_err("missing binary");
+        assert_eq!(error.code(), crate::VIDEO_COMPOSE_CONFIG_INVALID);
+        assert!(
+            error
+                .message()
+                .starts_with("compose binary failed to start")
+        );
     }
 
     #[tokio::test]
