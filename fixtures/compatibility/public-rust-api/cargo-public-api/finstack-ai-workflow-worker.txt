@@ -231,6 +231,7 @@ pub fn finstack_ai_workflow_worker::SqliteWorkerStore::path(&self) -> &std::path
 pub fn finstack_ai_workflow_worker::SqliteWorkerStore::try_open(impl core::convert::AsRef<std::path::Path>) -> core::result::Result<Self, finstack_ai_workflow_worker::WorkerError>
 impl finstack_ai_workflow_worker::SqliteWorkerStore
 pub fn finstack_ai_workflow_worker::SqliteWorkerStore::recovery_has_wake(&self, &finstack_ai_kernel::records::run::external::OperationLocator) -> core::result::Result<bool, finstack_ai_workflow_worker::WorkerError>
+pub fn finstack_ai_workflow_worker::SqliteWorkerStore::wake_without_recovery(&self, &str, usize) -> core::result::Result<alloc::vec::Vec<finstack_ai_kernel::records::run::external::OperationLocator>, finstack_ai_workflow_worker::WorkerError>
 impl finstack_ai_workflow_worker::FireStore for finstack_ai_workflow_worker::SqliteWorkerStore
 pub fn finstack_ai_workflow_worker::SqliteWorkerStore::load_unstarted(&self, usize) -> core::result::Result<alloc::vec::Vec<finstack_ai_workflow_worker::FireRow>, finstack_ai_workflow_worker::WorkerError>
 pub fn finstack_ai_workflow_worker::SqliteWorkerStore::mark_started(&self, &str, &str, u64, finstack_ai_kernel::primitives::ids::SessionId) -> core::result::Result<finstack_ai_workflow_worker::FireStartOutcome, finstack_ai_workflow_worker::WorkerError>
