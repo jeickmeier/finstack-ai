@@ -91,6 +91,10 @@ unpublished.
   is re-read under the lease, and only unknown locators, invalid commands,
   kernel decisions, and undecodable payloads dead-letter immediately; other
   failures back off under `max_response_attempts` (default 8).
+- `finstack-ai` (`durable-host`): `DurableHost::tick` fails with
+  `durable_descriptor_missing` when a scheduled row has no recovery
+  descriptor, before any dispatch, now that parked rows are driven only on a
+  response or deadline.
 - `finstack-ai-workflow-media-pipeline`: render tables are versioned through
   a `finstack_workflow_media_pipeline_schema` singleton (v1, existing files
   adopted). A compose-spec failure persists `failed` with its reason and a
@@ -131,8 +135,7 @@ unpublished.
   a linear pattern and redacts inner `AddContext`, `AddInstructions`, and
   `CompactContext` outcomes in wrapping mode (failing closed when a projection
   cannot be rebuilt). `finstack-ai-middleware-compaction` drops a multi-call
-  assistant message together with every tool-result message and skips
-  canonicalization far under threshold. `tool-policy` compiles jailbreak
+  assistant message together with every tool-result message. `tool-policy` compiles jailbreak
   triggers into an Aho-Corasick automaton once; `verify` memoizes bounced
   findings. `document-ingest` consults its parse memo before the store and
   parses on the blocking pool natively.

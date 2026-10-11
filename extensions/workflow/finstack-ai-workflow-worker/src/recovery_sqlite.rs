@@ -74,6 +74,57 @@ impl SqliteWorkerStore {
             ).map_err(|_| unavailable())
         })
     }
+
+    /// Locators of scheduled wake rows that have no recovery registration.
+    ///
+    /// A host that drives rows event-wise never touches a parked row until it
+    /// is due, so this is how it surfaces a vanished descriptor before any
+    /// dispatch instead of waiting for the next response.
+    ///
+    /// # Errors
+    /// Returns a storage error when the tables are unavailable or a row cannot
+    /// be decoded.
+    pub fn wake_without_recovery(
+        &self,
+        tenant_scope: &str,
+        limit: usize,
+    ) -> Result<Vec<OperationLocator>, WorkerError> {
+        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+        self.with_conn(|conn| {
+            let mut statement = conn
+                .prepare_cached(
+                    "SELECT w.session_id, w.lane_id, w.run_id \
+                     FROM finstack_workflow_worker_wake w \
+                     LEFT JOIN finstack_workflow_recovery r \
+                       ON r.tenant_scope = w.tenant_scope AND r.run_id = w.run_id \
+                     WHERE w.tenant_scope = ?1 AND r.run_id IS NULL \
+                     ORDER BY w.session_id LIMIT ?2",
+                )
+                .map_err(|_| unavailable())?;
+            let rows = statement
+                .query_map(params![tenant_scope, limit], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                })
+                .map_err(|_| unavailable())?;
+            let mut locators = Vec::new();
+            for row in rows {
+                let (session, lane, run) = row.map_err(|_| unavailable())?;
+                let locator = OperationLocator::try_new(
+                    tenant_scope,
+                    SessionId::parse(&session).map_err(|_| integrity())?,
+                    LaneId::parse(&lane).map_err(|_| integrity())?,
+                    RunId::parse(&run).map_err(|_| integrity())?,
+                )
+                .map_err(|_| integrity())?;
+                locators.push(locator);
+            }
+            Ok(locators)
+        })
+    }
 }
 
 fn decode(tenant: &str, raw: RawRegistration) -> Result<RecoveryRegistration, WorkerError> {
@@ -219,6 +270,52 @@ mod tests {
                 code: "sqlite_worker_recovery_schema_version"
             })
         ));
+    }
+
+    #[test]
+    fn scheduled_rows_without_a_descriptor_are_reported() {
+        let store = SqliteWorkerStore::try_open(":memory:").expect("store");
+        let row = registration();
+        let insert_wake = |tenant: &str, session: &str, lane: &str, run: &str| {
+            store
+                .with_conn(|conn| {
+                    conn.execute(
+                        "INSERT INTO finstack_workflow_worker_wake (tenant_scope, session_id, \
+                         lane_id, run_id, workflow_kind, reason, wake_at_unix_ms, \
+                         expires_at_unix_ms, pending_id, leased_by, lease_id, \
+                         lease_expires_unix_ms, attempts) VALUES (?1, ?2, ?3, ?4, 'approval', \
+                         'interaction', NULL, NULL, 'pending-1', NULL, NULL, NULL, 0)",
+                        params![tenant, session, lane, run],
+                    )
+                    .map_err(|_| unavailable())
+                })
+                .expect("wake row");
+        };
+        insert_wake(
+            "tenant-a",
+            &row.locator.session_id.to_canonical_string(),
+            &row.locator.lane_id.to_canonical_string(),
+            &row.locator.run_id.to_canonical_string(),
+        );
+        assert_eq!(
+            store.wake_without_recovery("tenant-a", 8).expect("orphans"),
+            vec![row.locator.clone()],
+            "a scheduled row without a descriptor is an orphan"
+        );
+        assert!(
+            store
+                .wake_without_recovery("tenant-b", 8)
+                .expect("scoped")
+                .is_empty()
+        );
+        store.insert_recovery(&row).expect("register");
+        assert!(
+            store
+                .wake_without_recovery("tenant-a", 8)
+                .expect("registered")
+                .is_empty(),
+            "a registered descriptor clears the orphan"
+        );
     }
 
     #[test]

@@ -508,6 +508,16 @@ impl DurableHost {
                 self.inspect(&locator).await?;
             }
         }
+        // Parked rows are driven only when a response or deadline arrives, so
+        // a scheduled row whose descriptor vanished must fail here, before any
+        // dispatch could repeat an unfinished external operation.
+        if !self
+            .adapters
+            .wake_without_recovery(&self.tenant_scope, 1)?
+            .is_empty()
+        {
+            return Err(DurableHostError::new("durable_descriptor_missing"));
+        }
         Ok(Box::pin(self.worker.tick()).await?)
     }
 

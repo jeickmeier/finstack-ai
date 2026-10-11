@@ -745,7 +745,6 @@ fn drop_component(
 #[cfg(test)]
 thread_local! {
     static PAIR_ANALYSIS_COUNT: Cell<usize> = const { Cell::new(0) };
-    static CANONICALIZE_COUNT: Cell<usize> = const { Cell::new(0) };
 }
 
 #[cfg(test)]
@@ -757,17 +756,6 @@ fn reset_pair_analysis_count() {
 #[must_use]
 fn pair_analysis_count() -> usize {
     PAIR_ANALYSIS_COUNT.with(Cell::get)
-}
-
-#[cfg(test)]
-fn reset_canonicalize_count() {
-    CANONICALIZE_COUNT.with(|count| count.set(0));
-}
-
-#[cfg(test)]
-#[must_use]
-fn canonicalize_count() -> usize {
-    CANONICALIZE_COUNT.with(Cell::get)
 }
 
 fn retained_messages(
@@ -854,55 +842,16 @@ fn utf8_prefix(value: &str, max_bytes: usize) -> &str {
     &value[..end]
 }
 
-/// Bytes the canonical JSON envelope adds around each message's blocks
-/// (identity, role, timestamp, block type tags, punctuation). Deliberately
-/// generous: the cheap estimate only ever errs toward canonicalizing.
-const MESSAGE_ENVELOPE_BYTES: usize = 128;
-/// Envelope bytes per content block, on the same generous footing.
-const BLOCK_ENVELOPE_BYTES: usize = 96;
-
-/// Decide whether the request is over the compaction threshold, returning
-/// the authoritative canonical estimate when it is and `None` when it is
-/// not.
-///
-/// Most turns are nowhere near the threshold, so a cheap `block_len`-based
-/// estimate (plus generous per-message and per-block envelope allowances)
-/// is taken first; only when that estimate reaches 80 % of the threshold is
-/// the request canonicalized. The canonical form stays authoritative for
-/// the final decision — the shortcut never declares a request over the
-/// threshold, and its 20 % margin plus the envelope allowances cover JSON
-/// escaping and structural overhead the block lengths do not see.
-///
-/// # Errors
-///
-/// Returns a stable compaction error when the request cannot be
-/// canonicalized.
+/// Decide whether the request is over the threshold from the authoritative
+/// canonical estimate. Block lengths alone undercount the canonical form
+/// (tool specs, instructions, and escaping), so no cheaper pre-check gates
+/// this decision.
 fn estimate_over_threshold(
     request: &ModelRequestDraft,
     threshold_tokens: u64,
 ) -> Result<Option<u64>, MiddlewareError> {
-    let rough = rough_estimate(&request.messages);
-    // 0.8 × threshold without floating point: rough < threshold × 4 / 5.
-    if rough.saturating_mul(5) < threshold_tokens.saturating_mul(4) {
-        return Ok(None);
-    }
     let before = estimate_request(request, &request.messages, 0)?;
     Ok((before > threshold_tokens).then_some(before))
-}
-
-/// Cheap lower-bound-style estimate from block lengths and envelope
-/// allowances; never used as evidence.
-fn rough_estimate(messages: &[Message]) -> u64 {
-    let bytes = messages.iter().fold(0_usize, |total, message| {
-        let blocks = message.content().iter().fold(0_usize, |sum, block| {
-            sum.saturating_add(block_len(block))
-                .saturating_add(BLOCK_ENVELOPE_BYTES)
-        });
-        total
-            .saturating_add(blocks)
-            .saturating_add(MESSAGE_ENVELOPE_BYTES)
-    });
-    estimate_tokens(bytes)
 }
 
 /// Authoritative token estimate over the canonical request bytes.
@@ -911,8 +860,6 @@ fn estimate_request(
     messages: &[Message],
     additional_tokens: u64,
 ) -> Result<u64, MiddlewareError> {
-    #[cfg(test)]
-    CANONICALIZE_COUNT.with(|count| count.set(count.get().saturating_add(1)));
     let mut rebuilt = request.clone();
     rebuilt.messages = Arc::from(messages.to_vec());
     let bytes = rebuilt
