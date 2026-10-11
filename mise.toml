@@ -368,7 +368,12 @@ run = """
 set -euo pipefail
 uv sync --locked --python 3.14 --no-install-package finstack-ai
 export VIRTUAL_ENV="$PWD/.venv"
-export PYO3_PYTHON="$VIRTUAL_ENV/bin/python"
+# PyO3 0.29 reruns its build script only when PYO3_ENVIRONMENT_SIGNATURE
+# changes, not when PYO3_PYTHON does. A stable venv path therefore keeps a
+# cached -L for the previous patch (3.14.7 after mise moved to 3.14.8).
+# The resolved base path changes with that patch.
+export PYO3_PYTHON="$("$VIRTUAL_ENV/bin/python" -c 'import sys; from pathlib import Path; print(Path(sys._base_executable or sys.executable).resolve())')"
+export PYO3_ENVIRONMENT_SIGNATURE="$PYO3_PYTHON"
 # `cargo test` links libpython. uv/mise CPython is not on the default
 # loader path, so the test harness fails with exit 127 unless LIBDIR is
 # exported (PyO3: "Building and testing" / LD_LIBRARY_PATH).
@@ -387,16 +392,21 @@ uv run --no-project --with maturin==1.14.1 \
   env VIRTUAL_ENV="$VIRTUAL_ENV" PYO3_PYTHON="$PYO3_PYTHON" \
   maturin develop --uv --locked --manifest-path bindings/finstack-ai-python/Cargo.toml \
   --features extension-module,callback-fixture
-# rust-lld resolves -lpython3.14 to libpython3.14.so. Standalone CPython
-# often ships only libpython3.14.so.1.0; add that alias to the link path.
-python_link_dir="$(uv run --no-sync python scripts/ci/python_link_dir.py)"
-if [ -n "$python_link_dir" ]; then
-  export LIBRARY_PATH="${python_link_dir}${LIBRARY_PATH:+:$LIBRARY_PATH}"
-  RUSTFLAGS="${RUSTFLAGS:-} -L native=${python_link_dir}" \
-    cargo test -p finstack-ai-python --lib --locked
-else
-  cargo test -p finstack-ai-python --lib --locked
-fi
+# Pass the live LIBDIR on this rustc command. A cached PyO3 build script can
+# still name the previous patch install, which rust-lld then fails to search.
+rustflags="${RUSTFLAGS:-}"
+python_link_output="$(uv run --no-sync python scripts/ci/python_link_dir.py)"
+while IFS= read -r python_link_dir; do
+  [ -n "$python_link_dir" ] || continue
+  if [ -n "${LIBRARY_PATH:-}" ]; then
+    LIBRARY_PATH="${LIBRARY_PATH}:${python_link_dir}"
+  else
+    LIBRARY_PATH="${python_link_dir}"
+  fi
+  rustflags="${rustflags} -L native=${python_link_dir}"
+done <<< "$python_link_output"
+export LIBRARY_PATH="${LIBRARY_PATH:-}"
+RUSTFLAGS="$rustflags" cargo test -p finstack-ai-python --lib --locked
 uv run --no-sync pytest -q
 mise run test-search-python
 uv run --no-sync python scripts/ci/test_recipes.py python
