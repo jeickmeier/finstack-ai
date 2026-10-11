@@ -107,6 +107,39 @@ def workspace_packages() -> list[dict]:
     return packages
 
 
+def edge_violation(edge: tuple[str, str], tier: int, target_tier: int) -> str | None:
+    """Return why ``edge`` breaks the layering law, or ``None`` when it holds."""
+    if edge in FORBIDDEN_EDGES:
+        return FORBIDDEN_EDGES[edge]
+    if target_tier > tier:
+        return (
+            f"tier {tier} ({TIER_NAMES[tier]}) must not depend on "
+            f"tier {target_tier} ({TIER_NAMES[target_tier]})"
+        )
+    if target_tier == tier and tier not in SAME_TIER_ALLOWED:
+        return f"tier {tier} ({TIER_NAMES[tier]}) crates must not depend on each other"
+    return None
+
+
+def checked_targets(package: dict, tiers: dict[str, int]) -> list[str]:
+    """Return workspace targets of ``package``'s normal and build dependencies."""
+    return [
+        dependency["name"]
+        for dependency in package["dependencies"]
+        if dependency["name"] in tiers and dependency["kind"] in (None, "build")
+    ]
+
+
+def stale_known_violations(observed_known: set[tuple[str, str]]) -> list[str]:
+    return [
+        f"stale KNOWN_VIOLATIONS entry {edge[0]} -> {edge[1]}: the edge "
+        "no longer exists, so remove it from scripts/ci/check_layering.py "
+        f"({note})"
+        for edge, note in sorted(KNOWN_VIOLATIONS.items())
+        if edge not in observed_known
+    ]
+
+
 def main() -> int:
     packages = workspace_packages()
     tiers = {package["name"]: package["tier"] for package in packages}
@@ -117,31 +150,9 @@ def main() -> int:
 
     for package in sorted(packages, key=lambda entry: entry["dir"]):
         name = package["name"]
-        tier = package["tier"]
-        for dependency in package["dependencies"]:
-            target = dependency["name"]
-            if target not in tiers:
-                continue
-            if dependency["kind"] not in (None, "build"):
-                continue
-
+        for target in checked_targets(package, tiers):
             edge = (name, target)
-            target_tier = tiers[target]
-            reason = None
-
-            if edge in FORBIDDEN_EDGES:
-                reason = FORBIDDEN_EDGES[edge]
-            elif target_tier > tier:
-                reason = (
-                    f"tier {tier} ({TIER_NAMES[tier]}) must not depend on "
-                    f"tier {target_tier} ({TIER_NAMES[target_tier]})"
-                )
-            elif target_tier == tier and tier not in SAME_TIER_ALLOWED:
-                reason = (
-                    f"tier {tier} ({TIER_NAMES[tier]}) crates must not depend "
-                    "on each other"
-                )
-
+            reason = edge_violation(edge, package["tier"], tiers[target])
             if reason is None:
                 continue
             if edge in KNOWN_VIOLATIONS:
@@ -151,13 +162,7 @@ def main() -> int:
                 f"{directories[name]}/Cargo.toml: {name} -> {target}: {reason}"
             )
 
-    for edge, note in sorted(KNOWN_VIOLATIONS.items()):
-        if edge not in observed_known:
-            failures.append(
-                f"stale KNOWN_VIOLATIONS entry {edge[0]} -> {edge[1]}: the edge "
-                "no longer exists, so remove it from scripts/ci/check_layering.py "
-                f"({note})"
-            )
+    failures.extend(stale_known_violations(observed_known))
 
     if failures:
         print("layering violations found:")

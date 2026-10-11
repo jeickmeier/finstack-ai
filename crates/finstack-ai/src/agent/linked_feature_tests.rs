@@ -1,5 +1,15 @@
 //! Constructor coverage executed with one provider feature at a time.
-use super::*;
+#[cfg(feature = "provider-anthropic")]
+use super::AnthropicAgentSpec;
+#[cfg(feature = "provider-gemini")]
+use super::GeminiAgentSpec;
+#[cfg(feature = "provider-ollama")]
+use super::OllamaAgentSpec;
+#[cfg(feature = "provider-openai")]
+use super::OpenAiAgentSpec;
+#[cfg(feature = "provider-openrouter")]
+use super::OpenRouterAgentSpec;
+use super::{Agent, LinkedCommon, LinkedProviderSpec};
 
 #[tokio::test]
 async fn individual_provider_constructs_without_aggregate_feature() {

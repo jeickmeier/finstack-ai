@@ -14,6 +14,7 @@ TEMPLATE = REPO_ROOT / "plugins" / "templates" / "toolset-plugin"
 CONTEXT_TEMPLATE = REPO_ROOT / "plugins" / "templates" / "context-plugin"
 GUEST_SDK = REPO_ROOT / "plugins" / "finstack-ai-guest-sdk"
 ENCODER = REPO_ROOT / "scripts" / "plugin_wasm" / "encoder"
+CARGO_TOML = "Cargo.toml"
 
 
 def run(command: list[str], cwd: Path, env: dict[str, str] | None = None) -> None:
@@ -26,7 +27,7 @@ def build_template(src: Path, dest: Path, crate: str) -> Path:
     shutil.copytree(
         src, dest, ignore=shutil.ignore_patterns("target", "component.wasm")
     )
-    cargo = dest / "Cargo.toml"
+    cargo = dest / CARGO_TOML
     text = cargo.read_text(encoding="utf-8")
     cargo.write_text(
         text.replace(
@@ -40,7 +41,7 @@ def build_template(src: Path, dest: Path, crate: str) -> Path:
             "cargo",
             "build",
             "--manifest-path",
-            str(dest / "Cargo.toml"),
+            str(dest / CARGO_TOML),
             "--target",
             "wasm32-unknown-unknown",
             "--release",
@@ -56,7 +57,7 @@ def build_template(src: Path, dest: Path, crate: str) -> Path:
             "cargo",
             "run",
             "--manifest-path",
-            str(ENCODER / "Cargo.toml"),
+            str(ENCODER / CARGO_TOML),
             "--quiet",
             "--",
             str(core),

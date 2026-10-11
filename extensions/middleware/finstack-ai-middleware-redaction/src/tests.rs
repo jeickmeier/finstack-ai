@@ -1024,13 +1024,15 @@ fn sixteen_thousand_pem_headers_scan_in_bounded_time() {
 
 #[test]
 fn encrypted_pem_block_is_redacted_whole() {
-    let block = "-----BEGIN RSA PRIVATE KEY-----\n\
+    let block = format!(
+        "{RSA_KEY_HEADER}\n\
         Proc-Type: 4,ENCRYPTED\n\
         DEK-Info: AES-128-CBC,0123456789ABCDEF0123456789ABCDEF\n\
         \n\
         MIIEowIBAAKCAQEAvq\n\
         QEFAAOCAQ8A==\n\
-        -----END RSA PRIVATE KEY-----";
+        -----END RSA PRIVATE KEY-----"
+    );
     assert_eq!(
         redacted(&format!("cfg:\n{block}\ndone")),
         "cfg:\n[REDACTED:private-key]\ndone"

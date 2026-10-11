@@ -1,8 +1,10 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use super::*;
-use crate::primitives::{ComponentId, LimitKey, RecordId};
+use crate::primitives::{
+    AllocatedIds, AssigneeHint, ComponentId, ComponentRef, CostAmount, LimitKey, PrincipalRef,
+    RecordId, Usage, Version,
+};
 
 #[test]
 fn principal_and_usage_roundtrip() {

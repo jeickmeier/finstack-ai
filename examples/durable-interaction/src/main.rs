@@ -298,10 +298,11 @@ async fn main() -> Result<(), BoxError> {
             let path = directory.path().join("durable.sqlite");
             let executable = std::env::current_exe()?;
             for phase in ["--park", "--resume"] {
-                if !std::process::Command::new(&executable)
+                if !tokio::process::Command::new(&executable)
                     .arg(phase)
                     .arg(&path)
-                    .status()?
+                    .status()
+                    .await?
                     .success()
                 {
                     return Err(format!("durable child failed: {phase}").into());

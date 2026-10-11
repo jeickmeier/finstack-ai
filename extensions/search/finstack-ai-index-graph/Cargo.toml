@@ -35,6 +35,7 @@ finstack-ai-store-sqlite.workspace = true
 finstack-ai-test.workspace = true
 futures-util.workspace = true
 tempfile.workspace = true
+tokio = { workspace = true, features = ["fs"] }
 
 [lints]
 workspace = true

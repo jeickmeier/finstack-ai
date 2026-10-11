@@ -126,12 +126,25 @@ class KnowledgeAgent:
             "more": False,
             "failures": [],
         }
+        await self._drain_journal_hints(report, limit)
+        await self._sync_journal_sessions(report, limit)
+        await self._reconcile_documents(report, limit)
+        if self.embedded:
+            await self._reconcile_embeddings(report, limit)
+        if self.graph is not None:
+            await self._reconcile_graph(self.graph, report, limit)
+        report["failures"] = sorted(set(report["failures"]))
+        return report
+
+    async def _drain_journal_hints(self, report: dict[str, Any], limit: int) -> None:
         try:
             for page in await self.observer.drain(1, limit):
                 report["journal_records"] += page["examined"]
                 report["more"] |= not page["complete"]
         except finstack_ai.FinstackError as error:
             report["failures"].append(error.code)
+
+    async def _sync_journal_sessions(self, report: dict[str, Any], limit: int) -> None:
         budget = limit
         for _ in self.sessions:
             if budget == 0:
@@ -148,6 +161,8 @@ class KnowledgeAgent:
             except finstack_ai.FinstackError as error:
                 report["failures"].append(error.code)
             self._journal_offset = (self._journal_offset + 1) % len(self.sessions)
+
+    async def _reconcile_documents(self, report: dict[str, Any], limit: int) -> None:
         try:
             documents = await self.documents.reconcile_sources(
                 after=self._document_cursor, limit=limit
@@ -159,42 +174,42 @@ class KnowledgeAgent:
                 report["failures"].append("document_sources_unavailable")
         except finstack_ai.FinstackError as error:
             report["failures"].append(error.code)
-        if self.embedded:
-            try:
-                memory = await self.memory.reconcile_embeddings(
-                    offset=self._memory_offset, limit=limit
-                )
-                self._memory_offset = memory["next_offset"] or 0
-                report["embeddings"] += memory["examined"]
-                report["more"] |= memory["next_offset"] is not None
-                count = await self.documents.reconcile_embeddings(limit=min(limit, 64))
-                report["embeddings"] += count
-                report["more"] |= count == min(limit, 64)
-            except finstack_ai.FinstackError as error:
-                report["failures"].append(error.code)
-        if self.graph is not None:
-            try:
-                graph = await self.graph.reconcile(
-                    after=self._graph_cursor, limit=limit
-                )
-                self._graph_cursor = graph["next_cursor"]
-                report["removed"] += graph["removed"]
-                report["more"] |= graph["next_cursor"] is not None
-                if graph["unavailable"]:
-                    report["failures"].append("graph_sources_unavailable")
-                build = await self.graph.rebuild_step(
-                    cursor=self._build_cursor, limit=limit
-                )
-                self._build_cursor = build["next_cursor"]
-                report["graph_references"] += build["indexed"]
-                report["removed"] += build["removed"]
-                report["more"] |= build["next_cursor"] is not None
-                if build["unavailable"]:
-                    report["failures"].append("graph_sources_unavailable")
-            except finstack_ai.FinstackError as error:
-                report["failures"].append(error.code)
-        report["failures"] = sorted(set(report["failures"]))
-        return report
+
+    async def _reconcile_embeddings(self, report: dict[str, Any], limit: int) -> None:
+        try:
+            memory = await self.memory.reconcile_embeddings(
+                offset=self._memory_offset, limit=limit
+            )
+            self._memory_offset = memory["next_offset"] or 0
+            report["embeddings"] += memory["examined"]
+            report["more"] |= memory["next_offset"] is not None
+            count = await self.documents.reconcile_embeddings(limit=min(limit, 64))
+            report["embeddings"] += count
+            report["more"] |= count == min(limit, 64)
+        except finstack_ai.FinstackError as error:
+            report["failures"].append(error.code)
+
+    async def _reconcile_graph(
+        self, graph_source: s.GraphSearchSource, report: dict[str, Any], limit: int
+    ) -> None:
+        try:
+            graph = await graph_source.reconcile(after=self._graph_cursor, limit=limit)
+            self._graph_cursor = graph["next_cursor"]
+            report["removed"] += graph["removed"]
+            report["more"] |= graph["next_cursor"] is not None
+            if graph["unavailable"]:
+                report["failures"].append("graph_sources_unavailable")
+            build = await graph_source.rebuild_step(
+                cursor=self._build_cursor, limit=limit
+            )
+            self._build_cursor = build["next_cursor"]
+            report["graph_references"] += build["indexed"]
+            report["removed"] += build["removed"]
+            report["more"] |= build["next_cursor"] is not None
+            if build["unavailable"]:
+                report["failures"].append("graph_sources_unavailable")
+        except finstack_ai.FinstackError as error:
+            report["failures"].append(error.code)
 
 
 async def build_knowledge_agent(

@@ -18,13 +18,14 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+PYTHON_INIT_FILE = "__init__.py"
 PYTHON_INIT = (
     REPO_ROOT
     / "bindings"
     / "finstack-ai-python"
     / "python"
     / "finstack_ai"
-    / "__init__.py"
+    / PYTHON_INIT_FILE
 )
 JS_INDEX = REPO_ROOT / "bindings" / "finstack-ai-wasm" / "js" / "src" / "index.ts"
 PYTHON_STUB = (
@@ -115,13 +116,14 @@ def python_exports_at(path: Path) -> list[str]:
 PYTHON_SUBPACKAGES = ("eval", "search")
 
 
+def python_subpackage_exports(module: str) -> list[str]:
+    return python_exports_at(PYTHON_INIT.parent / module / PYTHON_INIT_FILE)
+
+
 def python_items() -> list[str]:
     names = python_exports_at(PYTHON_INIT)
     for module in PYTHON_SUBPACKAGES:
-        names.extend(
-            f"{module}.{name}"
-            for name in python_exports_at(PYTHON_INIT.parent / module / "__init__.py")
-        )
+        names.extend(f"{module}.{name}" for name in python_subpackage_exports(module))
     return sorted(names)
 
 
@@ -176,9 +178,7 @@ def python_stub_members() -> dict[str, set[str]]:
                 if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
             }
     for module in PYTHON_SUBPACKAGES:
-        members[module] = set(
-            python_exports_at(PYTHON_INIT.parent / module / "__init__.py")
-        )
+        members[module] = set(python_subpackage_exports(module))
     return members
 
 
@@ -208,60 +208,92 @@ def js_class_members() -> dict[str, set[str]]:
     return classes
 
 
-def parity_errors(inventory: dict[str, object]) -> list[str]:
-    python_exports = set(python_items())
-    js_exports = set(js_items())
-    python_members = python_stub_members()
-    js_members = js_class_members()
+def is_known(name: object, known: set[str]) -> bool:
+    return isinstance(name, str) and name in known
+
+
+def portable_function_errors(
+    functions: list[object], python_exports: set[str], js_exports: set[str]
+) -> list[str]:
     errors: list[str] = []
-    functions = inventory.get("functions")
-    types = inventory.get("types")
-    if not isinstance(functions, list) or not isinstance(types, list):
-        return ["portable inventory must contain function and type lists"]
     for entry in functions:
         if not isinstance(entry, dict):
             errors.append("portable function entry must be an object")
             continue
         python_name = entry.get("python")
         js_name = entry.get("js")
-        if not isinstance(python_name, str) or python_name not in python_exports:
+        if not is_known(python_name, python_exports):
             errors.append(f"python portable function missing: {python_name}")
-        if not isinstance(js_name, str) or js_name not in js_exports:
+        if not is_known(js_name, js_exports):
             errors.append(f"js portable function missing: {js_name}")
+    return errors
+
+
+def portable_member_errors(
+    python_name: str,
+    js_name: str,
+    expected: object,
+    python_known: set[str],
+    js_known: set[str],
+) -> list[str]:
+    if not isinstance(expected, dict):
+        return [f"portable member must be an object: {python_name}/{js_name}"]
+    errors: list[str] = []
+    python_member = expected.get("python")
+    js_member = expected.get("js")
+    if not is_known(python_member, python_known):
+        errors.append(f"python portable member missing: {python_name}.{python_member}")
+    if not is_known(js_member, js_known):
+        errors.append(f"js portable member missing: {js_name}.{js_member}")
+    return errors
+
+
+def portable_type_errors(
+    entry: object,
+    python_exports: set[str],
+    js_exports: set[str],
+    python_members: dict[str, set[str]],
+    js_members: dict[str, set[str]],
+) -> list[str]:
+    if not isinstance(entry, dict):
+        return ["portable type entry must be an object"]
+    python_name = entry.get("python")
+    js_name = entry.get("js")
+    if not isinstance(python_name, str) or python_name not in python_exports:
+        return [f"python portable type missing: {python_name}"]
+    if not isinstance(js_name, str) or js_name not in js_exports:
+        return [f"js portable type missing: {js_name}"]
+    expected_members = entry.get("members", [])
+    if not isinstance(expected_members, list):
+        return [f"portable members must be a list: {python_name}/{js_name}"]
+    python_known = python_members.get(python_name, set())
+    js_known = js_members.get(js_name, set())
+    errors: list[str] = []
+    for expected in expected_members:
+        errors.extend(
+            portable_member_errors(
+                python_name, js_name, expected, python_known, js_known
+            )
+        )
+    return errors
+
+
+def parity_errors(inventory: dict[str, object]) -> list[str]:
+    python_exports = set(python_items())
+    js_exports = set(js_items())
+    python_members = python_stub_members()
+    js_members = js_class_members()
+    functions = inventory.get("functions")
+    types = inventory.get("types")
+    if not isinstance(functions, list) or not isinstance(types, list):
+        return ["portable inventory must contain function and type lists"]
+    errors = portable_function_errors(functions, python_exports, js_exports)
     for entry in types:
-        if not isinstance(entry, dict):
-            errors.append("portable type entry must be an object")
-            continue
-        python_name = entry.get("python")
-        js_name = entry.get("js")
-        if not isinstance(python_name, str) or python_name not in python_exports:
-            errors.append(f"python portable type missing: {python_name}")
-            continue
-        if not isinstance(js_name, str) or js_name not in js_exports:
-            errors.append(f"js portable type missing: {js_name}")
-            continue
-        expected_members = entry.get("members", [])
-        if not isinstance(expected_members, list):
-            errors.append(f"portable members must be a list: {python_name}/{js_name}")
-            continue
-        for expected in expected_members:
-            if not isinstance(expected, dict):
-                errors.append(
-                    f"portable member must be an object: {python_name}/{js_name}"
-                )
-                continue
-            python_member = expected.get("python")
-            js_member = expected.get("js")
-            if not isinstance(
-                python_member, str
-            ) or python_member not in python_members.get(python_name, set()):
-                errors.append(
-                    f"python portable member missing: {python_name}.{python_member}"
-                )
-            if not isinstance(js_member, str) or js_member not in js_members.get(
-                js_name, set()
-            ):
-                errors.append(f"js portable member missing: {js_name}.{js_member}")
+        errors.extend(
+            portable_type_errors(
+                entry, python_exports, js_exports, python_members, js_members
+            )
+        )
     return errors
 
 
@@ -293,6 +325,108 @@ def surface_exists(
     return owner in exports and member in members.get(owner, set())
 
 
+VALID_BINDING_STATUSES = {
+    "direct",
+    "composed",
+    "facade",
+    "host_adapter",
+    "unavailable",
+}
+DEPENDENCY_STATUSES = {"direct", "composed"}
+REASON_STATUSES = {"composed", "facade", "host_adapter", "unavailable"}
+SURFACE_STATUSES = {"direct", "facade", "host_adapter"}
+
+# (family, direct dependencies, exports, members) for one binding.
+BindingSurface = tuple[str, set[str], set[str], dict[str, set[str]]]
+
+
+def has_rust_baseline(crate: str) -> bool:
+    return any(
+        path.name == f"{crate}.txt" or path.name.startswith(f"{crate}+")
+        for path in RUST_API_BASELINES.glob(f"{crate}*.txt")
+    )
+
+
+def extension_surface_errors(
+    crate: str,
+    family: str,
+    status: str,
+    binding: dict[str, object],
+    exports: set[str],
+    members: dict[str, set[str]],
+) -> list[str]:
+    surfaces = binding.get("surfaces")
+    if (
+        not isinstance(surfaces, list)
+        or not surfaces
+        or not all(isinstance(surface, str) for surface in surfaces)
+    ):
+        return [f"{crate}: {family} {status} status requires string surfaces"]
+    if family == "js" and status == "host_adapter":
+        source = binding.get("source")
+        if not isinstance(source, str) or not (REPO_ROOT / source).is_file():
+            return [f"{crate}: JavaScript host adapter source is missing: {source}"]
+        exports = js_declared_items(REPO_ROOT / source)
+        members = {}
+    return [
+        f"{crate}: {family} extension surface missing: {surface}"
+        for surface in surfaces
+        if not surface_exists(surface, exports, members)
+    ]
+
+
+def extension_binding_errors(
+    crate: str, binding: object, surface: BindingSurface
+) -> list[str]:
+    family, dependencies, exports, members = surface
+    if not isinstance(binding, dict):
+        return [f"{crate}: missing {family} binding disposition"]
+    status = binding.get("status")
+    if status not in VALID_BINDING_STATUSES:
+        return [f"{crate}: invalid {family} binding status: {status}"]
+    errors: list[str] = []
+    if status in DEPENDENCY_STATUSES and crate not in dependencies:
+        errors.append(
+            f"{crate}: {family} {status} extension is not a direct dependency"
+        )
+    if status == "unavailable" and crate in dependencies:
+        errors.append(f"{crate}: {family} dependency cannot be marked unavailable")
+    reason = binding.get("reason")
+    if status in REASON_STATUSES and (not isinstance(reason, str) or not reason):
+        errors.append(f"{crate}: {family} {status} status requires a reason")
+    if status in SURFACE_STATUSES:
+        errors.extend(
+            extension_surface_errors(crate, family, status, binding, exports, members)
+        )
+    return errors
+
+
+def extension_entry_errors(
+    crate: str, entry: dict[str, object], surfaces: tuple[BindingSurface, ...]
+) -> list[str]:
+    errors: list[str] = []
+    if not has_rust_baseline(crate):
+        errors.append(f"Rust public-API baseline missing for extension: {crate}")
+    for surface in surfaces:
+        errors.extend(extension_binding_errors(crate, entry.get(surface[0]), surface))
+    return errors
+
+
+def extension_catalog_coverage_errors(
+    expected_crates: set[str], catalog_crates: set[str]
+) -> list[str]:
+    missing = sorted(expected_crates - catalog_crates)
+    extra = sorted(catalog_crates - expected_crates)
+    errors: list[str] = []
+    if missing:
+        errors.append(f"extension parity catalog missing crates: {', '.join(missing)}")
+    if extra:
+        errors.append(
+            f"extension parity catalog has unknown crates: {', '.join(extra)}"
+        )
+    return errors
+
+
 def extension_parity_errors(document: dict[str, object]) -> list[str]:
     entries = document.get("extensions")
     if not isinstance(entries, list):
@@ -305,9 +439,12 @@ def extension_parity_errors(document: dict[str, object]) -> list[str]:
     python_members = python_stub_members()
     js_exports = set(js_items())
     js_members = js_class_members()
+    surfaces: tuple[BindingSurface, ...] = (
+        ("python", python_dependencies, python_exports, python_members),
+        ("js", js_dependencies, js_exports, js_members),
+    )
     catalog_crates: set[str] = set()
     errors: list[str] = []
-    valid_statuses = {"direct", "composed", "facade", "host_adapter", "unavailable"}
 
     for entry in entries:
         if not isinstance(entry, dict) or not isinstance(entry.get("crate"), str):
@@ -317,76 +454,21 @@ def extension_parity_errors(document: dict[str, object]) -> list[str]:
         if crate in catalog_crates:
             errors.append(f"duplicate extension parity entry: {crate}")
         catalog_crates.add(crate)
-        if not any(
-            path.name == f"{crate}.txt" or path.name.startswith(f"{crate}+")
-            for path in RUST_API_BASELINES.glob(f"{crate}*.txt")
-        ):
-            errors.append(f"Rust public-API baseline missing for extension: {crate}")
+        errors.extend(extension_entry_errors(crate, entry, surfaces))
 
-        for family, dependencies, exports, members in (
-            ("python", python_dependencies, python_exports, python_members),
-            ("js", js_dependencies, js_exports, js_members),
-        ):
-            binding = entry.get(family)
-            if not isinstance(binding, dict):
-                errors.append(f"{crate}: missing {family} binding disposition")
-                continue
-            status = binding.get("status")
-            if status not in valid_statuses:
-                errors.append(f"{crate}: invalid {family} binding status: {status}")
-                continue
-            if status in {"direct", "composed"} and crate not in dependencies:
-                errors.append(
-                    f"{crate}: {family} {status} extension is not a direct dependency"
-                )
-            if status == "unavailable" and crate in dependencies:
-                errors.append(
-                    f"{crate}: {family} dependency cannot be marked unavailable"
-                )
-            reason = binding.get("reason")
-            if status in {"composed", "facade", "host_adapter", "unavailable"} and (
-                not isinstance(reason, str) or not reason
-            ):
-                errors.append(f"{crate}: {family} {status} status requires a reason")
-            surfaces = binding.get("surfaces")
-            if status in {"direct", "facade", "host_adapter"}:
-                if (
-                    not isinstance(surfaces, list)
-                    or not surfaces
-                    or not all(isinstance(surface, str) for surface in surfaces)
-                ):
-                    errors.append(
-                        f"{crate}: {family} {status} status requires string surfaces"
-                    )
-                    continue
-                source_exports = exports
-                source_members = members
-                if family == "js" and status == "host_adapter":
-                    source = binding.get("source")
-                    if (
-                        not isinstance(source, str)
-                        or not (REPO_ROOT / source).is_file()
-                    ):
-                        errors.append(
-                            f"{crate}: JavaScript host adapter source is missing: {source}"
-                        )
-                        continue
-                    source_exports = js_declared_items(REPO_ROOT / source)
-                    source_members = {}
-                for surface in surfaces:
-                    if not surface_exists(surface, source_exports, source_members):
-                        errors.append(
-                            f"{crate}: {family} extension surface missing: {surface}"
-                        )
+    errors.extend(extension_catalog_coverage_errors(expected_crates, catalog_crates))
+    return errors
 
-    missing = sorted(expected_crates - catalog_crates)
-    extra = sorted(catalog_crates - expected_crates)
-    if missing:
-        errors.append(f"extension parity catalog missing crates: {', '.join(missing)}")
-    if extra:
-        errors.append(
-            f"extension parity catalog has unknown crates: {', '.join(extra)}"
-        )
+
+def scenario_entry_errors(scenario_id: str, scenario: dict[str, object]) -> list[str]:
+    errors: list[str] = []
+    fixture = scenario.get("fixture")
+    if isinstance(fixture, str) and not (REPO_ROOT / fixture).is_file():
+        errors.append(f"binding parity scenario fixture missing: {fixture}")
+    for family in ("rust", "python", "js"):
+        surfaces = scenario.get(family)
+        if not isinstance(surfaces, list) or not surfaces:
+            errors.append(f"{scenario_id}: missing {family} surface")
     return errors
 
 
@@ -405,14 +487,163 @@ def scenario_errors() -> list[str]:
         if scenario_id in seen:
             errors.append(f"duplicate binding parity scenario: {scenario_id}")
         seen.add(scenario_id)
-        fixture = scenario.get("fixture")
-        if isinstance(fixture, str) and not (REPO_ROOT / fixture).is_file():
-            errors.append(f"binding parity scenario fixture missing: {fixture}")
-        for family in ("rust", "python", "js"):
-            surfaces = scenario.get(family)
-            if not isinstance(surfaces, list) or not surfaces:
-                errors.append(f"{scenario_id}: missing {family} surface")
+        errors.extend(scenario_entry_errors(scenario_id, scenario))
     return errors
+
+
+def rust_api_failed(write: bool) -> bool:
+    rust = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "scripts" / "compat" / "public_api.py"),
+            "--write" if write else "--check",
+        ],
+        cwd=REPO_ROOT,
+        check=False,
+    )
+    return rust.returncode != 0
+
+
+def write_parity_mutation(inventory: dict[str, object]) -> None:
+    mutation = copy.deepcopy(inventory)
+    types = mutation.get("types")
+    if not isinstance(types, list) or not types:
+        raise SystemExit("binding parity inventory has no types")
+    first = types[0]
+    if not isinstance(first, dict):
+        raise SystemExit("binding parity inventory has invalid first type")
+    members = first.get("members")
+    if not isinstance(members, list) or not members:
+        raise SystemExit("binding parity inventory has no members")
+    renamed = members[0]
+    if not isinstance(renamed, dict) or not isinstance(renamed.get("python"), str):
+        raise SystemExit("binding parity inventory has invalid first member")
+    renamed["python"] += "Renamed"
+    PARITY_MUTATION.write_text(json.dumps(mutation, indent=2) + "\n", encoding="utf-8")
+
+
+def rename_direct_surface(binding: object) -> bool:
+    if not isinstance(binding, dict) or binding.get("status") != "direct":
+        return False
+    surfaces = binding.get("surfaces")
+    if (
+        not isinstance(surfaces, list)
+        or not surfaces
+        or not isinstance(surfaces[0], str)
+    ):
+        return False
+    surfaces[0] += "Renamed"
+    return True
+
+
+def rename_first_direct_surface(extensions: list[object]) -> bool:
+    for extension in extensions:
+        if not isinstance(extension, dict):
+            continue
+        for family in ("python", "js"):
+            if rename_direct_surface(extension.get(family)):
+                return True
+    return False
+
+
+def write_extension_mutation(extension_inventory: dict[str, object]) -> None:
+    extension_mutation = copy.deepcopy(extension_inventory)
+    extension_entries = extension_mutation.get("extensions")
+    if not isinstance(extension_entries, list):
+        raise SystemExit("extension parity inventory has no extensions")
+    if not rename_first_direct_surface(extension_entries):
+        raise SystemExit("extension parity inventory has no direct surface")
+    EXTENSION_MUTATION.write_text(
+        json.dumps(extension_mutation, indent=2) + "\n", encoding="utf-8"
+    )
+
+
+def parity_mutations_failed() -> bool:
+    if not PARITY_MUTATION.is_file() or not EXTENSION_MUTATION.is_file():
+        print("binding parity mutation fixture is missing", file=sys.stderr)
+        return True
+    failed = False
+    mutation = json.loads(PARITY_MUTATION.read_text(encoding="utf-8"))
+    if not parity_errors(mutation):
+        print(
+            "binding parity: renamed-member mutation would silently pass",
+            file=sys.stderr,
+        )
+        failed = True
+    extension_mutation = json.loads(EXTENSION_MUTATION.read_text(encoding="utf-8"))
+    if not extension_parity_errors(extension_mutation):
+        print(
+            "binding parity: renamed extension surface mutation would silently pass",
+            file=sys.stderr,
+        )
+        failed = True
+    return failed
+
+
+def binding_parity_failed(write: bool) -> bool:
+    if (
+        not PARITY_INVENTORY.is_file()
+        or not PARITY_SCENARIOS.is_file()
+        or not EXTENSION_PARITY.is_file()
+    ):
+        print("binding parity inventories or scenarios are missing", file=sys.stderr)
+        return True
+    inventory = json.loads(PARITY_INVENTORY.read_text(encoding="utf-8"))
+    extension_inventory = json.loads(EXTENSION_PARITY.read_text(encoding="utf-8"))
+    errors = parity_errors(inventory)
+    errors.extend(extension_parity_errors(extension_inventory))
+    errors.extend(scenario_errors())
+    for error in errors:
+        print(f"binding parity: {error}", file=sys.stderr)
+    if write:
+        write_parity_mutation(inventory)
+        write_extension_mutation(extension_inventory)
+        return bool(errors)
+    mutations_failed = parity_mutations_failed()
+    return bool(errors) or mutations_failed
+
+
+def write_name_list(family: str, current: list[str]) -> None:
+    write_list(BASELINES[family], current)
+    mutated = list(current)
+    if not mutated:
+        raise SystemExit(f"{family}: empty public list")
+    mutated[0] = mutated[0] + "Renamed"
+    write_list(MUTATIONS[family], mutated)
+
+
+def name_list_failed(family: str, current: list[str]) -> bool:
+    baseline_path = BASELINES[family]
+    mutation_path = MUTATIONS[family]
+    if not baseline_path.is_file() or not mutation_path.is_file():
+        print(f"{family}: missing baseline or mutation fixture", file=sys.stderr)
+        return True
+    failed = False
+    baseline = read_list(baseline_path)
+    missing = compare(current, baseline)
+    if missing:
+        print(f"{family}: removed public items: {', '.join(missing)}", file=sys.stderr)
+        failed = True
+    extra = added(current, baseline)
+    if extra:
+        print(f"{family}: added public items: {', '.join(extra)}", file=sys.stderr)
+        failed = True
+    mutation = read_list(mutation_path)
+    if not compare(current, mutation):
+        print(f"{family}: renamed-item mutation would silently pass", file=sys.stderr)
+        failed = True
+    return failed
+
+
+def name_lists_failed(write: bool) -> bool:
+    failed = False
+    for family, extract in EXTRACTORS.items():
+        current = extract()
+        if write:
+            write_name_list(family, current)
+        elif name_list_failed(family, current):
+            failed = True
+    return failed
 
 
 def main() -> int:
@@ -422,146 +653,13 @@ def main() -> int:
     args = parser.parse_args()
     if not args.write and not args.check:
         parser.error("pass --write or --check")
-    rust = subprocess.run(
-        [
-            sys.executable,
-            str(REPO_ROOT / "scripts" / "compat" / "public_api.py"),
-            "--write" if args.write else "--check",
-        ],
-        cwd=REPO_ROOT,
-        check=False,
-    )
-    failed = rust.returncode != 0
-    if (
-        not PARITY_INVENTORY.is_file()
-        or not PARITY_SCENARIOS.is_file()
-        or not EXTENSION_PARITY.is_file()
-    ):
-        print("binding parity inventories or scenarios are missing", file=sys.stderr)
+    failed = rust_api_failed(args.write)
+    if binding_parity_failed(args.write):
         failed = True
-    else:
-        inventory = json.loads(PARITY_INVENTORY.read_text(encoding="utf-8"))
-        extension_inventory = json.loads(EXTENSION_PARITY.read_text(encoding="utf-8"))
-        errors = parity_errors(inventory)
-        errors.extend(extension_parity_errors(extension_inventory))
-        errors.extend(scenario_errors())
-        if errors:
-            for error in errors:
-                print(f"binding parity: {error}", file=sys.stderr)
-            failed = True
-        if args.write:
-            mutation = copy.deepcopy(inventory)
-            types = mutation.get("types")
-            if not isinstance(types, list) or not types:
-                raise SystemExit("binding parity inventory has no types")
-            first = types[0]
-            if not isinstance(first, dict):
-                raise SystemExit("binding parity inventory has invalid first type")
-            members = first.get("members")
-            if not isinstance(members, list) or not members:
-                raise SystemExit("binding parity inventory has no members")
-            renamed = members[0]
-            if not isinstance(renamed, dict) or not isinstance(
-                renamed.get("python"), str
-            ):
-                raise SystemExit("binding parity inventory has invalid first member")
-            renamed["python"] += "Renamed"
-            PARITY_MUTATION.write_text(
-                json.dumps(mutation, indent=2) + "\n", encoding="utf-8"
-            )
-            extension_mutation = copy.deepcopy(extension_inventory)
-            extension_entries = extension_mutation.get("extensions")
-            if not isinstance(extension_entries, list):
-                raise SystemExit("extension parity inventory has no extensions")
-            extension_surface_renamed = False
-            for extension in extension_entries:
-                if not isinstance(extension, dict):
-                    continue
-                for family in ("python", "js"):
-                    binding = extension.get(family)
-                    if (
-                        not isinstance(binding, dict)
-                        or binding.get("status") != "direct"
-                    ):
-                        continue
-                    surfaces = binding.get("surfaces")
-                    if (
-                        isinstance(surfaces, list)
-                        and surfaces
-                        and isinstance(surfaces[0], str)
-                    ):
-                        surfaces[0] += "Renamed"
-                        extension_surface_renamed = True
-                        break
-                if extension_surface_renamed:
-                    break
-            if not extension_surface_renamed:
-                raise SystemExit("extension parity inventory has no direct surface")
-            EXTENSION_MUTATION.write_text(
-                json.dumps(extension_mutation, indent=2) + "\n", encoding="utf-8"
-            )
-        elif not PARITY_MUTATION.is_file() or not EXTENSION_MUTATION.is_file():
-            print("binding parity mutation fixture is missing", file=sys.stderr)
-            failed = True
-        else:
-            mutation = json.loads(PARITY_MUTATION.read_text(encoding="utf-8"))
-            if not parity_errors(mutation):
-                print(
-                    "binding parity: renamed-member mutation would silently pass",
-                    file=sys.stderr,
-                )
-                failed = True
-            extension_mutation = json.loads(
-                EXTENSION_MUTATION.read_text(encoding="utf-8")
-            )
-            if not extension_parity_errors(extension_mutation):
-                print(
-                    "binding parity: renamed extension surface mutation would silently pass",
-                    file=sys.stderr,
-                )
-                failed = True
     # Tracked apart from `failed` so the remediation note below describes the
     # Python/JS name lists only when one of them actually drifted. public_api.py
     # prints its own note for the Rust baselines.
-    names_failed = False
-    for family, extract in EXTRACTORS.items():
-        current = extract()
-        baseline_path = BASELINES[family]
-        mutation_path = MUTATIONS[family]
-        if args.write:
-            write_list(baseline_path, current)
-            mutated = list(current)
-            if not mutated:
-                raise SystemExit(f"{family}: empty public list")
-            mutated[0] = mutated[0] + "Renamed"
-            write_list(mutation_path, mutated)
-            continue
-        if not baseline_path.is_file() or not mutation_path.is_file():
-            print(f"{family}: missing baseline or mutation fixture", file=sys.stderr)
-            failed = True
-            names_failed = True
-            continue
-        baseline = read_list(baseline_path)
-        missing = compare(current, baseline)
-        if missing:
-            print(
-                f"{family}: removed public items: {', '.join(missing)}", file=sys.stderr
-            )
-            failed = True
-            names_failed = True
-        extra = added(current, baseline)
-        if extra:
-            print(f"{family}: added public items: {', '.join(extra)}", file=sys.stderr)
-            failed = True
-            names_failed = True
-        mutation = read_list(mutation_path)
-        if not compare(current, mutation):
-            print(
-                f"{family}: renamed-item mutation would silently pass",
-                file=sys.stderr,
-            )
-            failed = True
-            names_failed = True
+    names_failed = name_lists_failed(args.write)
     if names_failed:
         print(
             "\nFrozen public-item lists differ. If the change is intended,"
@@ -572,7 +670,7 @@ def main() -> int:
             " baselines.",
             file=sys.stderr,
         )
-    return 1 if failed else 0
+    return 1 if failed or names_failed else 0
 
 
 if __name__ == "__main__":

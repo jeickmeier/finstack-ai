@@ -20,7 +20,7 @@ finstack-ai-workflow-hitl = { workspace = true }
 finstack-ai-workflow-local = { workspace = true }
 finstack-ai-workflow-worker = { workspace = true }
 tempfile = { workspace = true }
-tokio = { workspace = true, features = ["rt", "macros", "time"] }
+tokio = { workspace = true, features = ["rt", "macros", "process", "time"] }
 
 [lints]
 workspace = true

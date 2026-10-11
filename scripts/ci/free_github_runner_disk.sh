@@ -5,7 +5,7 @@
 # too little space for debug artifacts ("No space left on device").
 set -euo pipefail
 
-if [ "${GITHUB_ACTIONS:-}" != "true" ]; then
+if [[ "${GITHUB_ACTIONS:-}" != "true" ]]; then
   echo "scripts/ci/free_github_runner_disk.sh runs only on GitHub Actions" >&2
   exit 1
 fi
@@ -14,7 +14,7 @@ df -h
 
 remove_path() {
   local path="$1"
-  if [ -e "${path}" ]; then
+  if [[ -e "${path}" ]]; then
     echo "removing ${path}"
     sudo rm -rf "${path}"
   fi
@@ -27,7 +27,7 @@ remove_path /usr/local/.ghcup
 remove_path /usr/share/swift
 remove_path /usr/local/share/boost
 remove_path /opt/hostedtoolcache/CodeQL
-if [ -n "${AGENT_TOOLSDIRECTORY:-}" ]; then
+if [[ -n "${AGENT_TOOLSDIRECTORY:-}" ]]; then
   remove_path "${AGENT_TOOLSDIRECTORY}"
 fi
 

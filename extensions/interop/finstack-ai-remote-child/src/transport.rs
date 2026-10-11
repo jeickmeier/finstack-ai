@@ -4,9 +4,9 @@ use finstack_ai_kernel::ChildRunLocator;
 use finstack_ai_protocol::{
     FRAME_LENGTH_BYTES, POST_AUTH_FRAME_MAX_BYTES, PRE_AUTH_FRAME_MAX_BYTES, PROTOCOL_VERSION_V1,
     PayloadFamily, ProtocolEnvelope, RemoteAuthMethod, RemoteCommand, RemoteCommandPayload,
-    RemoteCommandResult, RemoteLocator, RemotePostAuth, RemotePreAuth, VersionOffer,
-    decode_envelope, decode_frame_len, encode_envelope, encode_frame, require_features,
-    select_version,
+    RemoteCommandResult, RemoteDurableStep, RemoteEventView, RemoteLocator, RemotePostAuth,
+    RemotePreAuth, VersionOffer, decode_envelope, decode_frame_len, encode_envelope, encode_frame,
+    require_features, select_version,
 };
 use finstack_ai_runtime::child::AgentInvokeError;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -68,10 +68,6 @@ where
     .map_err(|_| unavailable("remote child exchange timed out"))?
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "the bounded handshake, reconnect, and receipt state machine is kept linear for auditability"
-)]
 async fn exchange_on<S>(
     mut stream: S,
     route: &ResolvedRemoteRoute,
@@ -82,6 +78,54 @@ async fn exchange_on<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
+    let selected_version = authenticate(&mut stream, route).await?;
+    let remote_locator = RemoteLocator::try_new(
+        locator.operation.session_id,
+        Some(locator.operation.lane_id),
+        Some(locator.operation.run_id),
+    )
+    .map_err(|error| unavailable(error.to_string()))?;
+    write_post_auth(
+        &mut stream,
+        selected_version,
+        &RemotePostAuth::OpenSession {
+            last_known_durable_sequence: None,
+            locator: remote_locator.clone(),
+            tenant_scope: locator.operation.tenant_scope.to_string(),
+        },
+    )
+    .await?;
+    let started = Instant::now();
+    let durable_cursor =
+        read_until_sync_barrier(&mut stream, selected_version, &remote_locator, started).await?;
+    let command = RemoteCommand::try_new(
+        command_id,
+        remote_locator.clone(),
+        locator.operation.tenant_scope.as_ref(),
+        durable_cursor,
+        payload,
+    )
+    .map_err(|error| unavailable(error.to_string()))?;
+    send_command_for_receipt(
+        &mut stream,
+        selected_version,
+        &remote_locator,
+        durable_cursor,
+        command,
+        started,
+    )
+    .await
+}
+
+/// Negotiate the protocol version and authenticate; returns the selected
+/// post-auth protocol version.
+async fn authenticate<S>(
+    stream: &mut S,
+    route: &ResolvedRemoteRoute,
+) -> Result<u16, AgentInvokeError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
     let offer = VersionOffer::try_new(
         vec![PROTOCOL_VERSION_V1],
         PROTOCOL_VERSION_V1,
@@ -89,7 +133,7 @@ where
     )
     .map_err(|error| unavailable(error.to_string()))?;
     write_pre_auth(
-        &mut stream,
+        stream,
         &RemotePreAuth::ClientHello {
             offer: offer.clone(),
         },
@@ -98,7 +142,7 @@ where
     let RemotePreAuth::ServerHello {
         selected_version,
         offer: server_offer,
-    } = read_pre_auth(&mut stream).await?
+    } = read_pre_auth(stream).await?
     else {
         return Err(unavailable("remote child handshake failed"));
     };
@@ -120,78 +164,54 @@ where
         },
         _ => RemoteAuthMethod::Loopback,
     };
-    write_pre_auth(&mut stream, &RemotePreAuth::Authenticate { method }).await?;
-    let RemotePreAuth::AuthResult { accepted: true, .. } = read_pre_auth(&mut stream).await? else {
+    write_pre_auth(stream, &RemotePreAuth::Authenticate { method }).await?;
+    let RemotePreAuth::AuthResult { accepted: true, .. } = read_pre_auth(stream).await? else {
         return Err(unavailable("remote child authentication failed"));
     };
-    let remote_locator = RemoteLocator::try_new(
-        locator.operation.session_id,
-        Some(locator.operation.lane_id),
-        Some(locator.operation.run_id),
-    )
-    .map_err(|error| unavailable(error.to_string()))?;
-    write_post_auth(
-        &mut stream,
-        selected_version,
-        &RemotePostAuth::OpenSession {
-            last_known_durable_sequence: None,
-            locator: remote_locator.clone(),
-            tenant_scope: locator.operation.tenant_scope.to_string(),
-        },
-    )
-    .await?;
-    let started = Instant::now();
-    let mut open_frames = 0_usize;
-    let mut saw_snapshot_choice = false;
-    let mut durable_cursor = 0_u64;
-    let durable_cursor = loop {
-        open_frames = open_frames.saturating_add(1);
-        if open_frames > MAX_OPEN_FRAMES || started.elapsed() > EXCHANGE_TIMEOUT {
-            return Err(unavailable("remote child open exceeded the frame bound"));
-        }
-        match read_post_auth(&mut stream, selected_version).await? {
+    Ok(selected_version)
+}
+
+/// Durable catch-up state accumulated while opening a session.
+struct OpenProgress<'l> {
+    remote_locator: &'l RemoteLocator,
+    saw_snapshot_choice: bool,
+    durable_cursor: u64,
+}
+
+impl OpenProgress<'_> {
+    /// Apply one open-phase frame; returns the barrier sequence once the
+    /// session reaches its sync barrier.
+    fn apply(&mut self, frame: RemotePostAuth) -> Result<Option<u64>, AgentInvokeError> {
+        match frame {
             RemotePostAuth::Snapshot { sequence, snapshot } => {
-                if saw_snapshot_choice
+                if self.saw_snapshot_choice
                     || snapshot.sequence() != sequence
-                    || snapshot.locator() != &remote_locator
+                    || snapshot.locator() != self.remote_locator
                 {
                     return Err(unavailable("remote child received an invalid snapshot"));
                 }
-                saw_snapshot_choice = true;
-                durable_cursor = sequence;
+                self.saw_snapshot_choice = true;
+                self.durable_cursor = sequence;
             }
             RemotePostAuth::NoSnapshot { sequence } => {
-                if saw_snapshot_choice {
+                if self.saw_snapshot_choice {
                     return Err(unavailable(
                         "remote child received duplicate snapshot state",
                     ));
                 }
-                saw_snapshot_choice = true;
-                durable_cursor = sequence;
+                self.saw_snapshot_choice = true;
+                self.durable_cursor = sequence;
             }
             RemotePostAuth::DurableTail {
                 from_sequence,
                 to_sequence,
                 steps,
-            } => {
-                if !saw_snapshot_choice || from_sequence != durable_cursor.saturating_add(1) {
-                    return Err(unavailable("remote child received a discontinuous tail"));
-                }
-                for step in steps {
-                    durable_cursor = durable_cursor.saturating_add(1);
-                    if step.sequence() != durable_cursor {
-                        return Err(unavailable("remote child received a tail gap"));
-                    }
-                }
-                if durable_cursor != to_sequence {
-                    return Err(unavailable("remote child received an invalid tail range"));
-                }
-            }
+            } => self.apply_tail(from_sequence, to_sequence, &steps)?,
             RemotePostAuth::SyncBarrier { sequence } => {
-                if !saw_snapshot_choice || sequence != durable_cursor {
+                if !self.saw_snapshot_choice || sequence != self.durable_cursor {
                     return Err(unavailable("remote child received the wrong sync barrier"));
                 }
-                break sequence;
+                return Ok(Some(sequence));
             }
             RemotePostAuth::EventBatch { .. } => {
                 return Err(unavailable(
@@ -205,20 +225,78 @@ where
                 )));
             }
         }
+        Ok(None)
+    }
+
+    fn apply_tail(
+        &mut self,
+        from_sequence: u64,
+        to_sequence: u64,
+        steps: &[RemoteDurableStep],
+    ) -> Result<(), AgentInvokeError> {
+        if !self.saw_snapshot_choice || from_sequence != self.durable_cursor.saturating_add(1) {
+            return Err(unavailable("remote child received a discontinuous tail"));
+        }
+        for step in steps {
+            self.durable_cursor = self.durable_cursor.saturating_add(1);
+            if step.sequence() != self.durable_cursor {
+                return Err(unavailable("remote child received a tail gap"));
+            }
+        }
+        if self.durable_cursor != to_sequence {
+            return Err(unavailable("remote child received an invalid tail range"));
+        }
+        Ok(())
+    }
+}
+
+/// Read the snapshot choice and durable tail up to the sync barrier within
+/// [`MAX_OPEN_FRAMES`]; returns the barrier's durable sequence.
+async fn read_until_sync_barrier<S>(
+    stream: &mut S,
+    protocol_version: u16,
+    remote_locator: &RemoteLocator,
+    started: Instant,
+) -> Result<u64, AgentInvokeError>
+where
+    S: AsyncRead + Unpin,
+{
+    let mut progress = OpenProgress {
+        remote_locator,
+        saw_snapshot_choice: false,
+        durable_cursor: 0,
     };
-    let command = RemoteCommand::try_new(
-        command_id,
-        remote_locator.clone(),
-        locator.operation.tenant_scope.as_ref(),
-        durable_cursor,
-        payload,
-    )
-    .map_err(|error| unavailable(error.to_string()))?;
+    let mut open_frames = 0_usize;
+    loop {
+        open_frames = open_frames.saturating_add(1);
+        if open_frames > MAX_OPEN_FRAMES || started.elapsed() > EXCHANGE_TIMEOUT {
+            return Err(unavailable("remote child open exceeded the frame bound"));
+        }
+        let frame = read_post_auth(stream, protocol_version).await?;
+        if let Some(sequence) = progress.apply(frame)? {
+            return Ok(sequence);
+        }
+    }
+}
+
+/// Send `command` and read until its matching receipt within
+/// [`MAX_COMMAND_FRAMES`], validating interleaved live events.
+async fn send_command_for_receipt<S>(
+    stream: &mut S,
+    protocol_version: u16,
+    remote_locator: &RemoteLocator,
+    durable_cursor: u64,
+    command: RemoteCommand,
+    started: Instant,
+) -> Result<RemoteCommandResult, AgentInvokeError>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
     let expected_digest = command.digest();
     let expected_command_id = command.command_id();
     write_post_auth(
-        &mut stream,
-        selected_version,
+        stream,
+        protocol_version,
         &RemotePostAuth::Command { command },
     )
     .await?;
@@ -229,40 +307,18 @@ where
         if command_frames > MAX_COMMAND_FRAMES || started.elapsed() > EXCHANGE_TIMEOUT {
             return Err(unavailable("remote child command exceeded the frame bound"));
         }
-        match read_post_auth(&mut stream, selected_version).await? {
+        match read_post_auth(stream, protocol_version).await? {
             RemotePostAuth::CommandResult { result }
                 if result.command_id() == expected_command_id
                     && result.digest() == expected_digest =>
             {
-                let cursor_valid = if result.accepted() {
-                    result.durable_sequence() >= durable_cursor
-                } else {
-                    result.durable_sequence() == durable_cursor
-                };
-                if !cursor_valid {
-                    return Err(unavailable(
-                        "remote child received an invalid receipt cursor",
-                    ));
-                }
-                return Ok(result);
+                return check_receipt_cursor(result, durable_cursor);
             }
             RemotePostAuth::CommandResult { .. } => {
                 return Err(unavailable("remote child received an unrelated receipt"));
             }
             RemotePostAuth::EventBatch { events } => {
-                for event in events {
-                    let full = event.event();
-                    if event.durable_sequence().is_some()
-                        || full.session_id() != remote_locator.session_id()
-                        || Some(full.lane_id()) != remote_locator.lane_id()
-                        || Some(full.run_id()) != remote_locator.run_id()
-                        || last_transient_sequence
-                            .is_some_and(|value| event.transient_sequence() <= value)
-                    {
-                        return Err(unavailable("remote child received an invalid live event"));
-                    }
-                    last_transient_sequence = Some(event.transient_sequence());
-                }
+                check_live_events(&events, remote_locator, &mut last_transient_sequence)?;
             }
             RemotePostAuth::Grant { .. } => {}
             other => {
@@ -273,6 +329,43 @@ where
             }
         }
     }
+}
+
+fn check_receipt_cursor(
+    result: RemoteCommandResult,
+    durable_cursor: u64,
+) -> Result<RemoteCommandResult, AgentInvokeError> {
+    let cursor_valid = if result.accepted() {
+        result.durable_sequence() >= durable_cursor
+    } else {
+        result.durable_sequence() == durable_cursor
+    };
+    if !cursor_valid {
+        return Err(unavailable(
+            "remote child received an invalid receipt cursor",
+        ));
+    }
+    Ok(result)
+}
+
+fn check_live_events(
+    events: &[RemoteEventView],
+    remote_locator: &RemoteLocator,
+    last_transient_sequence: &mut Option<u64>,
+) -> Result<(), AgentInvokeError> {
+    for event in events {
+        let full = event.event();
+        if event.durable_sequence().is_some()
+            || full.session_id() != remote_locator.session_id()
+            || Some(full.lane_id()) != remote_locator.lane_id()
+            || Some(full.run_id()) != remote_locator.run_id()
+            || last_transient_sequence.is_some_and(|value| event.transient_sequence() <= value)
+        {
+            return Err(unavailable("remote child received an invalid live event"));
+        }
+        *last_transient_sequence = Some(event.transient_sequence());
+    }
+    Ok(())
 }
 
 async fn read_frame<R: AsyncRead + Unpin>(

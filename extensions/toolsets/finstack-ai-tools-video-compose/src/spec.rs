@@ -179,26 +179,20 @@ pub(crate) fn validate_spec(spec: &CompositionSpec) -> Result<(), &'static str> 
         return Err("composition needs between 1 and 64 clips");
     }
     if let Some(transitions) = &spec.transitions {
-        if !transitions.is_empty() && transitions.len() != spec.clips.len().saturating_sub(1) {
-            return Err("transition count must be clip count minus one");
-        }
-        for transition in transitions {
-            let duration = transition.duration_s.unwrap_or(0.5);
-            let needs_duration = !matches!(transition.kind, TransitionKind::Cut);
-            if needs_duration && !(0.05..=5.0).contains(&duration) {
-                return Err("transition duration must be between 0.05 and 5 seconds");
-            }
-        }
+        validate_transitions(transitions, spec.clips.len())?;
     }
-    for clip in &spec.clips {
-        if let Some(trim) = &clip.trim
-            && (!trim.start_s.is_finite()
+    if spec
+        .clips
+        .iter()
+        .filter_map(|clip| clip.trim.as_ref())
+        .any(|trim| {
+            !trim.start_s.is_finite()
                 || !trim.end_s.is_finite()
                 || trim.start_s < 0.0
-                || trim.end_s <= trim.start_s)
-        {
-            return Err("clip trim must satisfy 0 <= start < end");
-        }
+                || trim.end_s <= trim.start_s
+        })
+    {
+        return Err("clip trim must satisfy 0 <= start < end");
     }
     if let Some(audio) = &spec.audio
         && let Some(gain) = audio.gain_db
@@ -207,19 +201,43 @@ pub(crate) fn validate_spec(spec: &CompositionSpec) -> Result<(), &'static str> 
         return Err("audio gain must be between -60 and 12 dB");
     }
     if let Some(subtitles) = &spec.subtitles {
-        if matches!(subtitles.mode, SubtitleMode::Mux)
-            && !matches!(spec.output.container, Container::Mp4)
-        {
-            return Err("muxed subtitles require the mp4 container");
-        }
-        if let Some(style) = &subtitles.style
-            && (style.font_size.is_some_and(|v| !(8..=96).contains(&v))
-                || style.margin_v.is_some_and(|v| v > 400))
-        {
-            return Err("subtitle style values are out of bounds");
-        }
+        validate_subtitles(subtitles, spec.output.container)?;
     }
-    if let Some(resolution) = &spec.output.resolution {
+    validate_output(&spec.output)
+}
+
+fn validate_transitions(
+    transitions: &[TransitionSpec],
+    clip_count: usize,
+) -> Result<(), &'static str> {
+    if !transitions.is_empty() && transitions.len() != clip_count.saturating_sub(1) {
+        return Err("transition count must be clip count minus one");
+    }
+    let out_of_range = transitions.iter().any(|transition| {
+        let duration = transition.duration_s.unwrap_or(0.5);
+        !matches!(transition.kind, TransitionKind::Cut) && !(0.05..=5.0).contains(&duration)
+    });
+    if out_of_range {
+        return Err("transition duration must be between 0.05 and 5 seconds");
+    }
+    Ok(())
+}
+
+fn validate_subtitles(subtitles: &SubtitlesSpec, container: Container) -> Result<(), &'static str> {
+    if matches!(subtitles.mode, SubtitleMode::Mux) && !matches!(container, Container::Mp4) {
+        return Err("muxed subtitles require the mp4 container");
+    }
+    if let Some(style) = &subtitles.style
+        && (style.font_size.is_some_and(|v| !(8..=96).contains(&v))
+            || style.margin_v.is_some_and(|v| v > 400))
+    {
+        return Err("subtitle style values are out of bounds");
+    }
+    Ok(())
+}
+
+fn validate_output(output: &OutputSpec) -> Result<(), &'static str> {
+    if let Some(resolution) = &output.resolution {
         let valid = resolution.split_once('x').is_some_and(|(w, h)| {
             w.parse::<u32>().is_ok_and(|w| (16..=7_680).contains(&w))
                 && h.parse::<u32>().is_ok_and(|h| (16..=4_320).contains(&h))
@@ -228,7 +246,7 @@ pub(crate) fn validate_spec(spec: &CompositionSpec) -> Result<(), &'static str> 
             return Err("output resolution must be WIDTHxHEIGHT within 16..7680x4320");
         }
     }
-    if let Some(fps) = spec.output.fps
+    if let Some(fps) = output.fps
         && !(1..=120).contains(&fps)
     {
         return Err("output fps must be between 1 and 120");

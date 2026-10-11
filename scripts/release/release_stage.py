@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import tomllib
 from pathlib import Path
+from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKSPACE_VERSION = tomllib.loads(
@@ -115,12 +116,7 @@ def crate_sbom() -> dict[str, object]:
     }
 
 
-def stage(
-    work: Path, *, label: str = WORKSPACE_VERSION, extra: dict[str, str] | None = None
-) -> None:
-    if work.exists():
-        shutil.rmtree(work)
-    work.mkdir(parents=True)
+def stage_crate_lists(work: Path) -> None:
     lists = work / "crate-package-lists"
     lists.mkdir()
     for crate in CRATES:
@@ -138,6 +134,8 @@ def stage(
         )
         (lists / f"{crate}.list").write_text(completed.stdout, encoding="utf-8")
 
+
+def stage_python(work: Path) -> None:
     python_out = work / "python"
     python_out.mkdir()
     run(
@@ -169,13 +167,18 @@ def stage(
         ]
     )
 
-    if (JS_PACKAGE / "dist" / "index.js").is_file():
-        completed = run(["npm", "pack", "--pack-destination", str(work)], JS_PACKAGE)
-        name = completed.stdout.strip().splitlines()[-1]
-        packed = work / name
-        if not packed.is_file():
-            raise SystemExit(f"npm pack did not write {packed}")
 
+def stage_npm_tarball(work: Path) -> None:
+    if not (JS_PACKAGE / "dist" / "index.js").is_file():
+        return
+    completed = run(["npm", "pack", "--pack-destination", str(work)], JS_PACKAGE)
+    name = completed.stdout.strip().splitlines()[-1]
+    packed = work / name
+    if not packed.is_file():
+        raise SystemExit(f"npm pack did not write {packed}")
+
+
+def stage_wit(work: Path) -> None:
     wit_out = work / "wit"
     wit_out.mkdir()
     for root in WIT_ROOTS:
@@ -186,66 +189,68 @@ def stage(
     if PLUGIN_LOCK.is_file():
         shutil.copy2(PLUGIN_LOCK, work / "plugin.lock.json")
 
-    (work / "sbom.crates.cdx.json").write_text(
-        json.dumps(crate_sbom(), indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-    if (JS_PACKAGE / "package.json").is_file() and (
-        JS_PACKAGE / "package-lock.json"
-    ).is_file():
-        package = json.loads((JS_PACKAGE / "package.json").read_text(encoding="utf-8"))
-        lock = json.loads(
-            (JS_PACKAGE / "package-lock.json").read_text(encoding="utf-8")
-        )
-        npm_packages = [
+
+def npm_sbom_components(
+    package: dict[str, Any], lock: dict[str, Any]
+) -> list[dict[str, object]]:
+    components: list[dict[str, object]] = [
+        {
+            "type": "library",
+            "name": package["name"],
+            "version": package["version"],
+            "bom-ref": f"pkg:npm/{package['name']}@{package['version']}",
+        }
+    ]
+    for name, meta in sorted((lock.get("packages") or {}).items()):
+        if not isinstance(meta, dict):
+            continue
+        version = meta.get("version")
+        if not isinstance(version, str):
+            continue
+        purl_name = name.removeprefix("node_modules/") or str(package["name"])
+        components.append(
             {
                 "type": "library",
-                "name": package["name"],
-                "version": package["version"],
-                "bom-ref": f"pkg:npm/{package['name']}@{package['version']}",
+                "name": purl_name,
+                "version": version,
+                "bom-ref": f"pkg:npm/{purl_name}@{version}",
             }
-        ]
-        for name, meta in sorted((lock.get("packages") or {}).items()):
-            if not isinstance(meta, dict):
-                continue
-            version = meta.get("version")
-            if not isinstance(version, str):
-                continue
-            purl_name = name.removeprefix("node_modules/") or str(package["name"])
-            npm_packages.append(
-                {
-                    "type": "library",
-                    "name": purl_name,
-                    "version": version,
-                    "bom-ref": f"pkg:npm/{purl_name}@{version}",
-                }
-            )
-        (work / "sbom.npm.cdx.json").write_text(
-            json.dumps(
-                {
-                    "bomFormat": "CycloneDX",
-                    "specVersion": "1.6",
-                    "version": 1,
-                    "metadata": {
-                        "component": {
-                            "type": "library",
-                            "name": package["name"],
-                            "version": package["version"],
-                        }
-                    },
-                    "components": npm_packages,
-                },
-                indent=2,
-                sort_keys=True,
-            )
-            + "\n",
-            encoding="utf-8",
         )
+    return components
 
-    if extra:
-        for name, body in extra.items():
-            (work / name).write_text(body, encoding="utf-8")
 
+def stage_npm_sbom(work: Path) -> None:
+    if not (
+        (JS_PACKAGE / "package.json").is_file()
+        and (JS_PACKAGE / "package-lock.json").is_file()
+    ):
+        return
+    package = json.loads((JS_PACKAGE / "package.json").read_text(encoding="utf-8"))
+    lock = json.loads((JS_PACKAGE / "package-lock.json").read_text(encoding="utf-8"))
+    (work / "sbom.npm.cdx.json").write_text(
+        json.dumps(
+            {
+                "bomFormat": "CycloneDX",
+                "specVersion": "1.6",
+                "version": 1,
+                "metadata": {
+                    "component": {
+                        "type": "library",
+                        "name": package["name"],
+                        "version": package["version"],
+                    }
+                },
+                "components": npm_sbom_components(package, lock),
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def write_provenance(work: Path, label: str) -> None:
     revision = run(["git", "rev-parse", "HEAD"]).stdout.strip()
     rustc = run(["rustc", "--version"]).stdout.strip()
     statement = {
@@ -264,4 +269,25 @@ def stage(
         json.dumps(statement, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+
+
+def stage(
+    work: Path, *, label: str = WORKSPACE_VERSION, extra: dict[str, str] | None = None
+) -> None:
+    if work.exists():
+        shutil.rmtree(work)
+    work.mkdir(parents=True)
+    stage_crate_lists(work)
+    stage_python(work)
+    stage_npm_tarball(work)
+    stage_wit(work)
+    (work / "sbom.crates.cdx.json").write_text(
+        json.dumps(crate_sbom(), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    stage_npm_sbom(work)
+    if extra:
+        for name, body in extra.items():
+            (work / name).write_text(body, encoding="utf-8")
+    write_provenance(work, label)
     write_checksums(work)

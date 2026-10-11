@@ -233,9 +233,11 @@ pub async fn build_agent_with_stores(
     journal: Arc<dyn JournalStore>,
     artifact_store: Arc<dyn finstack_ai::runtime::artifact::ArtifactStore>,
 ) -> Result<KnowledgeAgent, KnowledgeError> {
-    std::fs::create_dir_all(&config.data_dir).map_err(|_| KnowledgeError::Config {
-        reason: "data_dir_unwritable",
-    })?;
+    tokio::fs::create_dir_all(&config.data_dir)
+        .await
+        .map_err(|_| KnowledgeError::Config {
+            reason: "data_dir_unwritable",
+        })?;
     let self_docs_root = materialize_self_docs(&config.data_dir)?;
 
     let provider = provider(config)?;

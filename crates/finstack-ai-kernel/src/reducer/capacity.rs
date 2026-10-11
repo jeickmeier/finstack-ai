@@ -4,6 +4,8 @@ use std::collections::BTreeSet;
 
 use crate::StageCursor;
 use crate::content::ContentBlock;
+use crate::conversation::Message;
+use crate::effects::EffectOutputKind;
 use crate::primitives::{BudgetReservationId, EffectId, ToolCallId};
 use crate::primitives::{SEMANTIC_ARRAY_MAX_ITEMS, SEMANTIC_MAP_MAX_ENTRIES};
 use crate::records::{RecordBody, RecordEnvelope};
@@ -161,47 +163,49 @@ pub(super) fn preflight_decision(
     )
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "batch preflight keeps every semantic collection ceiling in one fail-closed pass"
-)]
 pub(super) fn preflight_batch(
     state: &KernelState,
     records: &[RecordEnvelope],
 ) -> Result<(), KernelError> {
-    let mut messages = 0_usize;
-    let mut stage_keys = BTreeSet::new();
-    let mut model_keys = BTreeSet::new();
-    let mut extension_keys = BTreeSet::new();
-    let mut completion_keys = BTreeSet::new();
-    let mut resolution_keys = BTreeSet::new();
-    let mut tool_call_keys = BTreeSet::new();
-    let mut tool_settlement_keys = BTreeSet::new();
-    let mut timer_firing_keys = BTreeSet::new();
-    let mut child_preparation_keys = BTreeSet::new();
-    let mut budget_reservation_keys = BTreeSet::new();
-    let mut budget_charge_keys = BTreeSet::new();
+    let mut growth = BatchGrowth::default();
     for record in records {
-        match record.body() {
+        growth.observe(state, record.body());
+    }
+    growth.check(state)
+}
+
+#[derive(Default)]
+struct BatchGrowth<'a> {
+    messages: usize,
+    stage_keys: BTreeSet<StageCursor>,
+    model_keys: BTreeSet<EffectId>,
+    extension_keys: BTreeSet<EffectId>,
+    completion_keys: BTreeSet<&'a str>,
+    resolution_keys: BTreeSet<&'a str>,
+    tool_call_keys: BTreeSet<ToolCallId>,
+    tool_settlement_keys: BTreeSet<EffectId>,
+    timer_firing_keys: BTreeSet<EffectId>,
+    child_preparation_keys: BTreeSet<EffectId>,
+    budget_reservation_keys: BTreeSet<BudgetReservationId>,
+    budget_charge_keys: BTreeSet<EffectId>,
+}
+
+impl<'a> BatchGrowth<'a> {
+    fn observe(&mut self, state: &KernelState, body: &'a RecordBody) {
+        match body {
             RecordBody::StageOutcomeRecorded(outcome) => {
                 if !state.stage_settlements.contains_key(&outcome.cursor) {
-                    stage_keys.insert(outcome.cursor);
+                    self.stage_keys.insert(outcome.cursor);
                 }
             }
             RecordBody::EntryAppended(entry) => {
-                messages += 1;
-                for block in entry.message.content() {
-                    if let ContentBlock::ToolCall(call) = block
-                        && !state.tool_calls.contains_key(call.tool_call_id())
-                    {
-                        tool_call_keys.insert(*call.tool_call_id());
-                    }
-                }
+                self.messages += 1;
+                self.observe_tool_calls(state, &entry.message);
             }
             RecordBody::ToolCallSettled(settled) => {
-                messages += 1;
+                self.messages += 1;
                 if !state.tool_settlements.contains_key(&settled.effect_id) {
-                    tool_settlement_keys.insert(settled.effect_id);
+                    self.tool_settlement_keys.insert(settled.effect_id);
                 }
             }
             RecordBody::InteractionResolved(value) => {
@@ -209,35 +213,18 @@ pub(super) fn preflight_batch(
                     .resolution_identities
                     .contains_key(value.resolution_id())
                 {
-                    resolution_keys.insert(value.resolution_id());
+                    self.resolution_keys.insert(value.resolution_id());
                 }
             }
-            RecordBody::EffectCompleted(value) => {
-                if value.output_contract().kind == crate::EffectOutputKind::ToolResult {
-                    if !state.tool_settlements.contains_key(&value.effect_id()) {
-                        tool_settlement_keys.insert(value.effect_id());
-                    }
-                } else if matches!(
-                    value.output_contract().kind,
-                    crate::EffectOutputKind::ContextContribution
-                        | crate::EffectOutputKind::MiddlewareOutcome
-                ) && !state.extension_settlements.contains_key(&value.effect_id())
-                {
-                    extension_keys.insert(value.effect_id());
-                } else if value.output_contract().kind == crate::EffectOutputKind::ModelResponse
-                    && !state.model_settlements.contains_key(&value.effect_id())
-                {
-                    model_keys.insert(value.effect_id());
-                }
-                if let Some(id) = value.completion_id()
-                    && !state.completion_identities.contains_key(id)
-                {
-                    completion_keys.insert(id);
-                }
-            }
+            RecordBody::EffectCompleted(value) => self.observe_settlement(
+                state,
+                &value.output_contract().kind,
+                value.effect_id(),
+                value.completion_id(),
+            ),
             RecordBody::TimerFired(fired) => {
                 if !state.retry.timer_firings.contains_key(&fired.effect_id) {
-                    timer_firing_keys.insert(fired.effect_id);
+                    self.timer_firing_keys.insert(fired.effect_id);
                 }
             }
             RecordBody::ChildRunPrepared(prepared) => {
@@ -245,7 +232,8 @@ pub(super) fn preflight_batch(
                     .child_preparations
                     .contains_key(&prepared.parent_effect_id)
                 {
-                    child_preparation_keys.insert(prepared.parent_effect_id);
+                    self.child_preparation_keys
+                        .insert(prepared.parent_effect_id);
                 }
             }
             RecordBody::BudgetReservationRequested(requested) => {
@@ -253,7 +241,8 @@ pub(super) fn preflight_batch(
                     .budget_reservations
                     .contains_key(&requested.request.reservation_id)
                 {
-                    budget_reservation_keys.insert(requested.request.reservation_id);
+                    self.budget_reservation_keys
+                        .insert(requested.request.reservation_id);
                 }
             }
             RecordBody::BudgetChargeRecorded(charged) => {
@@ -261,107 +250,126 @@ pub(super) fn preflight_batch(
                     .budget_charges
                     .contains_key(&charged.receipt.effect_id)
                 {
-                    budget_charge_keys.insert(charged.receipt.effect_id);
+                    self.budget_charge_keys.insert(charged.receipt.effect_id);
                 }
             }
-            RecordBody::EffectFailed(value) => {
-                if value.output_contract().kind == crate::EffectOutputKind::ToolResult {
-                    if !state.tool_settlements.contains_key(&value.effect_id()) {
-                        tool_settlement_keys.insert(value.effect_id());
-                    }
-                } else if matches!(
-                    value.output_contract().kind,
-                    crate::EffectOutputKind::ContextContribution
-                        | crate::EffectOutputKind::MiddlewareOutcome
-                ) && !state.extension_settlements.contains_key(&value.effect_id())
-                {
-                    extension_keys.insert(value.effect_id());
-                } else if value.output_contract().kind == crate::EffectOutputKind::ModelResponse
-                    && !state.model_settlements.contains_key(&value.effect_id())
-                {
-                    model_keys.insert(value.effect_id());
-                }
-                if let Some(id) = value.completion_id()
-                    && !state.completion_identities.contains_key(id)
-                {
-                    completion_keys.insert(id);
-                }
-            }
+            RecordBody::EffectFailed(value) => self.observe_settlement(
+                state,
+                &value.output_contract().kind,
+                value.effect_id(),
+                value.completion_id(),
+            ),
             _ => {}
         }
     }
-    check(
-        "messages",
-        state.messages.len(),
-        messages,
-        SEMANTIC_ARRAY_MAX_ITEMS,
-    )?;
-    check(
-        "stage_settlements",
-        state.stage_settlements.len(),
-        stage_keys.len(),
-        SEMANTIC_MAP_MAX_ENTRIES,
-    )?;
-    check(
-        "model_settlements",
-        state.model_settlements.len(),
-        model_keys.len(),
-        SEMANTIC_MAP_MAX_ENTRIES,
-    )?;
-    check(
-        "extension_settlements",
-        state.extension_settlements.len(),
-        extension_keys.len(),
-        SEMANTIC_MAP_MAX_ENTRIES,
-    )?;
-    check(
-        "completion_identities",
-        state.completion_identities.len(),
-        completion_keys.len(),
-        SEMANTIC_MAP_MAX_ENTRIES,
-    )?;
-    check(
-        "resolution_identities",
-        state.resolution_identities.len(),
-        resolution_keys.len(),
-        SEMANTIC_MAP_MAX_ENTRIES,
-    )?;
-    check(
-        "tool_calls",
-        state.tool_calls.len(),
-        tool_call_keys.len(),
-        SEMANTIC_MAP_MAX_ENTRIES,
-    )?;
-    check(
-        "tool_settlements",
-        state.tool_settlements.len(),
-        tool_settlement_keys.len(),
-        SEMANTIC_MAP_MAX_ENTRIES,
-    )?;
-    check(
-        "timer_firings",
-        state.retry.timer_firings.len(),
-        timer_firing_keys.len(),
-        SEMANTIC_MAP_MAX_ENTRIES,
-    )?;
-    check(
-        "child_preparations",
-        state.child_preparations.len(),
-        child_preparation_keys.len(),
-        SEMANTIC_MAP_MAX_ENTRIES,
-    )?;
-    check(
-        "budget_reservations",
-        state.budget_reservations.len(),
-        budget_reservation_keys.len(),
-        SEMANTIC_MAP_MAX_ENTRIES,
-    )?;
-    check(
-        "budget_charges",
-        state.budget_charges.len(),
-        budget_charge_keys.len(),
-        SEMANTIC_MAP_MAX_ENTRIES,
-    )
+
+    fn observe_tool_calls(&mut self, state: &KernelState, message: &Message) {
+        for block in message.content() {
+            if let ContentBlock::ToolCall(call) = block
+                && !state.tool_calls.contains_key(call.tool_call_id())
+            {
+                self.tool_call_keys.insert(*call.tool_call_id());
+            }
+        }
+    }
+
+    fn observe_settlement(
+        &mut self,
+        state: &KernelState,
+        kind: &EffectOutputKind,
+        effect_id: EffectId,
+        completion_id: Option<&'a str>,
+    ) {
+        if *kind == EffectOutputKind::ToolResult {
+            if !state.tool_settlements.contains_key(&effect_id) {
+                self.tool_settlement_keys.insert(effect_id);
+            }
+        } else if matches!(
+            kind,
+            EffectOutputKind::ContextContribution | EffectOutputKind::MiddlewareOutcome
+        ) && !state.extension_settlements.contains_key(&effect_id)
+        {
+            self.extension_keys.insert(effect_id);
+        } else if *kind == EffectOutputKind::ModelResponse
+            && !state.model_settlements.contains_key(&effect_id)
+        {
+            self.model_keys.insert(effect_id);
+        }
+        if let Some(id) = completion_id
+            && !state.completion_identities.contains_key(id)
+        {
+            self.completion_keys.insert(id);
+        }
+    }
+
+    fn check(&self, state: &KernelState) -> Result<(), KernelError> {
+        check(
+            "messages",
+            state.messages.len(),
+            self.messages,
+            SEMANTIC_ARRAY_MAX_ITEMS,
+        )?;
+        for (field, current, growth) in [
+            (
+                "stage_settlements",
+                state.stage_settlements.len(),
+                self.stage_keys.len(),
+            ),
+            (
+                "model_settlements",
+                state.model_settlements.len(),
+                self.model_keys.len(),
+            ),
+            (
+                "extension_settlements",
+                state.extension_settlements.len(),
+                self.extension_keys.len(),
+            ),
+            (
+                "completion_identities",
+                state.completion_identities.len(),
+                self.completion_keys.len(),
+            ),
+            (
+                "resolution_identities",
+                state.resolution_identities.len(),
+                self.resolution_keys.len(),
+            ),
+            (
+                "tool_calls",
+                state.tool_calls.len(),
+                self.tool_call_keys.len(),
+            ),
+            (
+                "tool_settlements",
+                state.tool_settlements.len(),
+                self.tool_settlement_keys.len(),
+            ),
+            (
+                "timer_firings",
+                state.retry.timer_firings.len(),
+                self.timer_firing_keys.len(),
+            ),
+            (
+                "child_preparations",
+                state.child_preparations.len(),
+                self.child_preparation_keys.len(),
+            ),
+            (
+                "budget_reservations",
+                state.budget_reservations.len(),
+                self.budget_reservation_keys.len(),
+            ),
+            (
+                "budget_charges",
+                state.budget_charges.len(),
+                self.budget_charge_keys.len(),
+            ),
+        ] {
+            check(field, current, growth, SEMANTIC_MAP_MAX_ENTRIES)?;
+        }
+        Ok(())
+    }
 }
 
 fn check(

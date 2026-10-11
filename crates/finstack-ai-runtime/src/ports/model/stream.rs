@@ -194,10 +194,6 @@ impl ModelStreamAssembler {
         })
     }
 
-    #[expect(
-        clippy::too_many_lines,
-        reason = "the stream state machine keeps all ordering and terminal transitions contiguous"
-    )]
     pub(crate) async fn assemble_incremental<F, Fut>(
         &self,
         mut stream: ModelEventStream,
@@ -207,184 +203,235 @@ impl ModelStreamAssembler {
         F: FnMut(ModelProgress) -> Fut,
         Fut: Future<Output = Result<(), ModelError>>,
     {
-        let mut item_count = 0_usize;
-        let mut byte_count = 0_usize;
-        let mut text = String::new();
-        let mut reasoning_bytes = 0_usize;
-        let mut tools = BTreeMap::<u32, PartialToolCall>::new();
-        let mut order = Vec::<u32>::new();
-        let mut usage: Option<Usage> = None;
-        let mut terminal: Option<ModelTerminal> = None;
-
+        let mut state = StreamState::new(self.limits);
         while let Some(item) = poll_fn(|cx| stream.as_mut().poll_next(cx)).await {
-            if terminal.is_some() {
-                return match item {
-                    Err(_) => Err(ModelError::validation(
-                        MODEL_STREAM_ERROR_AFTER_COMPLETION,
-                        "model stream returned an error after its terminal item",
-                    )),
-                    Ok(ModelStreamItem::Completed(_) | ModelStreamItem::Deferred(_)) => {
-                        Err(ModelError::validation(
-                            MODEL_STREAM_DUPLICATE_COMPLETION,
-                            "model stream returned more than one terminal item",
-                        ))
-                    }
-                    Ok(_) => Err(ModelError::validation(
-                        MODEL_STREAM_ITEM_AFTER_COMPLETION,
-                        "model stream returned an item after its terminal item",
-                    )),
-                };
+            if state.terminal.is_some() {
+                return Err(after_terminal_error(&item));
             }
-            let item = item?;
-            item_count = item_count.checked_add(1).ok_or_else(stream_limit_error)?;
-            if item_count > self.limits.max_items {
-                return Err(stream_limit_error());
-            }
-            match item {
-                ModelStreamItem::TextDelta(delta) => {
-                    validate_delta(&delta.text)?;
-                    add_bytes(&mut byte_count, delta.text.len(), self.limits.max_bytes)?;
-                    text.push_str(&delta.text);
-                    if text.len() > STREAM_TEXT_MAX_BYTES {
-                        return Err(stream_limit_error());
-                    }
-                    emit_progress(ModelProgress::Text(delta.text)).await?;
-                }
-                ModelStreamItem::ReasoningDelta(delta) => {
-                    validate_delta(&delta.text)?;
-                    add_bytes(&mut byte_count, delta.text.len(), self.limits.max_bytes)?;
-                    reasoning_bytes = reasoning_bytes
-                        .checked_add(delta.text.len())
-                        .ok_or_else(stream_limit_error)?;
-                    if reasoning_bytes > STREAM_REASONING_MAX_BYTES {
-                        return Err(stream_limit_error());
-                    }
-                    emit_progress(ModelProgress::Reasoning(delta.text)).await?;
-                }
-                ModelStreamItem::ToolCallDelta(delta) => {
-                    let is_new = !tools.contains_key(&delta.index);
-                    if is_new {
-                        if tools.len() >= self.limits.max_tool_calls {
-                            return Err(stream_limit_error());
-                        }
-                        order.push(delta.index);
-                    }
-                    let partial = tools.entry(delta.index).or_default();
-                    if let Some(name) = delta.name {
-                        validated_label(&name)?;
-                        add_bytes(&mut byte_count, name.len(), self.limits.max_bytes)?;
-                        if partial
-                            .name
-                            .as_ref()
-                            .is_some_and(|current| current != &name)
-                        {
-                            return Err(ModelError::validation(
-                                MODEL_TOOL_CALL_DELTA_INVALID,
-                                "model tool-call name mutated across fragments",
-                            ));
-                        }
-                        partial.name = Some(name);
-                    }
-                    add_bytes(
-                        &mut byte_count,
-                        delta.arguments_delta.len(),
-                        self.limits.max_bytes,
-                    )?;
-                    partial.arguments.push_str(&delta.arguments_delta);
-                    if let Some(provider_call_id) = delta.provider_call_id {
-                        validated_label(&provider_call_id)?;
-                        if partial
-                            .provider_call_id
-                            .as_ref()
-                            .is_some_and(|current| current != &provider_call_id)
-                        {
-                            return Err(ModelError::validation(
-                                MODEL_TOOL_CALL_DELTA_INVALID,
-                                "model tool-call provider id mutated across fragments",
-                            ));
-                        }
-                        partial.provider_call_id = Some(provider_call_id);
-                    }
-                }
-                ModelStreamItem::Usage(delta) => {
-                    validate_usage(&delta.usage, usage.as_ref())?;
-                    usage = Some(delta.usage);
-                }
-                ModelStreamItem::Heartbeat(metadata) => {
-                    add_bytes(
-                        &mut byte_count,
-                        metadata.as_bytes().len(),
-                        self.limits.max_bytes,
-                    )?;
-                    emit_progress(ModelProgress::Heartbeat(metadata)).await?;
-                }
-                ModelStreamItem::ProviderEvent(event) => {
-                    validated_label(&event.namespace)?;
-                    add_bytes(
-                        &mut byte_count,
-                        event.namespace.len(),
-                        self.limits.max_bytes,
-                    )?;
-                    add_bytes(
-                        &mut byte_count,
-                        event.payload.as_bytes().len(),
-                        self.limits.max_bytes,
-                    )?;
-                }
-                ModelStreamItem::Completed(response) => {
-                    let encoded_len = canonical_byte_len(&response).ok_or_else(|| {
-                        ModelError::validation(
-                            MODEL_RESPONSE_MISMATCH,
-                            "model response is not serializable",
-                        )
-                    })?;
-                    add_bytes(&mut byte_count, encoded_len, self.limits.max_bytes)?;
-                    terminal = Some(ModelTerminal::Completed(response));
-                }
-                ModelStreamItem::Deferred(deferral) => {
-                    let encoded_len = canonical_byte_len(&deferral).ok_or_else(|| {
-                        ModelError::validation(
-                            MODEL_RESPONSE_MISMATCH,
-                            "model deferral is not serializable",
-                        )
-                    })?;
-                    add_bytes(&mut byte_count, encoded_len, self.limits.max_bytes)?;
-                    terminal = Some(ModelTerminal::Deferred(deferral));
-                }
+            if let Some(progress) = state.accept(item?)? {
+                emit_progress(progress).await?;
             }
         }
+        state.finish()
+    }
+}
 
-        let terminal = terminal.ok_or_else(|| {
+struct StreamState {
+    limits: ModelStreamLimits,
+    item_count: usize,
+    byte_count: usize,
+    text: String,
+    reasoning_bytes: usize,
+    tools: BTreeMap<u32, PartialToolCall>,
+    order: Vec<u32>,
+    usage: Option<Usage>,
+    terminal: Option<ModelTerminal>,
+}
+
+impl StreamState {
+    fn new(limits: ModelStreamLimits) -> Self {
+        Self {
+            limits,
+            item_count: 0,
+            byte_count: 0,
+            text: String::new(),
+            reasoning_bytes: 0,
+            tools: BTreeMap::new(),
+            order: Vec::new(),
+            usage: None,
+            terminal: None,
+        }
+    }
+
+    fn accept(&mut self, item: ModelStreamItem) -> Result<Option<ModelProgress>, ModelError> {
+        self.item_count = self
+            .item_count
+            .checked_add(1)
+            .ok_or_else(stream_limit_error)?;
+        if self.item_count > self.limits.max_items {
+            return Err(stream_limit_error());
+        }
+        match item {
+            ModelStreamItem::TextDelta(delta) => self.accept_text(delta).map(Some),
+            ModelStreamItem::ReasoningDelta(delta) => self.accept_reasoning(delta).map(Some),
+            ModelStreamItem::ToolCallDelta(delta) => self.accept_tool_call(delta).map(|()| None),
+            ModelStreamItem::Usage(delta) => {
+                validate_usage(&delta.usage, self.usage.as_ref())?;
+                self.usage = Some(delta.usage);
+                Ok(None)
+            }
+            ModelStreamItem::Heartbeat(metadata) => {
+                self.add_bytes(metadata.as_bytes().len())?;
+                Ok(Some(ModelProgress::Heartbeat(metadata)))
+            }
+            ModelStreamItem::ProviderEvent(event) => {
+                validated_label(&event.namespace)?;
+                self.add_bytes(event.namespace.len())?;
+                self.add_bytes(event.payload.as_bytes().len())?;
+                Ok(None)
+            }
+            ModelStreamItem::Completed(response) => {
+                self.add_bytes(terminal_byte_len(
+                    &response,
+                    "model response is not serializable",
+                )?)?;
+                self.terminal = Some(ModelTerminal::Completed(response));
+                Ok(None)
+            }
+            ModelStreamItem::Deferred(deferral) => {
+                self.add_bytes(terminal_byte_len(
+                    &deferral,
+                    "model deferral is not serializable",
+                )?)?;
+                self.terminal = Some(ModelTerminal::Deferred(deferral));
+                Ok(None)
+            }
+        }
+    }
+
+    fn accept_text(&mut self, delta: TextDelta) -> Result<ModelProgress, ModelError> {
+        validate_delta(&delta.text)?;
+        self.add_bytes(delta.text.len())?;
+        self.text.push_str(&delta.text);
+        if self.text.len() > STREAM_TEXT_MAX_BYTES {
+            return Err(stream_limit_error());
+        }
+        Ok(ModelProgress::Text(delta.text))
+    }
+
+    fn accept_reasoning(&mut self, delta: ReasoningDelta) -> Result<ModelProgress, ModelError> {
+        validate_delta(&delta.text)?;
+        self.add_bytes(delta.text.len())?;
+        self.reasoning_bytes = self
+            .reasoning_bytes
+            .checked_add(delta.text.len())
+            .ok_or_else(stream_limit_error)?;
+        if self.reasoning_bytes > STREAM_REASONING_MAX_BYTES {
+            return Err(stream_limit_error());
+        }
+        Ok(ModelProgress::Reasoning(delta.text))
+    }
+
+    fn accept_tool_call(&mut self, delta: ToolCallDelta) -> Result<(), ModelError> {
+        if !self.tools.contains_key(&delta.index) {
+            if self.tools.len() >= self.limits.max_tool_calls {
+                return Err(stream_limit_error());
+            }
+            self.order.push(delta.index);
+        }
+        let partial = self.tools.entry(delta.index).or_default();
+        if let Some(name) = delta.name {
+            validated_label(&name)?;
+            add_bytes(&mut self.byte_count, name.len(), self.limits.max_bytes)?;
+            merge_fragment_label(
+                &mut partial.name,
+                name,
+                "model tool-call name mutated across fragments",
+            )?;
+        }
+        add_bytes(
+            &mut self.byte_count,
+            delta.arguments_delta.len(),
+            self.limits.max_bytes,
+        )?;
+        partial.arguments.push_str(&delta.arguments_delta);
+        if let Some(provider_call_id) = delta.provider_call_id {
+            validated_label(&provider_call_id)?;
+            merge_fragment_label(
+                &mut partial.provider_call_id,
+                provider_call_id,
+                "model tool-call provider id mutated across fragments",
+            )?;
+        }
+        Ok(())
+    }
+
+    fn add_bytes(&mut self, add: usize) -> Result<(), ModelError> {
+        add_bytes(&mut self.byte_count, add, self.limits.max_bytes)
+    }
+
+    fn finish(self) -> Result<ModelTerminal, ModelError> {
+        let terminal = self.terminal.ok_or_else(|| {
             ModelError::validation(
                 MODEL_STREAM_MISSING_COMPLETION,
                 "model stream ended without a terminal item",
             )
         })?;
         match &terminal {
-            ModelTerminal::Completed(response) => {
-                validate_completed_response(response, &text, &tools, &order, usage.as_ref())?;
-            }
-            ModelTerminal::Deferred(deferral) => {
-                if !tools.is_empty() {
-                    return Err(ModelError::validation(
-                        MODEL_TOOL_CALL_INCOMPLETE,
-                        "deferred model stream contains an unsettled tool call",
-                    ));
-                }
-                if deferral
-                    .next_poll_at
-                    .zip(deferral.expires_at)
-                    .is_some_and(|(next, expires)| next > expires)
-                {
-                    return Err(ModelError::validation(
-                        MODEL_RESPONSE_MISMATCH,
-                        "model deferral poll time exceeds its expiry",
-                    ));
-                }
-            }
+            ModelTerminal::Completed(response) => validate_completed_response(
+                response,
+                &self.text,
+                &self.tools,
+                &self.order,
+                self.usage.as_ref(),
+            )?,
+            ModelTerminal::Deferred(deferral) => validate_deferral(deferral, &self.tools)?,
         }
         Ok(terminal)
     }
+}
+
+fn after_terminal_error(item: &Result<ModelStreamItem, ModelError>) -> ModelError {
+    match item {
+        Err(_) => ModelError::validation(
+            MODEL_STREAM_ERROR_AFTER_COMPLETION,
+            "model stream returned an error after its terminal item",
+        ),
+        Ok(ModelStreamItem::Completed(_) | ModelStreamItem::Deferred(_)) => ModelError::validation(
+            MODEL_STREAM_DUPLICATE_COMPLETION,
+            "model stream returned more than one terminal item",
+        ),
+        Ok(_) => ModelError::validation(
+            MODEL_STREAM_ITEM_AFTER_COMPLETION,
+            "model stream returned an item after its terminal item",
+        ),
+    }
+}
+
+fn merge_fragment_label(
+    current: &mut Option<Arc<str>>,
+    value: Arc<str>,
+    mutated: &'static str,
+) -> Result<(), ModelError> {
+    if current.as_ref().is_some_and(|current| current != &value) {
+        return Err(ModelError::validation(
+            MODEL_TOOL_CALL_DELTA_INVALID,
+            mutated,
+        ));
+    }
+    *current = Some(value);
+    Ok(())
+}
+
+fn terminal_byte_len<T: Serialize>(
+    value: &T,
+    unserializable: &'static str,
+) -> Result<usize, ModelError> {
+    canonical_byte_len(value)
+        .ok_or_else(|| ModelError::validation(MODEL_RESPONSE_MISMATCH, unserializable))
+}
+
+fn validate_deferral(
+    deferral: &ModelDeferral,
+    tools: &BTreeMap<u32, PartialToolCall>,
+) -> Result<(), ModelError> {
+    if !tools.is_empty() {
+        return Err(ModelError::validation(
+            MODEL_TOOL_CALL_INCOMPLETE,
+            "deferred model stream contains an unsettled tool call",
+        ));
+    }
+    if deferral
+        .next_poll_at
+        .zip(deferral.expires_at)
+        .is_some_and(|(next, expires)| next > expires)
+    {
+        return Err(ModelError::validation(
+            MODEL_RESPONSE_MISMATCH,
+            "model deferral poll time exceeds its expiry",
+        ));
+    }
+    Ok(())
 }
 
 fn validate_completed_response(

@@ -3,10 +3,11 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use finstack_ai_kernel::{ContentBlock, MessageRole, ToolId};
+use finstack_ai_kernel::{ContentBlock, Message, MessageRole, ToolId};
 use finstack_ai_runtime::ports::middleware::{BeforeModelInput, BeforeToolBatchInput};
 use finstack_ai_runtime::ports::model::SideEffectClass;
 
+use crate::config::{JailbreakTriggers, WriteBudget};
 use crate::{
     JailbreakAction, TOOL_POLICY_JAILBREAK_TRIGGERED, TOOL_POLICY_WRITE_BUDGET_EXCEEDED,
     ToolPolicyConfig,
@@ -131,70 +132,84 @@ pub(crate) fn evaluate_before_model(
     let mut retain = narrow_universe(config, &universe, granted_roles, relation_depth);
 
     if let Some(budget) = &config.write_budget {
-        // One pre-pass over `input.request.tools` to classify write-class
-        // tools, instead of re-scanning `tools` once per call (O(calls×tools))
-        // and then again to rebuild the id set.
-        let mut write_model_names: BTreeSet<&str> = BTreeSet::new();
-        let mut write_tool_ids: BTreeSet<ToolId> = BTreeSet::new();
-        for tool in input.request.tools.iter() {
-            if tool.side_effect != SideEffectClass::ReadOnly {
-                write_model_names.insert(tool.model_name.as_ref());
-                write_tool_ids.insert(tool.id.clone());
-            }
-        }
+        apply_draft_write_budget(budget, input, &mut retain);
+    }
 
-        let write_call_count = input
+    if let Some(jailbreak) = &config.jailbreak
+        && input
             .request
             .messages
             .iter()
-            .filter(|message| message.role() == MessageRole::Assistant)
-            .flat_map(|message| message.content().iter())
-            .filter_map(|block| match block {
-                ContentBlock::ToolCall(call) => Some(call.tool_name()),
-                _ => None,
-            })
-            .filter(|tool_name| write_model_names.contains(tool_name))
-            .count();
-        let write_call_count = u64::try_from(write_call_count).unwrap_or(u64::MAX);
-        if write_call_count >= u64::from(budget.max_write_calls) {
-            retain.retain(|id| !write_tool_ids.contains(id));
-        }
-    }
-
-    if let Some(jailbreak) = &config.jailbreak {
-        'scan: for message in input.request.messages.iter() {
-            let triggered = match message.role() {
-                MessageRole::User => message.content().iter().any(|block| match block {
-                    ContentBlock::Text(text) => jailbreak.matches(text.text()),
-                    _ => false,
-                }),
-                MessageRole::Tool => message.content().iter().any(|block| {
-                    match block {
-                    ContentBlock::ToolResult(result) => result.content().iter().any(|block| {
-                        matches!(block, ContentBlock::Text(text) if jailbreak.matches(text.text()))
-                    }),
-                    _ => false,
-                }
-                }),
-                MessageRole::System | MessageRole::Developer | MessageRole::Assistant => false,
-            };
-            if triggered {
-                match &jailbreak.action {
-                    JailbreakAction::Fail => {
-                        return PolicyVerdict::Fail {
-                            reason: TOOL_POLICY_JAILBREAK_TRIGGERED,
-                        };
-                    }
-                    JailbreakAction::RestrictTo(safe) => {
-                        retain = retain.intersection(safe).cloned().collect();
-                    }
-                }
-                break 'scan;
+            .any(|message| message_triggers_jailbreak(jailbreak, message))
+    {
+        match &jailbreak.action {
+            JailbreakAction::Fail => {
+                return PolicyVerdict::Fail {
+                    reason: TOOL_POLICY_JAILBREAK_TRIGGERED,
+                };
+            }
+            JailbreakAction::RestrictTo(safe) => {
+                retain = retain.intersection(safe).cloned().collect();
             }
         }
     }
 
     PolicyVerdict::narrowed(&universe, retain)
+}
+
+/// Drop every write-class tool from `retain` once the draft's assistant
+/// history already holds `max_write_calls` calls to visible write-class tools.
+fn apply_draft_write_budget(
+    budget: &WriteBudget,
+    input: &BeforeModelInput,
+    retain: &mut BTreeSet<ToolId>,
+) {
+    // One pre-pass over `input.request.tools` to classify write-class
+    // tools, instead of re-scanning `tools` once per call (O(calls×tools))
+    // and then again to rebuild the id set.
+    let mut write_model_names: BTreeSet<&str> = BTreeSet::new();
+    let mut write_tool_ids: BTreeSet<ToolId> = BTreeSet::new();
+    for tool in input.request.tools.iter() {
+        if tool.side_effect != SideEffectClass::ReadOnly {
+            write_model_names.insert(tool.model_name.as_ref());
+            write_tool_ids.insert(tool.id.clone());
+        }
+    }
+
+    let write_call_count = input
+        .request
+        .messages
+        .iter()
+        .filter(|message| message.role() == MessageRole::Assistant)
+        .flat_map(|message| message.content().iter())
+        .filter_map(|block| match block {
+            ContentBlock::ToolCall(call) => Some(call.tool_name()),
+            _ => None,
+        })
+        .filter(|tool_name| write_model_names.contains(tool_name))
+        .count();
+    let write_call_count = u64::try_from(write_call_count).unwrap_or(u64::MAX);
+    if write_call_count >= u64::from(budget.max_write_calls) {
+        retain.retain(|id| !write_tool_ids.contains(id));
+    }
+}
+
+/// User text and tool-result text are scanned; assistant, system, and
+/// developer text is trusted.
+fn message_triggers_jailbreak(jailbreak: &JailbreakTriggers, message: &Message) -> bool {
+    match message.role() {
+        MessageRole::User => message.content().iter().any(|block| match block {
+            ContentBlock::Text(text) => jailbreak.matches(text.text()),
+            _ => false,
+        }),
+        MessageRole::Tool => message.content().iter().any(|block| match block {
+            ContentBlock::ToolResult(result) => result.content().iter().any(
+                |block| matches!(block, ContentBlock::Text(text) if jailbreak.matches(text.text())),
+            ),
+            _ => false,
+        }),
+        MessageRole::System | MessageRole::Developer | MessageRole::Assistant => false,
+    }
 }
 
 /// Evaluate the `before_tool_batch` defense-in-depth policy.

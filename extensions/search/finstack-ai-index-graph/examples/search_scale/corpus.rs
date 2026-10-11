@@ -161,7 +161,7 @@ pub async fn journal(
     ))?);
     let mut timings = BTreeMap::new();
     let id: SessionId = if reuse {
-        serde_json::from_slice(&std::fs::read(root.join("journal-session.json"))?)?
+        serde_json::from_slice(&tokio::fs::read(root.join("journal-session.json")).await?)?
     } else {
         let start = Instant::now();
         let session = finstack_ai::Session::create(store.clone(), "search-benchmark").await?;
@@ -174,7 +174,7 @@ pub async fn journal(
             .await?;
         }
         let id = session.session_id();
-        std::fs::write(root.join("journal-session.json"), serde_json::to_vec(&id)?)?;
+        tokio::fs::write(root.join("journal-session.json"), serde_json::to_vec(&id)?).await?;
         timings.insert("journal_fixture_ms", start.elapsed().as_secs_f64() * 1000.0);
         id
     };

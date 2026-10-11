@@ -1,6 +1,6 @@
 //! Bounded execution with reservation-before-dispatch and explicit cancellation.
 use crate::{
-    AttemptRecord, AttemptReservation, AttemptStatus, EVAL_ATTEMPT_UNRESOLVED,
+    AttemptRecord, AttemptReservation, AttemptStatus, Cell, EVAL_ATTEMPT_UNRESOLVED,
     EVAL_SUBJECT_UNBOUND, EvalError, EvalSpec, EvalStore, ExecutionIdentity, Reconciliation,
     StoreSnapshot, SubjectBinding,
 };
@@ -34,6 +34,32 @@ struct Inner {
     store: crate::async_store::AsyncEvalStore,
     subjects: BTreeMap<Arc<str>, SubjectBinding>,
     cancellation: crate::execution::Cancellation,
+}
+type AttemptOutcome = (Cell, Result<AttemptRecord, EvalError>);
+/// Admission stop reason, carrying the store failure that caused it when there is one.
+struct Halt {
+    reason: Arc<str>,
+    store_error: Option<EvalError>,
+}
+impl Halt {
+    fn reason(reason: &str) -> Self {
+        Self {
+            reason: Arc::from(reason),
+            store_error: None,
+        }
+    }
+    fn store(error: EvalError) -> Self {
+        Self {
+            reason: Arc::from("eval_store_unavailable"),
+            store_error: Some(error),
+        }
+    }
+    fn apply(self, stop: &mut Option<Arc<str>>, store_error: &mut Option<EvalError>) {
+        *stop = Some(self.reason);
+        if let Some(error) = self.store_error {
+            *store_error = Some(error);
+        }
+    }
 }
 impl EvalRunner {
     /// Validate bounded data and subject identities. No subject executes here.
@@ -175,83 +201,22 @@ impl Inner {
         let mut active = JoinSet::new();
         let mut store_error = None;
         loop {
-            while stop.is_none()
-                && active.len() < self.spec.limits.max_concurrency as usize
-                && !cells.is_empty()
-            {
-                if self.cancellation.is_cancelled() {
-                    stop = Some(Arc::from("eval_cancelled"));
-                    break;
-                }
-                let snapshot = match self.store.snapshot().await {
-                    Ok(snapshot) => snapshot,
-                    Err(error) => {
-                        store_error = Some(error);
-                        stop = Some(Arc::from("eval_store_unavailable"));
-                        break;
-                    }
-                };
-                let Some(cell) = cells.pop_front() else {
-                    break;
-                };
-                let reservations = snapshot.reservations.get(&cell.id);
-                let prior = snapshot
-                    .attempts
-                    .get(&cell.id)
-                    .and_then(|records| records.last());
-                if prior.is_some_and(|record| record.status.is_final()) {
-                    continue;
-                }
-                if prior.is_some_and(|record| record.status == AttemptStatus::Indeterminate) {
-                    stop = Some(Arc::from(EVAL_ATTEMPT_UNRESOLVED));
-                    break;
-                }
-                let sequence = reservations
-                    .and_then(|items| items.last())
-                    .map_or(1, |item| item.sequence.saturating_add(1));
-                if sequence > self.spec.limits.max_replacement_attempts + 1 {
-                    continue;
-                }
-                if let Err(error) = crate::budget::admission_budget(&self.spec, &snapshot) {
-                    stop = Some(Arc::from(error.code()));
-                    break;
-                }
-                let reservation = match self.store.reserve(&cell, sequence, now_ms()).await {
-                    Ok(reservation) => reservation,
-                    Err(error) => {
-                        store_error = Some(error);
-                        stop = Some(Arc::from("eval_store_unavailable"));
-                        break;
-                    }
-                };
-                let owner = Arc::clone(&self);
-                active.spawn(async move {
-                    let cell = reservation.cell.clone();
-                    (cell, Box::pin(owner.attempt(reservation)).await)
-                });
+            let halt = if stop.is_none() {
+                self.admit(&mut cells, &mut active).await
+            } else {
+                None
+            };
+            if let Some(halt) = halt {
+                halt.apply(&mut stop, &mut store_error);
             }
             if active.is_empty() {
                 break;
             }
-            match active.join_next().await {
-                Some(Ok((cell, Ok(record)))) => {
-                    if record.status == AttemptStatus::Indeterminate {
-                        stop = Some(Arc::from(EVAL_ATTEMPT_UNRESOLVED));
-                    }
-                    if record.status == AttemptStatus::InfraFailed
-                        && record.sequence <= self.spec.limits.max_replacement_attempts
-                    {
-                        cells.push_back(cell);
-                    }
-                }
-                Some(Ok((_, Err(error)))) => {
-                    store_error = Some(error);
-                    stop = Some(Arc::from("eval_store_unavailable"));
-                }
-                Some(Err(_)) => {
-                    stop = Some(Arc::from(EVAL_ATTEMPT_UNRESOLVED));
-                }
-                None => break,
+            let Some(joined) = active.join_next().await else {
+                break;
+            };
+            if let Some(halt) = self.settle_joined(joined, &mut cells) {
+                halt.apply(&mut stop, &mut store_error);
             }
         }
         if let Some(error) = store_error {
@@ -261,6 +226,71 @@ impl Inner {
             snapshot: self.store.snapshot().await?,
             stop_reason: stop,
         })
+    }
+    async fn admit(
+        self: &Arc<Self>,
+        cells: &mut VecDeque<Cell>,
+        active: &mut JoinSet<AttemptOutcome>,
+    ) -> Option<Halt> {
+        while active.len() < self.spec.limits.max_concurrency as usize && !cells.is_empty() {
+            if self.cancellation.is_cancelled() {
+                return Some(Halt::reason("eval_cancelled"));
+            }
+            let snapshot = match self.store.snapshot().await {
+                Ok(snapshot) => snapshot,
+                Err(error) => return Some(Halt::store(error)),
+            };
+            let cell = cells.pop_front()?;
+            let reservations = snapshot.reservations.get(&cell.id);
+            let prior = snapshot
+                .attempts
+                .get(&cell.id)
+                .and_then(|records| records.last());
+            if prior.is_some_and(|record| record.status.is_final()) {
+                continue;
+            }
+            if prior.is_some_and(|record| record.status == AttemptStatus::Indeterminate) {
+                return Some(Halt::reason(EVAL_ATTEMPT_UNRESOLVED));
+            }
+            let sequence = reservations
+                .and_then(|items| items.last())
+                .map_or(1, |item| item.sequence.saturating_add(1));
+            if sequence > self.spec.limits.max_replacement_attempts + 1 {
+                continue;
+            }
+            if let Err(error) = crate::budget::admission_budget(&self.spec, &snapshot) {
+                return Some(Halt::reason(error.code()));
+            }
+            let reservation = match self.store.reserve(&cell, sequence, now_ms()).await {
+                Ok(reservation) => reservation,
+                Err(error) => return Some(Halt::store(error)),
+            };
+            let owner = Arc::clone(self);
+            active.spawn(async move {
+                let cell = reservation.cell.clone();
+                (cell, Box::pin(owner.attempt(reservation)).await)
+            });
+        }
+        None
+    }
+    fn settle_joined(
+        &self,
+        joined: Result<AttemptOutcome, tokio::task::JoinError>,
+        cells: &mut VecDeque<Cell>,
+    ) -> Option<Halt> {
+        match joined {
+            Ok((cell, Ok(record))) => {
+                if record.status == AttemptStatus::InfraFailed
+                    && record.sequence <= self.spec.limits.max_replacement_attempts
+                {
+                    cells.push_back(cell);
+                }
+                (record.status == AttemptStatus::Indeterminate)
+                    .then(|| Halt::reason(EVAL_ATTEMPT_UNRESOLVED))
+            }
+            Ok((_, Err(error))) => Some(Halt::store(error)),
+            Err(_) => Some(Halt::reason(EVAL_ATTEMPT_UNRESOLVED)),
+        }
     }
     async fn preflight_and_reconcile(&self) -> Result<Option<Arc<str>>, EvalError> {
         self.store.freeze(&self.spec).await?;

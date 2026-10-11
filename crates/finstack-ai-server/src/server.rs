@@ -156,7 +156,7 @@ impl Server {
             }
             #[cfg(unix)]
             ListenAddr::Unix { path } => {
-                let _ = std::fs::remove_file(path);
+                let _ = tokio::fs::remove_file(path).await;
                 let listener = UnixListener::bind(path)?;
                 let (stream, _) = listener.accept().await?;
                 Box::pin(self.serve(stream, TransportKind::Unix)).await

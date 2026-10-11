@@ -10,7 +10,9 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use crate::exec::InputContainer;
-use crate::spec::{AudioMode, ClipSpec, CompositionSpec, Container, SubtitleMode, TransitionKind};
+use crate::spec::{
+    AudioMode, ClipSpec, CompositionSpec, Container, SubtitleMode, TransitionKind, TransitionSpec,
+};
 
 /// Effective duration `ffmpeg` is given for a `cut` inside an `xfade` chain.
 const CUT_XFADE_SECONDS: f64 = 0.01;
@@ -192,6 +194,177 @@ fn audio_lane(idx: usize, clip: &ClipSpec, input: &ClipInput) -> String {
     lane
 }
 
+/// Leading global flags plus one `-f <demuxer> -i <clip>` pair per clip,
+/// then the optional music and muxed-subtitle inputs, in input-index order.
+fn input_args(
+    clips: &[ClipInput],
+    audio: Option<&Path>,
+    muxed_subtitles: Option<&Path>,
+) -> Vec<OsString> {
+    let mut args: Vec<OsString> = ["-nostdin", "-y", "-hide_banner", "-loglevel", "error"]
+        .into_iter()
+        .map(OsString::from)
+        .collect();
+    for clip in clips {
+        args.push(OsString::from("-f"));
+        args.push(OsString::from(clip.container.demuxer()));
+        args.push(OsString::from("-i"));
+        args.push(clip.path.as_os_str().to_os_string());
+    }
+    for path in [audio, muxed_subtitles].into_iter().flatten() {
+        args.push(OsString::from("-i"));
+        args.push(path.as_os_str().to_os_string());
+    }
+    args
+}
+
+/// Join every `[vi][ai]` lane into `[vc][ac]`: an `xfade`/`acrossfade` chain
+/// when any transition is visible, otherwise a single `concat`.
+fn join_clauses(
+    transitions: Option<&[TransitionSpec]>,
+    durations: &[f64],
+    clip_count: usize,
+) -> Vec<String> {
+    match transitions {
+        Some(transitions)
+            if transitions
+                .iter()
+                .any(|t| !matches!(t.kind, TransitionKind::Cut)) =>
+        {
+            xfade_chain(transitions, durations)
+        }
+        _ => {
+            let mut concat_inputs = String::new();
+            for idx in 0..clip_count {
+                let _ = write!(concat_inputs, "[v{idx}][a{idx}]");
+            }
+            vec![format!(
+                "{concat_inputs}concat=n={clip_count}:v=1:a=1[vc][ac]"
+            )]
+        }
+    }
+}
+
+/// Fold the clip lanes pairwise through `xfade`/`acrossfade`, carrying the
+/// running output offset so each join starts `duration` before the end.
+fn xfade_chain(transitions: &[TransitionSpec], durations: &[f64]) -> Vec<String> {
+    let mut parts = Vec::with_capacity(transitions.len() * 2);
+    let mut offset = durations.first().copied().unwrap_or(0.0);
+    let mut prev_v = "v0".to_string();
+    let mut prev_a = "a0".to_string();
+    let last_idx = transitions.len().saturating_sub(1);
+    for (k, transition) in transitions.iter().enumerate() {
+        let duration = transition_duration(transition.kind, transition.duration_s);
+        let name = if matches!(transition.kind, TransitionKind::FadeToBlack) {
+            "fadeblack"
+        } else {
+            "fade"
+        };
+        let join_offset = offset - duration;
+        let (next_v, next_a) = if k == last_idx {
+            ("vc".to_string(), "ac".to_string())
+        } else {
+            (format!("vx{k}"), format!("ax{k}"))
+        };
+        let next_clip_idx = k + 1;
+        let d = fmt_f64(duration);
+        let o = fmt_f64(join_offset);
+        parts.push(format!(
+            "[{prev_v}][v{next_clip_idx}]xfade=transition={name}:duration={d}:offset={o}[{next_v}]"
+        ));
+        parts.push(format!(
+            "[{prev_a}][a{next_clip_idx}]acrossfade=d={d}[{next_a}]"
+        ));
+        offset += durations.get(next_clip_idx).copied().unwrap_or(0.0) - duration;
+        prev_v = next_v;
+        prev_a = next_a;
+    }
+    parts
+}
+
+/// Append the burn-in `subtitles` clause when the spec asks for one and
+/// return the label of the final video stream.
+fn burn_in_subtitles(
+    spec: &CompositionSpec,
+    subtitles: Option<&Path>,
+    parts: &mut Vec<String>,
+) -> Result<&'static str, &'static str> {
+    let Some(subs) = spec
+        .subtitles
+        .as_ref()
+        .filter(|subs| matches!(subs.mode, SubtitleMode::BurnIn))
+    else {
+        return Ok("vc");
+    };
+    let subs_path = subtitles.ok_or("subtitles path is required by the spec")?;
+    let escaped = escape_filter_path(subs_path);
+    let mut clause = format!("[vc]subtitles={escaped}");
+    let style_parts: Vec<String> = subs
+        .style
+        .iter()
+        .flat_map(|style| {
+            [
+                style.font_size.map(|v| format!("FontSize={v}")),
+                style.margin_v.map(|v| format!("MarginV={v}")),
+            ]
+        })
+        .flatten()
+        .collect();
+    if !style_parts.is_empty() {
+        let _ = write!(clause, ":force_style='{}'", style_parts.join(","));
+    }
+    clause.push_str("[vs]");
+    parts.push(clause);
+    Ok("vs")
+}
+
+/// Append the music input's gain clause, plus an `amix` for
+/// [`AudioMode::Mix`], and return the label of the final audio stream.
+fn music_track(spec: &CompositionSpec, audio_idx: usize, parts: &mut Vec<String>) -> &'static str {
+    let Some(audio_spec) = &spec.audio else {
+        return "ac";
+    };
+    let mut music_clause = format!("[{audio_idx}:a]");
+    match audio_spec.gain_db {
+        Some(gain) => {
+            let _ = write!(music_clause, "volume={}dB", fmt_f64(gain));
+        }
+        None => music_clause.push_str("anull"),
+    }
+    music_clause.push_str("[music]");
+    parts.push(music_clause);
+    match audio_spec.mode {
+        AudioMode::Replace => "music",
+        AudioMode::Mix => {
+            parts.push("[ac][music]amix=inputs=2:duration=first[am]".to_string());
+            "am"
+        }
+    }
+}
+
+/// Encoder flags for the output container.
+fn encoder_args(container: Container, mux_subtitles: bool) -> Vec<&'static str> {
+    match container {
+        Container::Mp4 => {
+            let mut flags = vec![
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+                "-c:a",
+                "aac",
+                "-movflags",
+                "+faststart",
+            ];
+            if mux_subtitles {
+                flags.extend(["-c:s", "mov_text"]);
+            }
+            flags
+        }
+        Container::Webm => vec!["-c:v", "libvpx-vp9", "-c:a", "libopus"],
+    }
+}
+
 /// Build the ordered `ffmpeg` argument vector for one validated composition.
 ///
 /// Every clip `-i` is preceded by `-f <demuxer>` from its sniffed container,
@@ -208,7 +381,6 @@ fn audio_lane(idx: usize, clip: &ClipSpec, input: &ClipInput) -> String {
 /// transition is longer than either clip it joins or would start at a
 /// negative offset, or a required side input path (`audio`/`subtitles`) is
 /// missing for a spec that declares one.
-#[allow(clippy::too_many_lines)]
 pub(crate) fn build_ffmpeg_args(
     spec: &CompositionSpec,
     clips: &[ClipInput],
@@ -237,136 +409,25 @@ pub(crate) fn build_ffmpeg_args(
         return Err("audio path is required by the spec");
     }
     let format = VideoFormat::resolve(spec, first_clip);
-
-    let mut args: Vec<OsString> = ["-nostdin", "-y", "-hide_banner", "-loglevel", "error"]
-        .into_iter()
-        .map(OsString::from)
-        .collect();
-
-    for clip in clips {
-        args.push(OsString::from("-f"));
-        args.push(OsString::from(clip.container.demuxer()));
-        args.push(OsString::from("-i"));
-        args.push(clip.path.as_os_str().to_os_string());
-    }
-    if let Some(audio_path) = audio {
-        args.push(OsString::from("-i"));
-        args.push(audio_path.as_os_str().to_os_string());
-    }
     let mux_subtitles = matches!(
         spec.subtitles.as_ref().map(|s| s.mode),
         Some(SubtitleMode::Mux)
     );
     let subtitles_input_idx = clips.len() + usize::from(audio.is_some());
-    if mux_subtitles && let Some(subs_path) = subtitles {
-        args.push(OsString::from("-i"));
-        args.push(subs_path.as_os_str().to_os_string());
-    }
+    let mut args = input_args(clips, audio, subtitles.filter(|_| mux_subtitles));
 
     let mut parts: Vec<String> = Vec::new();
     for (idx, (clip_spec, input)) in spec.clips.iter().zip(clips).enumerate() {
         parts.push(video_lane(idx, clip_spec, &format));
         parts.push(audio_lane(idx, clip_spec, input));
     }
-
-    match &spec.transitions {
-        Some(transitions)
-            if !transitions.is_empty()
-                && transitions
-                    .iter()
-                    .any(|t| !matches!(t.kind, TransitionKind::Cut)) =>
-        {
-            let mut offset = durations.first().copied().unwrap_or(0.0);
-            let mut prev_v = "v0".to_string();
-            let mut prev_a = "a0".to_string();
-            let last_idx = transitions.len().saturating_sub(1);
-            for (k, transition) in transitions.iter().enumerate() {
-                let duration = transition_duration(transition.kind, transition.duration_s);
-                let name = if matches!(transition.kind, TransitionKind::FadeToBlack) {
-                    "fadeblack"
-                } else {
-                    "fade"
-                };
-                let join_offset = offset - duration;
-                let is_last = k == last_idx;
-                let next_v = if is_last {
-                    "vc".to_string()
-                } else {
-                    format!("vx{k}")
-                };
-                let next_a = if is_last {
-                    "ac".to_string()
-                } else {
-                    format!("ax{k}")
-                };
-                let next_clip_idx = k + 1;
-                let d = fmt_f64(duration);
-                let o = fmt_f64(join_offset);
-                parts.push(format!(
-                    "[{prev_v}][v{next_clip_idx}]xfade=transition={name}:duration={d}:offset={o}[{next_v}]"
-                ));
-                parts.push(format!(
-                    "[{prev_a}][a{next_clip_idx}]acrossfade=d={d}[{next_a}]"
-                ));
-                offset += durations.get(next_clip_idx).copied().unwrap_or(0.0) - duration;
-                prev_v = next_v;
-                prev_a = next_a;
-            }
-        }
-        _ => {
-            let mut concat_inputs = String::new();
-            for idx in 0..clips.len() {
-                let _ = write!(concat_inputs, "[v{idx}][a{idx}]");
-            }
-            let n = clips.len();
-            parts.push(format!("{concat_inputs}concat=n={n}:v=1:a=1[vc][ac]"));
-        }
-    }
-
-    let mut video_label = "vc".to_string();
-    if let Some(subs) = &spec.subtitles
-        && matches!(subs.mode, SubtitleMode::BurnIn)
-    {
-        let subs_path = subtitles.ok_or("subtitles path is required by the spec")?;
-        let escaped = escape_filter_path(subs_path);
-        let mut clause = format!("[vc]subtitles={escaped}");
-        let mut style_parts = Vec::new();
-        if let Some(style) = &subs.style {
-            if let Some(font_size) = style.font_size {
-                style_parts.push(format!("FontSize={font_size}"));
-            }
-            if let Some(margin_v) = style.margin_v {
-                style_parts.push(format!("MarginV={margin_v}"));
-            }
-        }
-        if !style_parts.is_empty() {
-            let _ = write!(clause, ":force_style='{}'", style_parts.join(","));
-        }
-        clause.push_str("[vs]");
-        parts.push(clause);
-        video_label = "vs".to_string();
-    }
-
-    let mut audio_label = "ac".to_string();
-    if let Some(audio_spec) = &spec.audio {
-        let audio_idx = clips.len();
-        let mut music_clause = format!("[{audio_idx}:a]");
-        match audio_spec.gain_db {
-            Some(gain) => {
-                let _ = write!(music_clause, "volume={}dB", fmt_f64(gain));
-            }
-            None => music_clause.push_str("anull"),
-        }
-        music_clause.push_str("[music]");
-        parts.push(music_clause);
-        match audio_spec.mode {
-            AudioMode::Replace => audio_label = "music".to_string(),
-            AudioMode::Mix => {
-                parts.push("[ac][music]amix=inputs=2:duration=first[am]".to_string());
-                audio_label = "am".to_string();
-            }
-        }
-    }
+    parts.extend(join_clauses(
+        spec.transitions.as_deref(),
+        &durations,
+        clips.len(),
+    ));
+    let video_label = burn_in_subtitles(spec, subtitles, &mut parts)?;
+    let audio_label = music_track(spec, clips.len(), &mut parts);
 
     args.push(OsString::from("-filter_complex"));
     args.push(OsString::from(parts.join(";")));
@@ -379,32 +440,11 @@ pub(crate) fn build_ffmpeg_args(
         args.push(OsString::from("-map"));
         args.push(OsString::from(format!("{subtitles_input_idx}:s")));
     }
-
-    match spec.output.container {
-        Container::Mp4 => {
-            for flag in [
-                "-c:v",
-                "libx264",
-                "-pix_fmt",
-                "yuv420p",
-                "-c:a",
-                "aac",
-                "-movflags",
-                "+faststart",
-            ] {
-                args.push(OsString::from(flag));
-            }
-            if mux_subtitles {
-                args.push(OsString::from("-c:s"));
-                args.push(OsString::from("mov_text"));
-            }
-        }
-        Container::Webm => {
-            for flag in ["-c:v", "libvpx-vp9", "-c:a", "libopus"] {
-                args.push(OsString::from(flag));
-            }
-        }
-    }
+    args.extend(
+        encoder_args(spec.output.container, mux_subtitles)
+            .into_iter()
+            .map(OsString::from),
+    );
 
     if matches!(
         spec.audio.as_ref().map(|a| a.mode),

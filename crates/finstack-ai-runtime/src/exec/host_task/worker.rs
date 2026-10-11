@@ -377,7 +377,6 @@ enum ParallelToolPoll {
 
 #[expect(
     clippy::too_many_arguments,
-    clippy::too_many_lines,
     reason = "parallel host execution keeps its single-owner settlement dependencies explicit"
 )]
 async fn settle_parallel_tools<C, R>(
@@ -412,105 +411,27 @@ where
         .min(config.result_capacity)
         .max(1);
     let completions = HostToolCompletions::new();
-    let mut running_by_tool = BTreeMap::<finstack_ai_kernel::ToolId, usize>::new();
-    let mut tasks = Vec::<crate::driver::host_driver::HostTaskHandle>::new();
-    let mut running = 0_usize;
+    let mut slots = ParallelToolSlots::new(concurrency);
     let mut intake_open = true;
 
-    while !pending.is_empty() || running > 0 {
-        while running < concurrency {
-            let ready = pending.iter().position(|(_, _, resolved)| {
-                running_by_tool.get(&resolved.spec.id).copied().unwrap_or(0)
-                    < resolved.policy.max_concurrency
-            });
-            let Some(index) = ready else { break };
-            let Some((seed, context, resolved)) = pending.remove(index) else {
-                break;
-            };
-            let tool_id = resolved.spec.id.clone();
-            *running_by_tool.entry(tool_id.clone()).or_default() += 1;
-            running += 1;
-            let completions = Arc::clone(&completions);
-            let task_active = Arc::clone(active);
-            let cancellation = context.run.cancellation.clone();
-            let call = seed.call.clone();
-            let effect_id = context.run.effect_id;
-            let task = crate::driver::host_driver::spawn(Box::pin(async move {
-                let (progress, result) =
-                    drive_tool_cancellable(resolved, context, call, assembler, cancellation).await;
-                if let Ok(mut values) = task_active.lock() {
-                    values.remove(&effect_id);
-                }
-                completions.push(HostToolCompletion {
-                    tool_id,
-                    progress,
-                    result: ToolDriverResult { seed, result },
-                });
-            }));
-            let Ok(task) = task else {
-                if let Ok(mut values) = active.lock() {
-                    values.remove(&effect_id);
-                }
-                abort_host_tasks(&tasks).await;
-                return Err(RunHandleError::InvalidConfiguration);
-            };
-            tasks.push(task);
-        }
-
-        while let Some(completion) = completions.pop()? {
-            running = running.saturating_sub(1);
-            if let Some(count) = running_by_tool.get_mut(&completion.tool_id) {
-                *count = count.saturating_sub(1);
-                if *count == 0 {
-                    running_by_tool.remove(&completion.tool_id);
-                }
-            }
-            if shared.shutting_down.load(Ordering::Acquire) {
-                continue;
-            }
-            let effect_id = completion.result.seed.requested.effect_id();
-            for item in completion.progress {
-                process_tool_progress(coordinator, effect_id, item, sources).await?;
-            }
-            let parked = completion.result.seed.clone();
-            match process_tool_result(coordinator, completion.result, sources).await? {
-                ToolResultDisposition::ParkedForInteraction => *parked_tool = Some(parked),
-                ToolResultDisposition::Settled => {}
-            }
-        }
-        if pending.is_empty() && running == 0 {
+    while !pending.is_empty() || slots.running > 0 {
+        spawn_ready_tools(&mut slots, &mut pending, &completions, active, assembler).await?;
+        settle_tool_completions(
+            coordinator,
+            shared,
+            &completions,
+            &mut slots,
+            sources,
+            parked_tool,
+        )
+        .await?;
+        if pending.is_empty() && slots.running == 0 {
             break;
         }
         if shared.shutting_down.load(Ordering::Acquire) {
-            for cancellation in active
-                .lock()
-                .map_err(|_| RunHandleError::IntakeClosed)?
-                .values()
-            {
-                cancellation.cancel();
-            }
+            cancel_active_tools(active)?;
         }
-
-        let mut notified = std::pin::pin!(completions.available.notified());
-        let mut recv = std::pin::pin!(shared.control.next(intake.recv()));
-        let outcome = std::future::poll_fn(|cx| {
-            if completions
-                .values
-                .lock()
-                .is_ok_and(|values| !values.is_empty())
-            {
-                return Poll::Ready(ParallelToolPoll::Completed);
-            }
-            if intake_open && let Poll::Ready(command) = recv.as_mut().poll(cx) {
-                return Poll::Ready(ParallelToolPoll::Command(command.map(Box::new)));
-            }
-            if notified.as_mut().poll(cx).is_ready() {
-                return Poll::Ready(ParallelToolPoll::Completed);
-            }
-            Poll::Pending
-        })
-        .await;
-        match outcome {
+        match next_parallel_tool_event(&completions, shared, intake, intake_open).await {
             ParallelToolPoll::Completed => {}
             ParallelToolPoll::Command(None) => intake_open = false,
             ParallelToolPoll::Command(Some(command)) => {
@@ -525,7 +446,7 @@ where
                 )
                 .await
                 {
-                    abort_host_tasks(&tasks).await;
+                    abort_host_tasks(&slots.tasks).await;
                     return Err(RunHandleError::Faulted {
                         code: "host_run_faulted_during_effect",
                     });
@@ -533,10 +454,179 @@ where
             }
         }
     }
-    for task in &tasks {
+    for task in &slots.tasks {
         task.completed().await;
     }
     Ok(())
+}
+
+struct ParallelToolSlots {
+    concurrency: usize,
+    running: usize,
+    running_by_tool: BTreeMap<finstack_ai_kernel::ToolId, usize>,
+    tasks: Vec<crate::driver::host_driver::HostTaskHandle>,
+}
+
+impl ParallelToolSlots {
+    fn new(concurrency: usize) -> Self {
+        Self {
+            concurrency,
+            running: 0,
+            running_by_tool: BTreeMap::new(),
+            tasks: Vec::new(),
+        }
+    }
+
+    fn next_ready(&self, pending: &VecDeque<PendingHostTool>) -> Option<usize> {
+        if self.running >= self.concurrency {
+            return None;
+        }
+        pending.iter().position(|(_, _, resolved)| {
+            self.running_by_tool
+                .get(&resolved.spec.id)
+                .copied()
+                .unwrap_or(0)
+                < resolved.policy.max_concurrency
+        })
+    }
+
+    fn acquire(&mut self, tool_id: finstack_ai_kernel::ToolId) {
+        *self.running_by_tool.entry(tool_id).or_default() += 1;
+        self.running += 1;
+    }
+
+    fn release(&mut self, tool_id: &finstack_ai_kernel::ToolId) {
+        self.running = self.running.saturating_sub(1);
+        if let Some(count) = self.running_by_tool.get_mut(tool_id) {
+            *count = count.saturating_sub(1);
+            if *count == 0 {
+                self.running_by_tool.remove(tool_id);
+            }
+        }
+    }
+}
+
+async fn spawn_ready_tools(
+    slots: &mut ParallelToolSlots,
+    pending: &mut VecDeque<PendingHostTool>,
+    completions: &Arc<HostToolCompletions>,
+    active: &Arc<Mutex<BTreeMap<EffectId, CancellationSignal>>>,
+    assembler: ToolStreamAssembler,
+) -> Result<(), RunHandleError> {
+    while let Some(index) = slots.next_ready(pending) {
+        let Some((seed, context, resolved)) = pending.remove(index) else {
+            break;
+        };
+        let effect_id = context.run.effect_id;
+        slots.acquire(resolved.spec.id.clone());
+        let task = spawn_host_tool((seed, context, resolved), completions, active, assembler);
+        let Ok(task) = task else {
+            if let Ok(mut values) = active.lock() {
+                values.remove(&effect_id);
+            }
+            abort_host_tasks(&slots.tasks).await;
+            return Err(RunHandleError::InvalidConfiguration);
+        };
+        slots.tasks.push(task);
+    }
+    Ok(())
+}
+
+fn spawn_host_tool(
+    (seed, context, resolved): PendingHostTool,
+    completions: &Arc<HostToolCompletions>,
+    active: &Arc<Mutex<BTreeMap<EffectId, CancellationSignal>>>,
+    assembler: ToolStreamAssembler,
+) -> Result<crate::driver::host_driver::HostTaskHandle, crate::driver::host_driver::DriverUnavailable>
+{
+    let tool_id = resolved.spec.id.clone();
+    let completions = Arc::clone(completions);
+    let task_active = Arc::clone(active);
+    let cancellation = context.run.cancellation.clone();
+    let call = seed.call.clone();
+    let effect_id = context.run.effect_id;
+    crate::driver::host_driver::spawn(Box::pin(async move {
+        let (progress, result) =
+            drive_tool_cancellable(resolved, context, call, assembler, cancellation).await;
+        if let Ok(mut values) = task_active.lock() {
+            values.remove(&effect_id);
+        }
+        completions.push(HostToolCompletion {
+            tool_id,
+            progress,
+            result: ToolDriverResult { seed, result },
+        });
+    }))
+}
+
+async fn settle_tool_completions<C, R>(
+    coordinator: &mut CommitCoordinator,
+    shared: &Shared,
+    completions: &HostToolCompletions,
+    slots: &mut ParallelToolSlots,
+    sources: &SettlementSources<C, R>,
+    parked_tool: &mut Option<ToolDispatchSeed>,
+) -> Result<(), RunHandleError>
+where
+    C: Clock + crate::ports::PortObject,
+    R: RandomSource + crate::ports::PortObject,
+{
+    while let Some(completion) = completions.pop()? {
+        slots.release(&completion.tool_id);
+        if shared.shutting_down.load(Ordering::Acquire) {
+            continue;
+        }
+        let effect_id = completion.result.seed.requested.effect_id();
+        for item in completion.progress {
+            process_tool_progress(coordinator, effect_id, item, sources).await?;
+        }
+        let parked = completion.result.seed.clone();
+        match process_tool_result(coordinator, completion.result, sources).await? {
+            ToolResultDisposition::ParkedForInteraction => *parked_tool = Some(parked),
+            ToolResultDisposition::Settled => {}
+        }
+    }
+    Ok(())
+}
+
+fn cancel_active_tools(
+    active: &Mutex<BTreeMap<EffectId, CancellationSignal>>,
+) -> Result<(), RunHandleError> {
+    for cancellation in active
+        .lock()
+        .map_err(|_| RunHandleError::IntakeClosed)?
+        .values()
+    {
+        cancellation.cancel();
+    }
+    Ok(())
+}
+
+async fn next_parallel_tool_event(
+    completions: &HostToolCompletions,
+    shared: &Shared,
+    intake: &CommandIntake,
+    intake_open: bool,
+) -> ParallelToolPoll {
+    let mut notified = std::pin::pin!(completions.available.notified());
+    let mut recv = std::pin::pin!(shared.control.next(intake.recv()));
+    std::future::poll_fn(|cx| {
+        if completions
+            .values
+            .lock()
+            .is_ok_and(|values| !values.is_empty())
+        {
+            return Poll::Ready(ParallelToolPoll::Completed);
+        }
+        if intake_open && let Poll::Ready(command) = recv.as_mut().poll(cx) {
+            return Poll::Ready(ParallelToolPoll::Command(command.map(Box::new)));
+        }
+        if notified.as_mut().poll(cx).is_ready() {
+            return Poll::Ready(ParallelToolPoll::Completed);
+        }
+        Poll::Pending
+    })
+    .await
 }
 
 async fn abort_host_tasks(tasks: &[crate::driver::host_driver::HostTaskHandle]) {

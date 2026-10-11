@@ -33,36 +33,42 @@ def run(command: list[str], *, env: dict[str, str], capture: bool = False) -> st
     return completed.stdout if capture else ""
 
 
+def coverage_artifact_filenames(line: str) -> list[str]:
+    """Return artifact filenames from one cargo JSON line for the covered targets."""
+    try:
+        message = json.loads(line)
+    except json.JSONDecodeError:
+        return []
+    if message.get("reason") != "compiler-artifact":
+        return []
+    target = message.get("target")
+    if not isinstance(target, dict) or target.get("name") not in {
+        CRATE_NAME,
+        TEST_TARGET,
+    }:
+        return []
+    filenames = message.get("filenames")
+    if not isinstance(filenames, list):
+        return []
+    return [filename for filename in filenames if isinstance(filename, str)]
+
+
+def llvm_ir_candidate(artifact: Path) -> Path | None:
+    """Return the LLVM IR file rustc emits beside a `.wasm` or `.rlib` artifact."""
+    if artifact.suffix == ".wasm":
+        return artifact.with_suffix(".ll")
+    if artifact.suffix == ".rlib":
+        stem = artifact.stem.removeprefix("lib")
+        return artifact.with_name(f"{stem}.ll")
+    return None
+
+
 def llvm_ir_paths(cargo_output: str) -> list[Path]:
     paths: set[Path] = set()
     for line in cargo_output.splitlines():
-        try:
-            message = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if message.get("reason") != "compiler-artifact":
-            continue
-        target = message.get("target")
-        if not isinstance(target, dict) or target.get("name") not in {
-            CRATE_NAME,
-            TEST_TARGET,
-        }:
-            continue
-        filenames = message.get("filenames")
-        if not isinstance(filenames, list):
-            continue
-        for filename in filenames:
-            if not isinstance(filename, str):
-                continue
-            artifact = Path(filename)
-            if artifact.suffix == ".wasm":
-                candidate = artifact.with_suffix(".ll")
-            elif artifact.suffix == ".rlib":
-                stem = artifact.stem.removeprefix("lib")
-                candidate = artifact.with_name(f"{stem}.ll")
-            else:
-                continue
-            if candidate.is_file():
+        for filename in coverage_artifact_filenames(line):
+            candidate = llvm_ir_candidate(Path(filename))
+            if candidate is not None and candidate.is_file():
                 paths.add(candidate)
     if not paths:
         raise SystemExit("coverage build produced no LLVM IR artifacts")

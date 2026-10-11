@@ -176,12 +176,12 @@ def link_search_dirs(
     return dirs
 
 
-def main() -> int:
+def main() -> None:
     libdir_raw = sysconfig.get_config_var("LIBDIR") or ""
     ldlibrary = sysconfig.get_config_var("LDLIBRARY") or ""
     version = f"{sys.version_info.major}.{sys.version_info.minor}"
     if not libdir_raw:
-        return 0
+        return
     for directory in link_search_dirs(
         Path(libdir_raw),
         str(ldlibrary),
@@ -189,8 +189,7 @@ def main() -> int:
         Path("target/ci/python-link"),
     ):
         print(directory.resolve())
-    return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    main()

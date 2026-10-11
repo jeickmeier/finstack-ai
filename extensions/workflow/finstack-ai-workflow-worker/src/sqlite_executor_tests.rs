@@ -1,5 +1,8 @@
 //! A real `SQLite` write lock must not block the current-thread executor.
-use super::*;
+use super::{
+    Arc, Connection, Duration, LaneId, RunId, SessionId, SqliteWorkerStore, Timestamp,
+    WakeIndexStore, WakeReason, WakeRow, WorkerError,
+};
 use crate::{InboxStore, PortsFactory, WorkerBuilder};
 use finstack_ai_runtime::ids::ExternalClock;
 use finstack_ai_runtime::workflow::WorkflowSession;
@@ -18,6 +21,14 @@ impl PortsFactory for NeverBinds {
             code: "never_binds",
         })
     }
+}
+
+/// Runs on the thread that issued the contended `SQLite` statement, never on
+/// the executor, so the retry back-off is a plain thread sleep.
+fn contended_busy_handler(_attempt: i32) -> bool {
+    CONTENDED.notify_one();
+    std::thread::sleep(Duration::from_millis(1));
+    true
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -46,11 +57,7 @@ async fn tick_remains_responsive_during_sqlite_contention() {
         .conn
         .lock()
         .expect("connection")
-        .busy_handler(Some(|_| {
-            CONTENDED.notify_one();
-            std::thread::sleep(Duration::from_millis(1));
-            true
-        }))
+        .busy_handler(Some(contended_busy_handler))
         .expect("busy handler");
     let journal = Arc::new(
         MemoryJournalStore::try_new(MemoryStoreLimits {

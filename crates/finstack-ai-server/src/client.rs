@@ -3,7 +3,7 @@
 use finstack_ai_protocol::{
     POST_AUTH_FRAME_MAX_BYTES, PROTOCOL_VERSION_V1, RemoteAuthMethod, RemoteCommand,
     RemoteCommandResult, RemoteDurableStep, RemoteEventView, RemoteLocator, RemotePostAuth,
-    RemotePreAuth, VersionOffer, require_features, select_version,
+    RemotePreAuth, RemoteSnapshot, VersionOffer, require_features, select_version,
 };
 use tokio::io::{AsyncRead, AsyncWrite};
 
@@ -48,10 +48,6 @@ where
     /// # Errors
     ///
     /// Returns protocol, auth, or ordering failures.
-    #[expect(
-        clippy::too_many_lines,
-        reason = "the reconnect protocol state machine is intentionally linear and fail-closed"
-    )]
     pub async fn reconnect(
         &mut self,
         offer: &VersionOffer,
@@ -64,6 +60,59 @@ where
         self.last_transient_sequence = None;
         let expected_locator = locator.clone();
         self.locator = Some(expected_locator.clone());
+        self.authenticate(offer, method).await?;
+        write_post_auth(
+            &mut self.stream,
+            self.post_auth_ceiling,
+            self.protocol_version,
+            &RemotePostAuth::OpenSession {
+                last_known_durable_sequence,
+                locator,
+                tenant_scope: tenant_scope.into(),
+            },
+        )
+        .await?;
+
+        let mut progress = ReconnectProgress::default();
+        loop {
+            match read_post_auth(
+                &mut self.stream,
+                self.post_auth_ceiling,
+                self.protocol_version,
+            )
+            .await?
+            {
+                RemotePostAuth::Snapshot { sequence, snapshot } => {
+                    progress.snapshot(sequence, *snapshot, &expected_locator)?;
+                }
+                RemotePostAuth::NoSnapshot { sequence } => progress.no_snapshot(sequence)?,
+                RemotePostAuth::DurableTail {
+                    from_sequence,
+                    to_sequence,
+                    steps,
+                } => progress.durable_tail(from_sequence, to_sequence, steps, &expected_locator)?,
+                RemotePostAuth::SyncBarrier { sequence } => {
+                    let view = progress.barrier(sequence)?;
+                    self.barrier_seen = true;
+                    self.durable_cursor = sequence;
+                    return Ok(view);
+                }
+                RemotePostAuth::EventBatch { .. } | RemotePostAuth::Grant { .. } => {
+                    return Err(ServerError::LiveBeforeBarrier);
+                }
+                RemotePostAuth::Close { reason_code } => {
+                    return Err(codec_error(reason_code));
+                }
+                _ => return Err(ServerError::UnknownLocator),
+            }
+        }
+    }
+
+    async fn authenticate(
+        &mut self,
+        offer: &VersionOffer,
+        method: RemoteAuthMethod,
+    ) -> Result<(), ServerError> {
         write_pre_auth(
             &mut self.stream,
             &RemotePreAuth::ClientHello {
@@ -89,105 +138,7 @@ where
         else {
             return Err(ServerError::AuthenticationFailure);
         };
-        write_post_auth(
-            &mut self.stream,
-            self.post_auth_ceiling,
-            self.protocol_version,
-            &RemotePostAuth::OpenSession {
-                last_known_durable_sequence,
-                locator,
-                tenant_scope: tenant_scope.into(),
-            },
-        )
-        .await?;
-
-        let mut snapshot = None;
-        let mut snapshot_sequence = 0;
-        let mut tail = Vec::new();
-        let mut saw_snapshot_choice = false;
-        let mut cursor = 0_u64;
-        loop {
-            match read_post_auth(
-                &mut self.stream,
-                self.post_auth_ceiling,
-                self.protocol_version,
-            )
-            .await?
-            {
-                RemotePostAuth::Snapshot {
-                    sequence,
-                    snapshot: value,
-                } => {
-                    if saw_snapshot_choice
-                        || value.sequence() != sequence
-                        || value.locator() != &expected_locator
-                    {
-                        return Err(codec_error("invalid reconnect snapshot"));
-                    }
-                    saw_snapshot_choice = true;
-                    snapshot_sequence = sequence;
-                    cursor = sequence;
-                    snapshot = Some(*value);
-                }
-                RemotePostAuth::NoSnapshot { sequence } => {
-                    if saw_snapshot_choice {
-                        return Err(codec_error("duplicate reconnect snapshot choice"));
-                    }
-                    saw_snapshot_choice = true;
-                    snapshot_sequence = sequence;
-                    cursor = sequence;
-                }
-                RemotePostAuth::DurableTail {
-                    from_sequence,
-                    to_sequence,
-                    steps,
-                } => {
-                    if !saw_snapshot_choice
-                        || from_sequence != cursor.saturating_add(1)
-                        || steps.first().map(RemoteDurableStep::sequence) != Some(from_sequence)
-                        || steps.last().map(RemoteDurableStep::sequence) != Some(to_sequence)
-                    {
-                        return Err(codec_error("invalid durable tail range"));
-                    }
-                    for step in &steps {
-                        let expected = cursor
-                            .checked_add(1)
-                            .ok_or_else(|| codec_error("durable cursor exhausted"))?;
-                        if step.sequence() != expected {
-                            return Err(codec_error("durable tail gap"));
-                        }
-                        if step.events().iter().any(|event| {
-                            !event_matches_locator(event, &expected_locator)
-                                || event.durable_sequence() != Some(expected)
-                        }) {
-                            return Err(codec_error("durable event locator mismatch"));
-                        }
-                        cursor = expected;
-                    }
-                    tail.extend(steps);
-                }
-                RemotePostAuth::SyncBarrier { sequence } => {
-                    if !saw_snapshot_choice || sequence != cursor {
-                        return Err(codec_error("invalid sync barrier"));
-                    }
-                    self.barrier_seen = true;
-                    self.durable_cursor = sequence;
-                    return Ok(ReconnectView {
-                        snapshot,
-                        snapshot_sequence,
-                        tail,
-                        barrier: sequence,
-                    });
-                }
-                RemotePostAuth::EventBatch { .. } | RemotePostAuth::Grant { .. } => {
-                    return Err(ServerError::LiveBeforeBarrier);
-                }
-                RemotePostAuth::Close { reason_code } => {
-                    return Err(codec_error(reason_code));
-                }
-                _ => return Err(ServerError::UnknownLocator),
-            }
-        }
+        Ok(())
     }
 
     /// Read the next post-auth message after the barrier.
@@ -293,6 +244,95 @@ where
             },
         )
         .await
+    }
+}
+
+/// Reconnect state accumulated before the sync barrier.
+#[derive(Default)]
+struct ReconnectProgress {
+    snapshot: Option<RemoteSnapshot>,
+    snapshot_sequence: u64,
+    tail: Vec<RemoteDurableStep>,
+    saw_snapshot_choice: bool,
+    cursor: u64,
+}
+
+impl ReconnectProgress {
+    fn snapshot(
+        &mut self,
+        sequence: u64,
+        snapshot: RemoteSnapshot,
+        expected_locator: &RemoteLocator,
+    ) -> Result<(), ServerError> {
+        if self.saw_snapshot_choice
+            || snapshot.sequence() != sequence
+            || snapshot.locator() != expected_locator
+        {
+            return Err(codec_error("invalid reconnect snapshot"));
+        }
+        self.choose_snapshot_sequence(sequence);
+        self.snapshot = Some(snapshot);
+        Ok(())
+    }
+
+    fn no_snapshot(&mut self, sequence: u64) -> Result<(), ServerError> {
+        if self.saw_snapshot_choice {
+            return Err(codec_error("duplicate reconnect snapshot choice"));
+        }
+        self.choose_snapshot_sequence(sequence);
+        Ok(())
+    }
+
+    fn choose_snapshot_sequence(&mut self, sequence: u64) {
+        self.saw_snapshot_choice = true;
+        self.snapshot_sequence = sequence;
+        self.cursor = sequence;
+    }
+
+    fn durable_tail(
+        &mut self,
+        from_sequence: u64,
+        to_sequence: u64,
+        steps: Vec<RemoteDurableStep>,
+        expected_locator: &RemoteLocator,
+    ) -> Result<(), ServerError> {
+        if !self.saw_snapshot_choice
+            || from_sequence != self.cursor.saturating_add(1)
+            || steps.first().map(RemoteDurableStep::sequence) != Some(from_sequence)
+            || steps.last().map(RemoteDurableStep::sequence) != Some(to_sequence)
+        {
+            return Err(codec_error("invalid durable tail range"));
+        }
+        for step in &steps {
+            let expected = self
+                .cursor
+                .checked_add(1)
+                .ok_or_else(|| codec_error("durable cursor exhausted"))?;
+            if step.sequence() != expected {
+                return Err(codec_error("durable tail gap"));
+            }
+            if step.events().iter().any(|event| {
+                !event_matches_locator(event, expected_locator)
+                    || event.durable_sequence() != Some(expected)
+            }) {
+                return Err(codec_error("durable event locator mismatch"));
+            }
+            self.cursor = expected;
+        }
+        self.tail.extend(steps);
+        Ok(())
+    }
+
+    fn barrier(self, sequence: u64) -> Result<ReconnectView, ServerError> {
+        if !self.saw_snapshot_choice || sequence != self.cursor {
+            return Err(codec_error("invalid sync barrier"));
+        }
+        Ok(ReconnectView {
+            snapshot: self.snapshot,
+            snapshot_sequence: self.snapshot_sequence,
+            tail: self.tail,
+            barrier: sequence,
+        })
     }
 }
 

@@ -50,18 +50,27 @@ def crate_of(path: Path) -> str:
     return "<unknown>"
 
 
+def is_scanned_source(path: Path) -> bool:
+    if any(part in SKIP_PARTS for part in path.parts):
+        return False
+    return not (path.name.endswith("tests.rs") or "tests" in path.parts)
+
+
+def is_error_code(value: str) -> bool:
+    return (
+        CODE_RE.match(value) is not None
+        and len(value.encode("utf-8")) <= CODE_MAX_BYTES
+    )
+
+
 def collect() -> list[dict[str, str]]:
     found: dict[tuple[str, str], dict[str, str]] = {}
     for root in SCAN_ROOTS:
         for path in sorted((REPO_ROOT / root).rglob("*.rs")):
-            if any(part in SKIP_PARTS for part in path.parts):
-                continue
-            if path.name.endswith("tests.rs") or "tests" in path.parts:
+            if not is_scanned_source(path):
                 continue
             for name, value in DECL_RE.findall(path.read_text(encoding="utf-8")):
-                if not CODE_RE.match(value):
-                    continue
-                if len(value.encode("utf-8")) > CODE_MAX_BYTES:
+                if not is_error_code(value):
                     continue
                 crate = crate_of(path)
                 found[(crate, name)] = {"crate": crate, "name": name, "value": value}
@@ -74,6 +83,40 @@ def stable_codes_from_ts() -> list[str]:
     if block is None:
         raise SystemExit(f"{ERRORS_TS}: STABLE_CODES array not found")
     return re.findall(r'"([^"]+)"', block.group(1))
+
+
+def fixture_drift(
+    frozen: list[dict[str, str]], current: list[dict[str, str]]
+) -> list[str]:
+    frozen_by_key = {(e["crate"], e["name"]): e["value"] for e in frozen}
+    current_by_key = {(e["crate"], e["name"]): e["value"] for e in current}
+    drift: list[str] = []
+    for key, value in sorted(frozen_by_key.items()):
+        if key not in current_by_key:
+            drift.append(f"removed error code: {key[0]}::{key[1]} = {value!r}")
+        elif current_by_key[key] != value:
+            drift.append(
+                f"changed error code value: {key[0]}::{key[1]}"
+                f" {value!r} -> {current_by_key[key]!r}"
+            )
+    drift.extend(
+        f"added error code: {key[0]}::{key[1]} = {value!r}"
+        for key, value in sorted(current_by_key.items())
+        if key not in frozen_by_key
+    )
+    return drift
+
+
+def stable_codes_drift(current: list[dict[str, str]]) -> list[str]:
+    # The TypeScript binding keeps its own copy to classify messages. It must
+    # not drift from the Rust values; it may legitimately cover only a subset.
+    known = {e["value"] for e in current}
+    return [
+        f"{ERRORS_TS.relative_to(REPO_ROOT)}: STABLE_CODES entry {code!r}"
+        " matches no Rust error-code constant"
+        for code in stable_codes_from_ts()
+        if code not in known
+    ]
 
 
 def main() -> int:
@@ -94,45 +137,18 @@ def main() -> int:
         )
         return 0
 
-    failed = False
     if not FIXTURE.is_file():
         print(f"missing fixture {FIXTURE}", file=sys.stderr)
         return 1
     frozen = json.loads(FIXTURE.read_text(encoding="utf-8"))["codes"]
-    frozen_by_key = {(e["crate"], e["name"]): e["value"] for e in frozen}
-    current_by_key = {(e["crate"], e["name"]): e["value"] for e in current}
+    drift = fixture_drift(frozen, current)
+    for message in drift:
+        print(message, file=sys.stderr)
+    stable_drift = stable_codes_drift(current)
+    for message in stable_drift:
+        print(message, file=sys.stderr)
 
-    for key, value in sorted(frozen_by_key.items()):
-        if key not in current_by_key:
-            print(
-                f"removed error code: {key[0]}::{key[1]} = {value!r}", file=sys.stderr
-            )
-            failed = True
-        elif current_by_key[key] != value:
-            print(
-                f"changed error code value: {key[0]}::{key[1]}"
-                f" {value!r} -> {current_by_key[key]!r}",
-                file=sys.stderr,
-            )
-            failed = True
-    for key, value in sorted(current_by_key.items()):
-        if key not in frozen_by_key:
-            print(f"added error code: {key[0]}::{key[1]} = {value!r}", file=sys.stderr)
-            failed = True
-
-    # The TypeScript binding keeps its own copy to classify messages. It must
-    # not drift from the Rust values; it may legitimately cover only a subset.
-    known = {e["value"] for e in current}
-    for code in stable_codes_from_ts():
-        if code not in known:
-            print(
-                f"{ERRORS_TS.relative_to(REPO_ROOT)}: STABLE_CODES entry {code!r}"
-                " matches no Rust error-code constant",
-                file=sys.stderr,
-            )
-            failed = True
-
-    if failed:
+    if drift or stable_drift:
         print(
             "\nError-code values differ from the frozen fixture in"
             f" {FIXTURE.relative_to(REPO_ROOT)}."
@@ -142,7 +158,7 @@ def main() -> int:
             f"\n    {REGENERATE}",
             file=sys.stderr,
         )
-    return 1 if failed else 0
+    return 1 if drift or stable_drift else 0
 
 
 if __name__ == "__main__":

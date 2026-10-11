@@ -8,15 +8,15 @@
 # FINSTACK_PLAYWRIGHT_WITH_DEPS=1 also installs OS deps locally.
 ensure_playwright_browsers() {
   local prefix="bindings/finstack-ai-wasm/js"
-  if [ "${FINSTACK_PLAYWRIGHT_SKIP_INSTALL:-0}" = "1" ]; then
+  if [[ "${FINSTACK_PLAYWRIGHT_SKIP_INSTALL:-0}" = "1" ]]; then
     return 0
   fi
-  if [ "$#" -eq 0 ]; then
+  if [[ "$#" -eq 0 ]]; then
     set -- chromium firefox webkit
   fi
   npx --prefix "${prefix}" playwright install "$@"
-  if [ "${FINSTACK_PLAYWRIGHT_WITH_DEPS:-0}" = "1" ] \
-    || { [ "${CI:-}" = "true" ] && [ "$(uname -s)" = "Linux" ]; }; then
+  if [[ "${FINSTACK_PLAYWRIGHT_WITH_DEPS:-0}" = "1" ]] \
+    || { [[ "${CI:-}" = "true" ]] && [[ "$(uname -s)" = "Linux" ]]; }; then
     npx --prefix "${prefix}" playwright install-deps "$@"
   fi
 }
@@ -30,11 +30,11 @@ wasm_repro_needed() {
     0) return 1 ;;
   esac
   local range=""
-  if [ -n "${GITHUB_EVENT_BEFORE:-}" ] \
-    && [ "${GITHUB_EVENT_BEFORE}" != "null" ] \
-    && [ "${GITHUB_EVENT_BEFORE}" != "0000000000000000000000000000000000000000" ]; then
+  if [[ -n "${GITHUB_EVENT_BEFORE:-}" ]] \
+    && [[ "${GITHUB_EVENT_BEFORE}" != "null" ]] \
+    && [[ "${GITHUB_EVENT_BEFORE}" != "0000000000000000000000000000000000000000" ]]; then
     range="${GITHUB_EVENT_BEFORE}...HEAD"
-  elif [ -n "${GITHUB_BASE_REF:-}" ] && git rev-parse --verify "origin/${GITHUB_BASE_REF}" >/dev/null 2>&1; then
+  elif [[ -n "${GITHUB_BASE_REF:-}" ]] && git rev-parse --verify "origin/${GITHUB_BASE_REF}" >/dev/null 2>&1; then
     range="origin/${GITHUB_BASE_REF}...HEAD"
   elif git rev-parse --verify origin/main >/dev/null 2>&1; then
     range="origin/main...HEAD"

@@ -15,6 +15,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 STAGE = REPO_ROOT / "target" / "release-staging" / "starter-rc"
 PYTHON = REPO_ROOT / "bindings" / "finstack-ai-python"
 JS_PACKAGE = REPO_ROOT / "bindings" / "finstack-ai-wasm" / "js"
+CARGO_TOML = "Cargo.toml"
+MAIN_PY = "main.py"
 STARTERS = (
     "finstack-ai-native-examples",
     "finstack-ai-example-durable-interaction",
@@ -146,7 +148,7 @@ def dependencies_block(manifest: Path) -> str:
 def write_rc_example(dest: Path, name: str, source: Path, extra: str) -> None:
     dest.mkdir(parents=True)
     shutil.copytree(source / "src", dest / "src")
-    (dest / "Cargo.toml").write_text(
+    (dest / CARGO_TOML).write_text(
         f"""[package]
 name = "{name}"
 version.workspace = true
@@ -177,8 +179,8 @@ def rust_starters(stage: Path) -> None:
             "examples/rc-durable-interaction",
         ]
     )
-    root_toml = (REPO_ROOT / "Cargo.toml").read_text(encoding="utf-8")
-    (stage / "Cargo.toml").write_text(
+    root_toml = (REPO_ROOT / CARGO_TOML).read_text(encoding="utf-8")
+    (stage / CARGO_TOML).write_text(
         rewrite_members(root_toml, members), encoding="utf-8"
     )
     shutil.copy2(REPO_ROOT / "Cargo.lock", stage / "Cargo.lock")
@@ -190,14 +192,14 @@ def rust_starters(stage: Path) -> None:
         stage / "examples" / "rc-rust-minimal",
         "finstack-ai-native-examples",
         minimal,
-        dependencies_block(minimal / "Cargo.toml"),
+        dependencies_block(minimal / CARGO_TOML),
     )
     durable = REPO_ROOT / "examples" / "durable-interaction"
     write_rc_example(
         stage / "examples" / "rc-durable-interaction",
         "finstack-ai-example-durable-interaction",
         durable,
-        dependencies_block(durable / "Cargo.toml"),
+        dependencies_block(durable / CARGO_TOML),
     )
     run(
         [
@@ -205,7 +207,7 @@ def rust_starters(stage: Path) -> None:
             "generate-lockfile",
             "--offline",
             "--manifest-path",
-            str(stage / "Cargo.toml"),
+            str(stage / CARGO_TOML),
         ],
         stage,
     )
@@ -219,7 +221,7 @@ def rust_starters(stage: Path) -> None:
                 "--format-version",
                 "1",
                 "--manifest-path",
-                str(stage / "Cargo.toml"),
+                str(stage / CARGO_TOML),
             ],
             cwd=stage,
             capture_output=True,
@@ -248,7 +250,7 @@ def rust_starters(stage: Path) -> None:
             "--offline",
             "--locked",
             "--manifest-path",
-            str(stage / "examples" / "rc-rust-minimal" / "Cargo.toml"),
+            str(stage / "examples" / "rc-rust-minimal" / CARGO_TOML),
             "--bin",
             "minimal",
         ],
@@ -261,7 +263,7 @@ def rust_starters(stage: Path) -> None:
             "--offline",
             "--locked",
             "--manifest-path",
-            str(stage / "examples" / "rc-durable-interaction" / "Cargo.toml"),
+            str(stage / "examples" / "rc-durable-interaction" / CARGO_TOML),
         ],
         stage,
     )
@@ -271,9 +273,9 @@ def python_starters(wheel: Path) -> None:
     if "editable" in str(wheel):
         raise SystemExit("python RC must not use an editable workspace mapping")
     for script in (
-        REPO_ROOT / "examples" / "python-minimal" / "python-callback" / "main.py",
-        REPO_ROOT / "examples" / "python-minimal" / "rust-backed" / "main.py",
-        REPO_ROOT / "examples" / "python-minimal" / "service" / "main.py",
+        REPO_ROOT / "examples" / "python-minimal" / "python-callback" / MAIN_PY,
+        REPO_ROOT / "examples" / "python-minimal" / "rust-backed" / MAIN_PY,
+        REPO_ROOT / "examples" / "python-minimal" / "service" / MAIN_PY,
     ):
         run(
             [
@@ -333,7 +335,7 @@ def build_python_wheel(out: Path) -> Path:
             "--offline",
             "--locked",
             "--manifest-path",
-            str(PYTHON / "Cargo.toml"),
+            str(PYTHON / CARGO_TOML),
             "--out",
             str(out),
         ]

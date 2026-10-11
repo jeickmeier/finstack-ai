@@ -188,15 +188,7 @@ impl<'p> GlobMatcher<'p> {
             let recursive_prefix = double_star && pattern.get(index + 2).copied() == Some(b'/');
             let token = pattern[index];
             if recursive_prefix {
-                self.current.copy_from_slice(&self.previous);
-                let mut reachable = self.previous[0];
-                for position in 1..=path.len() {
-                    if path[position - 1] == b'/' && reachable {
-                        self.current[position] = true;
-                    }
-                    reachable |= self.previous[position];
-                }
-                core::mem::swap(&mut self.previous, &mut self.current);
+                self.step_recursive_prefix(path);
                 index += 3;
                 continue;
             }
@@ -205,29 +197,43 @@ impl<'p> GlobMatcher<'p> {
                     index += 1;
                 }
             }
-            self.current.fill(false);
-            if token == b'*' {
-                self.current[0] = self.previous[0];
-                for position in 1..=path.len() {
-                    let can_consume = double_star || path[position - 1] != b'/';
-                    self.current[position] =
-                        self.previous[position] || (can_consume && self.current[position - 1]);
-                }
-            } else if token == b'?' {
-                for position in 1..=path.len() {
-                    self.current[position] =
-                        self.previous[position - 1] && path[position - 1] != b'/';
-                }
-            } else {
-                for position in 1..=path.len() {
-                    self.current[position] =
-                        self.previous[position - 1] && path[position - 1] == token;
-                }
-            }
-            core::mem::swap(&mut self.previous, &mut self.current);
+            self.step_token(path, token, double_star);
             index += 1;
         }
         self.previous[path.len()]
+    }
+
+    fn step_recursive_prefix(&mut self, path: &[u8]) {
+        self.current.copy_from_slice(&self.previous);
+        let mut reachable = self.previous[0];
+        for position in 1..=path.len() {
+            if path[position - 1] == b'/' && reachable {
+                self.current[position] = true;
+            }
+            reachable |= self.previous[position];
+        }
+        core::mem::swap(&mut self.previous, &mut self.current);
+    }
+
+    fn step_token(&mut self, path: &[u8], token: u8, double_star: bool) {
+        self.current.fill(false);
+        if token == b'*' {
+            self.current[0] = self.previous[0];
+            for position in 1..=path.len() {
+                let can_consume = double_star || path[position - 1] != b'/';
+                self.current[position] =
+                    self.previous[position] || (can_consume && self.current[position - 1]);
+            }
+        } else if token == b'?' {
+            for position in 1..=path.len() {
+                self.current[position] = self.previous[position - 1] && path[position - 1] != b'/';
+            }
+        } else {
+            for position in 1..=path.len() {
+                self.current[position] = self.previous[position - 1] && path[position - 1] == token;
+            }
+        }
+        core::mem::swap(&mut self.previous, &mut self.current);
     }
 }
 
@@ -260,7 +266,7 @@ mod tests {
         assert!(glob_matches("src/?.rs", "src/a.rs"));
     }
 
-    /// The pre-`GlobMatcher` implementation, kept verbatim as the parity oracle.
+    /// The pre-`GlobMatcher` allocating implementation, kept as the parity oracle.
     fn legacy_glob_matches(pattern: &str, path: &str) -> bool {
         let pattern = pattern.as_bytes();
         let path = path.as_bytes();
@@ -273,15 +279,7 @@ mod tests {
             let recursive_prefix = double_star && pattern.get(index + 2).copied() == Some(b'/');
             let token = pattern[index];
             if recursive_prefix {
-                let mut current = previous.clone();
-                let mut reachable = previous[0];
-                for position in 1..=path.len() {
-                    if path[position - 1] == b'/' && reachable {
-                        current[position] = true;
-                    }
-                    reachable |= previous[position];
-                }
-                previous = current;
+                previous = legacy_recursive_prefix_row(&previous, path);
                 index += 3;
                 continue;
             }
@@ -290,27 +288,42 @@ mod tests {
                     index += 1;
                 }
             }
-            let mut current = vec![false; path.len() + 1];
-            if token == b'*' {
-                current[0] = previous[0];
-                for position in 1..=path.len() {
-                    let can_consume = double_star || path[position - 1] != b'/';
-                    current[position] =
-                        previous[position] || (can_consume && current[position - 1]);
-                }
-            } else if token == b'?' {
-                for position in 1..=path.len() {
-                    current[position] = previous[position - 1] && path[position - 1] != b'/';
-                }
-            } else {
-                for position in 1..=path.len() {
-                    current[position] = previous[position - 1] && path[position - 1] == token;
-                }
-            }
-            previous = current;
+            previous = legacy_token_row(&previous, path, token, double_star);
             index += 1;
         }
         previous[path.len()]
+    }
+
+    fn legacy_recursive_prefix_row(previous: &[bool], path: &[u8]) -> Vec<bool> {
+        let mut current = previous.to_vec();
+        let mut reachable = previous[0];
+        for position in 1..=path.len() {
+            if path[position - 1] == b'/' && reachable {
+                current[position] = true;
+            }
+            reachable |= previous[position];
+        }
+        current
+    }
+
+    fn legacy_token_row(previous: &[bool], path: &[u8], token: u8, double_star: bool) -> Vec<bool> {
+        let mut current = vec![false; path.len() + 1];
+        if token == b'*' {
+            current[0] = previous[0];
+            for position in 1..=path.len() {
+                let can_consume = double_star || path[position - 1] != b'/';
+                current[position] = previous[position] || (can_consume && current[position - 1]);
+            }
+        } else if token == b'?' {
+            for position in 1..=path.len() {
+                current[position] = previous[position - 1] && path[position - 1] != b'/';
+            }
+        } else {
+            for position in 1..=path.len() {
+                current[position] = previous[position - 1] && path[position - 1] == token;
+            }
+        }
+        current
     }
 
     #[test]

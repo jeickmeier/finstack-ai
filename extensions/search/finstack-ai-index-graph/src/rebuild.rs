@@ -1,6 +1,6 @@
 //! Bounded host rebuild over this graph's exact configured source catalogs.
 use crate::GraphSearchSource;
-use finstack_ai_search_core::{SearchError, validate_catalog_request};
+use finstack_ai_search_core::{SearchError, SearchSource, validate_catalog_request};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -55,66 +55,83 @@ impl GraphSearchSource {
             next_cursor: None,
         };
         let mut remaining = limit;
-        let mut active = cursor.is_none();
-        for (id, source) in &self.sources {
-            if !active && cursor.as_ref().is_some_and(|c| &c.source == id) {
-                active = true;
-            }
-            if !active {
-                continue;
-            }
-            let mut reference = cursor
+        let start = cursor.as_ref().map(|c| &c.source);
+        let pending = self
+            .sources
+            .iter()
+            .skip_while(|(id, _)| start.is_some_and(|source| source != *id));
+        for (id, source) in pending {
+            let reference = cursor
                 .as_ref()
                 .filter(|c| &c.source == id)
                 .and_then(|c| c.reference.clone());
-            loop {
-                if remaining == 0 {
-                    report.next_cursor = Some(GraphBuildCursor {
-                        source: id.clone(),
-                        reference,
-                    });
-                    return Ok(report);
-                }
-                let page = match tokio::time::timeout(
-                    std::time::Duration::from_millis(self.config.source_timeout_ms),
-                    source.references(self.config.scope.clone(), reference, remaining),
-                )
-                .await
-                {
-                    Ok(Ok(page)) => page,
-                    Ok(Err(SearchError::SearchScopeDenied)) => {
-                        return Err(SearchError::SearchScopeDenied);
-                    }
-                    _ => {
-                        report.unavailable += 1;
-                        break;
-                    }
-                };
-                validate_catalog_request(page.next_cursor.as_deref(), remaining)?;
-                if page.references.len() > remaining
-                    || page.references.is_empty() && page.next_cursor.is_some()
-                {
-                    return Err(SearchError::invalid("graph_catalog_result"));
-                }
-                for reference in page.references {
-                    remaining -= 1;
-                    match self.index_reference(id, reference).await {
-                        Ok(value) => {
-                            report.indexed += usize::from(!value.removed);
-                            report.removed += usize::from(value.removed);
-                        }
-                        Err(SearchError::SearchScopeDenied) => {
-                            return Err(SearchError::SearchScopeDenied);
-                        }
-                        Err(_) => report.unavailable += 1,
-                    }
-                }
-                reference = page.next_cursor;
-                if reference.is_none() {
-                    break;
-                }
+            let next = self
+                .rebuild_source(id, source.as_ref(), reference, &mut remaining, &mut report)
+                .await?;
+            if next.is_some() {
+                report.next_cursor = next;
+                return Ok(report);
             }
         }
         Ok(report)
+    }
+
+    /// Walk one source's catalog from `reference` until it ends, becomes
+    /// unavailable, or the step budget is spent; a spent budget returns the
+    /// cursor to resume from.
+    async fn rebuild_source(
+        &self,
+        id: &Arc<str>,
+        source: &dyn SearchSource,
+        mut reference: Option<String>,
+        remaining: &mut usize,
+        report: &mut GraphBuildReport,
+    ) -> Result<Option<GraphBuildCursor>, SearchError> {
+        loop {
+            if *remaining == 0 {
+                return Ok(Some(GraphBuildCursor {
+                    source: id.clone(),
+                    reference,
+                }));
+            }
+            let page = match tokio::time::timeout(
+                std::time::Duration::from_millis(self.config.source_timeout_ms),
+                source.references(self.config.scope.clone(), reference, *remaining),
+            )
+            .await
+            {
+                Ok(Ok(page)) => page,
+                Ok(Err(SearchError::SearchScopeDenied)) => {
+                    return Err(SearchError::SearchScopeDenied);
+                }
+                _ => {
+                    report.unavailable += 1;
+                    return Ok(None);
+                }
+            };
+            validate_catalog_request(page.next_cursor.as_deref(), *remaining)?;
+            if page.references.len() > *remaining
+                || page.references.is_empty() && page.next_cursor.is_some()
+            {
+                return Err(SearchError::invalid("graph_catalog_result"));
+            }
+            for reference in page.references {
+                *remaining -= 1;
+                match self.index_reference(id, reference).await {
+                    Ok(value) => {
+                        report.indexed += usize::from(!value.removed);
+                        report.removed += usize::from(value.removed);
+                    }
+                    Err(SearchError::SearchScopeDenied) => {
+                        return Err(SearchError::SearchScopeDenied);
+                    }
+                    Err(_) => report.unavailable += 1,
+                }
+            }
+            reference = page.next_cursor;
+            if reference.is_none() {
+                return Ok(None);
+            }
+        }
     }
 }

@@ -173,47 +173,51 @@ def parse_func(text: str) -> Func:
     return Func(name=match.group(1), params=params, result=result)
 
 
-def parse_interface_body(body: str) -> Interface:
-    interface = Interface(name="")
-    index = 0
-    length = len(body)
-    while index < length:
-        while index < length and body[index].isspace():
-            index += 1
-        if index >= length:
-            break
-        if body.startswith("use ", index):
-            end = body.find(";", index)
-            if end < 0:
-                raise WitError("unterminated use")
-            index = end + 1
-            continue
-        if body.startswith("record ", index):
-            name_start = index + len("record ")
-            name_end = body.find("{", name_start)
-            name = body[name_start:name_end].strip()
-            close = matching_brace(body, name_end)
-            interface.records[name] = parse_fields(body[name_end + 1 : close])
-            index = close + 1
-            continue
-        if body.startswith("enum ", index):
-            name_start = index + len("enum ")
-            name_end = body.find("{", name_start)
-            name = body[name_start:name_end].strip()
-            close = matching_brace(body, name_end)
-            cases = [
-                case.strip()
-                for case in body[name_end + 1 : close].split(",")
-                if case.strip()
-            ]
-            interface.enums[name] = cases
-            index = close + 1
-            continue
+def skip_whitespace(text: str, index: int) -> int:
+    while index < len(text) and text[index].isspace():
+        index += 1
+    return index
+
+
+def named_block(text: str, index: int, keyword: str) -> tuple[str, int, int]:
+    """Return the name and brace indexes of the ``<keyword><name> {...}`` item at ``index``."""
+    name_start = index + len(keyword)
+    name_end = text.find("{", name_start)
+    name = text[name_start:name_end].strip()
+    return name, name_end, matching_brace(text, name_end)
+
+
+def parse_interface_item(body: str, index: int, interface: Interface) -> int:
+    """Parse the interface item at ``index`` into ``interface``; return the next index."""
+    if body.startswith("use ", index):
         end = body.find(";", index)
         if end < 0:
-            raise WitError(f"unterminated interface item: {body[index:]}")
-        interface.funcs.append(parse_func(re.sub(r"\s+", " ", body[index:end]).strip()))
-        index = end + 1
+            raise WitError("unterminated use")
+        return end + 1
+    if body.startswith("record ", index):
+        name, open_index, close = named_block(body, index, "record ")
+        interface.records[name] = parse_fields(body[open_index + 1 : close])
+        return close + 1
+    if body.startswith("enum ", index):
+        name, open_index, close = named_block(body, index, "enum ")
+        interface.enums[name] = [
+            case.strip()
+            for case in body[open_index + 1 : close].split(",")
+            if case.strip()
+        ]
+        return close + 1
+    end = body.find(";", index)
+    if end < 0:
+        raise WitError(f"unterminated interface item: {body[index:]}")
+    interface.funcs.append(parse_func(re.sub(r"\s+", " ", body[index:end]).strip()))
+    return end + 1
+
+
+def parse_interface_body(body: str) -> Interface:
+    interface = Interface(name="")
+    index = skip_whitespace(body, 0)
+    while index < len(body):
+        index = skip_whitespace(body, parse_interface_item(body, index, interface))
     return interface
 
 
@@ -253,38 +257,40 @@ def parse_package(path: Path, allowed: tuple[str, ...]) -> Package:
     if package_name not in allowed:
         raise WitError(f"{path}: unexpected package {package_name}")
     package = Package(name=package_name, path=path)
-    index = package_match.end()
+    index = skip_whitespace(text, package_match.end())
     while index < len(text):
-        while index < len(text) and text[index].isspace():
-            index += 1
-        if index >= len(text):
-            break
         if text.startswith("interface ", index):
-            name_start = index + len("interface ")
-            name_end = text.find("{", name_start)
-            name = text[name_start:name_end].strip()
-            close = matching_brace(text, name_end)
-            interface = parse_interface_body(text[name_end + 1 : close])
-            interface.name = name
+            interface, index = parse_interface(text, index)
             package.interfaces.append(interface)
-            index = close + 1
-            continue
-        if text.startswith("world ", index):
-            name_start = index + len("world ")
-            name_end = text.find("{", name_start)
-            name = text[name_start:name_end].strip()
-            close = matching_brace(text, name_end)
-            world = parse_world_body(text[name_end + 1 : close])
-            world.name = name
-            lowered = " ".join([world.name, *world.exports, *world.imports]).lower()
-            for token in forbidden_tokens_for_world(world.name):
-                if token in lowered.split() or token in world.exports:
-                    raise WitError(f"{path}: forbidden world surface token {token}")
+        elif text.startswith("world ", index):
+            world, index = parse_world(path, text, index)
             package.worlds.append(world)
-            index = close + 1
-            continue
-        raise WitError(f"{path}: unexpected item at {text[index : index + 32]!r}")
+        else:
+            raise WitError(f"{path}: unexpected item at {text[index : index + 32]!r}")
+        index = skip_whitespace(text, index)
     return package
+
+
+def parse_interface(text: str, index: int) -> tuple[Interface, int]:
+    name, open_index, close = named_block(text, index, "interface ")
+    interface = parse_interface_body(text[open_index + 1 : close])
+    interface.name = name
+    return interface, close + 1
+
+
+def parse_world(path: Path, text: str, index: int) -> tuple[World, int]:
+    name, open_index, close = named_block(text, index, "world ")
+    world = parse_world_body(text[open_index + 1 : close])
+    world.name = name
+    reject_forbidden_world_tokens(path, world)
+    return world, close + 1
+
+
+def reject_forbidden_world_tokens(path: Path, world: World) -> None:
+    lowered = " ".join([world.name, *world.exports, *world.imports]).lower()
+    for token in forbidden_tokens_for_world(world.name):
+        if token in lowered.split() or token in world.exports:
+            raise WitError(f"{path}: forbidden world surface token {token}")
 
 
 def forbidden_tokens_for_world(world_name: str) -> tuple[str, ...]:
@@ -381,6 +387,35 @@ def world_imports(packages: list[Package]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(imports))
 
 
+def interface_outline(package: Package) -> list[tuple[str, list[str], list[str]]]:
+    return [
+        (iface.name, sorted(iface.records), sorted(iface.enums))
+        for iface in package.interfaces
+    ]
+
+
+def func_signatures(
+    interface: Interface,
+) -> list[tuple[str, list[tuple[str, str]], str]]:
+    return [
+        (func.name, [(p.name, p.ty) for p in func.params], func.result)
+        for func in interface.funcs
+    ]
+
+
+def assert_same_interfaces(package_name: str, left: Package, right: Package) -> None:
+    if interface_outline(left) != interface_outline(right):
+        raise WitError(f"{package_name} interface/record/enum shape drifted")
+    for left_iface, right_iface in zip(left.interfaces, right.interfaces, strict=True):
+        if (
+            left_iface.records != right_iface.records
+            or left_iface.enums != right_iface.enums
+        ):
+            raise WitError(f"{package_name} field shape drifted")
+        if func_signatures(left_iface) != func_signatures(right_iface):
+            raise WitError(f"{package_name} function shape drifted")
+
+
 def assert_same_shape(v004: list[Package], v100: list[Package]) -> None:
     if len(v004) != len(v100):
         raise WitError("v0.0.4 and v1.0.0 package counts drifted")
@@ -389,32 +424,7 @@ def assert_same_shape(v004: list[Package], v100: list[Package]) -> None:
         right_name = right.name.rsplit("@", 1)[0]
         if left_name != right_name:
             raise WitError(f"package order drifted: {left.name} vs {right.name}")
-        if [
-            (iface.name, sorted(iface.records), sorted(iface.enums))
-            for iface in left.interfaces
-        ] != [
-            (iface.name, sorted(iface.records), sorted(iface.enums))
-            for iface in right.interfaces
-        ]:
-            raise WitError(f"{left_name} interface/record/enum shape drifted")
-        for left_iface, right_iface in zip(
-            left.interfaces, right.interfaces, strict=True
-        ):
-            if (
-                left_iface.records != right_iface.records
-                or left_iface.enums != right_iface.enums
-            ):
-                raise WitError(f"{left_name} field shape drifted")
-            left_funcs = [
-                (func.name, [(p.name, p.ty) for p in func.params], func.result)
-                for func in left_iface.funcs
-            ]
-            right_funcs = [
-                (func.name, [(p.name, p.ty) for p in func.params], func.result)
-                for func in right_iface.funcs
-            ]
-            if left_funcs != right_funcs:
-                raise WitError(f"{left_name} function shape drifted")
+        assert_same_interfaces(left_name, left, right)
         left_worlds = [(world.name, world.exports) for world in left.worlds]
         right_worlds = [(world.name, world.exports) for world in right.worlds]
         if left_worlds != right_worlds:

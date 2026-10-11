@@ -19,6 +19,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 GUESTS = REPO_ROOT / "plugins" / "finstack-ai-plugin-host" / "fixtures" / "guests"
 REFERENCES = REPO_ROOT / "plugins" / "reference"
 ENCODER = REPO_ROOT / "scripts" / "plugin_wasm" / "encoder"
+CARGO_TOML = "Cargo.toml"
 GUEST_NAMES = ("echo-toolset", "trap-toolset", "fuel-burner")
 REFERENCE_NAMES = ("calculator", "filesystem-sandbox", "context-provider")
 GUEST_CRATES = {
@@ -123,7 +124,7 @@ def encode(core: Path, dest: Path) -> None:
             "cargo",
             "run",
             "--manifest-path",
-            str(ENCODER / "Cargo.toml"),
+            str(ENCODER / CARGO_TOML),
             "--quiet",
             "--",
             str(core),
@@ -144,7 +145,7 @@ def items() -> list[tuple[Path, str, str]]:
 
 def generate() -> None:
     for root, _name, crate in items():
-        core = build(root / "Cargo.toml", crate)
+        core = build(root / CARGO_TOML, crate)
         encode(core, root / "component.wasm")
 
 
@@ -164,7 +165,7 @@ def check() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
         for root, name, crate in items():
-            core = build(root / "Cargo.toml", crate)
+            core = build(root / CARGO_TOML, crate)
             generated = tmp_path / f"{name}.wasm"
             encode(core, generated)
             checked = root / "component.wasm"

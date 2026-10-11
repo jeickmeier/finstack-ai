@@ -9,10 +9,10 @@ pub struct Statistics {
     /// Number of observations, after the documented reduction/pairing.
     pub n: u32,
     /// Mean, serialized as a decimal string; absent for an empty sample.
-    #[serde(with = "decimal")]
+    #[serde(default, with = "decimal")]
     pub mean: Option<f64>,
     /// Sample standard deviation divided by sqrt(n), absent below two observations.
-    #[serde(with = "decimal")]
+    #[serde(default, with = "decimal")]
     pub stderr: Option<f64>,
 }
 impl Statistics {

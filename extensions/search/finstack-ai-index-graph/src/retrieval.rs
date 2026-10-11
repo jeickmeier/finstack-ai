@@ -319,10 +319,67 @@ impl ReadState<'_> {
         self.counted(edges.len());
         Ok(edges)
     }
+    /// Unvisited neighbours of `node` reachable over `edges`, each with its
+    /// merged path proof, in edge order. Marks every returned neighbour visited.
+    async fn expand(
+        &mut self,
+        node: &Node,
+        proof: &Proof,
+        edges: Vec<Edge>,
+        visited: &mut BTreeSet<String>,
+        max_nodes: usize,
+    ) -> Result<Vec<(Node, Proof)>, SearchError> {
+        let mut reached = Vec::new();
+        for edge in edges {
+            let next = if edge.source == node.id {
+                &edge.target
+            } else {
+                &edge.source
+            };
+            if visited.contains(next) {
+                continue;
+            }
+            if visited.len() >= max_nodes {
+                self.result.truncate("graph_node_limit");
+                break;
+            }
+            if let Some(step) = self.follow(proof, &edge, next).await? {
+                visited.insert(next.clone());
+                reached.push(step);
+            }
+        }
+        Ok(reached)
+    }
+    /// Verify `edge` and its far endpoint `next`, extending `proof` with both.
+    async fn follow(
+        &mut self,
+        proof: &Proof,
+        edge: &Edge,
+        next: &str,
+    ) -> Result<Option<(Node, Proof)>, SearchError> {
+        let Some(mut edge_proof) = self.support(&edge.id, true, None).await? else {
+            return Ok(None);
+        };
+        let Some(node_proof) = self.support(next, false, None).await? else {
+            return Ok(None);
+        };
+        let Some(next_node) = self.node(next.to_owned()).await? else {
+            self.result.truncate("graph_concurrent_reconciliation");
+            return Ok(None);
+        };
+        edge_proof
+            .locators
+            .push(format!("{} -{}-> {}", edge.source, edge.kind, edge.target).into());
+        let mut path_proof = proof.clone();
+        if !path_proof.merge(&edge_proof) || !path_proof.merge(&node_proof) {
+            self.result.truncate("graph_path_proof_limit");
+            return Ok(None);
+        }
+        Ok(Some((next_node, path_proof)))
+    }
 }
 
 impl GraphSearchSource {
-    #[allow(clippy::too_many_lines)] // One bounded breadth-first traversal owns its proof and cycle state.
     pub(crate) async fn retrieve(
         &self,
         query: SearchQuery,
@@ -393,38 +450,10 @@ impl GraphSearchSource {
                 )
                 .await?;
             examined_edges += edges.len();
-            for edge in edges {
-                let next = if edge.source == node.id {
-                    &edge.target
-                } else {
-                    &edge.source
-                };
-                if visited.contains(next) {
-                    continue;
-                }
-                if visited.len() >= max_nodes {
-                    state.result.truncate("graph_node_limit");
-                    break;
-                }
-                let Some(mut edge_proof) = state.support(&edge.id, true, None).await? else {
-                    continue;
-                };
-                let Some(node_proof) = state.support(next, false, None).await? else {
-                    continue;
-                };
-                let Some(next_node) = state.node(next.clone()).await? else {
-                    state.result.truncate("graph_concurrent_reconciliation");
-                    continue;
-                };
-                edge_proof
-                    .locators
-                    .push(format!("{} -{}-> {}", edge.source, edge.kind, edge.target).into());
-                let mut path_proof = proof.clone();
-                if !path_proof.merge(&edge_proof) || !path_proof.merge(&node_proof) {
-                    state.result.truncate("graph_path_proof_limit");
-                    continue;
-                }
-                visited.insert(next.clone());
+            let reached = state
+                .expand(&node, &proof, edges, &mut visited, max_nodes)
+                .await?;
+            for (next_node, path_proof) in reached {
                 queue.push_back((next_node, path_proof, distance + 1));
             }
         }

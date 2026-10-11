@@ -8,6 +8,9 @@ import zipfile
 from pathlib import Path
 
 OUT = Path(__file__).resolve().parent.parent / "fixtures" / "documents"
+END_STREAM = b"\nendstream"
+CONTENT_TYPES_PART = "[Content_Types].xml"
+ROOT_RELS_PART = "_rels/.rels"
 
 
 def build_pdf(object_bodies: list[bytes], root_obj_num: int = 1) -> bytes:
@@ -49,7 +52,7 @@ def _text_pdf() -> bytes:
             b"<</Type/Pages/Kids[3 0 R]/Count 1>>",
             b"<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]"
             b"/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>",
-            f"<</Length {len(content)}>>\nstream\n".encode() + content + b"\nendstream",
+            f"<</Length {len(content)}>>\nstream\n".encode() + content + END_STREAM,
             b"<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>",
         ]
     )
@@ -66,11 +69,11 @@ def _scanned_pdf() -> bytes:
             b"<</Type/Pages/Kids[3 0 R]/Count 1>>",
             b"<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]"
             b"/Contents 4 0 R/Resources<</XObject<</Im1 5 0 R>>>>>>",
-            f"<</Length {len(content)}>>\nstream\n".encode() + content + b"\nendstream",
+            f"<</Length {len(content)}>>\nstream\n".encode() + content + END_STREAM,
             f"<</Type/XObject/Subtype/Image/Width 1/Height 1/ColorSpace/DeviceGray"
             f"/BitsPerComponent 8/Length {len(image_data)}>>\nstream\n".encode()
             + image_data
-            + b"\nendstream",
+            + END_STREAM,
         ]
     )
 
@@ -137,8 +140,8 @@ def main() -> None:
     (OUT / "sample.docx").write_bytes(
         zip_bytes(
             {
-                "[Content_Types].xml": CONTENT_TYPES,
-                "_rels/.rels": ROOT_RELS,
+                CONTENT_TYPES_PART: CONTENT_TYPES,
+                ROOT_RELS_PART: ROOT_RELS,
                 "word/document.xml": DOCUMENT_XML,
             }
         )
@@ -146,8 +149,8 @@ def main() -> None:
     (OUT / "sample.xlsx").write_bytes(
         zip_bytes(
             {
-                "[Content_Types].xml": XLSX_CONTENT_TYPES,
-                "_rels/.rels": XLSX_ROOT_RELS,
+                CONTENT_TYPES_PART: XLSX_CONTENT_TYPES,
+                ROOT_RELS_PART: XLSX_ROOT_RELS,
                 "xl/workbook.xml": WORKBOOK_XML,
                 "xl/_rels/workbook.xml.rels": WORKBOOK_RELS,
                 "xl/worksheets/sheet1.xml": SHEET_XML,
@@ -157,14 +160,14 @@ def main() -> None:
     (OUT / "sample.pptx").write_bytes(
         zip_bytes(
             {
-                "[Content_Types].xml": """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+                CONTENT_TYPES_PART: """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
 <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
 <Default Extension="xml" ContentType="application/xml"/>
 <Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>
 <Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>
 </Types>""",
-                "_rels/.rels": """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+                ROOT_RELS_PART: """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
 <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/>
 </Relationships>""",

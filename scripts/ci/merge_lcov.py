@@ -45,6 +45,16 @@ class FileCoverage:
         if hits is not None:
             self.function_hits[name] = self.function_hits.get(name, 0) + hits
 
+    def merge(self, other: FileCoverage) -> None:
+        for line, hits in other.lines.items():
+            self.add_line(line, hits)
+        for key, branch in other.branches.items():
+            self.add_branch(key, str(branch.taken) if branch.executed else "-")
+        for name, line in other.functions.items():
+            self.add_function(name, line, None)
+        for name, hits in other.function_hits.items():
+            self.add_function(name, self.functions.get(name, 0), hits)
+
 
 def project_path(raw: str, root: Path) -> str | None:
     path = Path(raw)
@@ -101,15 +111,7 @@ def merge_reports(texts: list[str], root: Path) -> str:
         reports, report_skipped = parse_lcov(text, root)
         skipped += report_skipped
         for path, coverage in reports.items():
-            target = _record(merged, path)
-            for line, hits in coverage.lines.items():
-                target.add_line(line, hits)
-            for key, branch in coverage.branches.items():
-                target.add_branch(key, str(branch.taken) if branch.executed else "-")
-            for name, line in coverage.functions.items():
-                target.add_function(name, line, None)
-            for name, hits in coverage.function_hits.items():
-                target.add_function(name, target.functions.get(name, 0), hits)
+            _record(merged, path).merge(coverage)
     if not merged:
         raise SystemExit("LCOV merge produced no repository files")
     rendered = render(merged)
@@ -120,40 +122,57 @@ def merge_reports(texts: list[str], root: Path) -> str:
     return rendered
 
 
+def _function_lines(coverage: FileCoverage) -> list[str]:
+    lines = [
+        f"FN:{coverage.functions[name]},{name}" for name in sorted(coverage.functions)
+    ]
+    lines.extend(
+        f"FNDA:{coverage.function_hits[name]},{name}"
+        for name in sorted(coverage.function_hits)
+    )
+    if coverage.functions:
+        covered = sum(
+            1 for name in coverage.functions if coverage.function_hits.get(name, 0) > 0
+        )
+        lines.append(f"FNF:{len(coverage.functions)}")
+        lines.append(f"FNH:{covered}")
+    return lines
+
+
+def _branch_lines(coverage: FileCoverage) -> list[str]:
+    lines: list[str] = []
+    for key in sorted(coverage.branches):
+        branch = coverage.branches[key]
+        taken = str(branch.taken) if branch.executed else "-"
+        lines.append(f"BRDA:{key[0]},{key[1]},{key[2]},{taken}")
+    if coverage.branches:
+        covered = sum(1 for branch in coverage.branches.values() if branch.taken > 0)
+        lines.append(f"BRF:{len(coverage.branches)}")
+        lines.append(f"BRH:{covered}")
+    return lines
+
+
+def _line_lines(coverage: FileCoverage) -> list[str]:
+    lines = [
+        f"DA:{number},{coverage.lines[number]}" for number in sorted(coverage.lines)
+    ]
+    covered = sum(1 for hits in coverage.lines.values() if hits > 0)
+    lines.append(f"LH:{covered}")
+    lines.append(f"LF:{len(coverage.lines)}")
+    return lines
+
+
 def render(reports: dict[str, FileCoverage]) -> str:
     chunks: list[str] = []
     for path in sorted(reports):
         coverage = reports[path]
-        lines = [f"SF:{path}"]
-        for name in sorted(coverage.functions):
-            lines.append(f"FN:{coverage.functions[name]},{name}")
-        hit_names = sorted(coverage.function_hits)
-        for name in hit_names:
-            lines.append(f"FNDA:{coverage.function_hits[name]},{name}")
-        if coverage.functions:
-            covered = sum(
-                1
-                for name in coverage.functions
-                if coverage.function_hits.get(name, 0) > 0
-            )
-            lines.append(f"FNF:{len(coverage.functions)}")
-            lines.append(f"FNH:{covered}")
-        for key in sorted(coverage.branches):
-            branch = coverage.branches[key]
-            taken = str(branch.taken) if branch.executed else "-"
-            lines.append(f"BRDA:{key[0]},{key[1]},{key[2]},{taken}")
-        if coverage.branches:
-            covered_branches = sum(
-                1 for branch in coverage.branches.values() if branch.taken > 0
-            )
-            lines.append(f"BRF:{len(coverage.branches)}")
-            lines.append(f"BRH:{covered_branches}")
-        for number in sorted(coverage.lines):
-            lines.append(f"DA:{number},{coverage.lines[number]}")
-        covered_lines = sum(1 for hits in coverage.lines.values() if hits > 0)
-        lines.append(f"LH:{covered_lines}")
-        lines.append(f"LF:{len(coverage.lines)}")
-        lines.append("end_of_record")
+        lines = [
+            f"SF:{path}",
+            *_function_lines(coverage),
+            *_branch_lines(coverage),
+            *_line_lines(coverage),
+            "end_of_record",
+        ]
         chunks.append("\n".join(lines))
     return "\n".join(chunks) + "\n"
 

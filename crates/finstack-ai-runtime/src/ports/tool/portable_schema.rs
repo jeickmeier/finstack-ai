@@ -71,10 +71,8 @@ pub fn normalize_portable_schema(
     Ok(schema)
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "portable schema validation is one bounded recursive policy traversal"
-)]
+type SchemaObject = serde_json::Map<String, serde_json::Value>;
+
 fn normalize_schema_node(
     schema: &mut serde_json::Value,
     path: &str,
@@ -88,6 +86,24 @@ fn normalize_schema_node(
     let object = schema
         .as_object_mut()
         .ok_or_else(|| format!("schema at {path} must be an object"))?;
+    validate_keywords(object, path)?;
+    validate_annotations(object, path)?;
+    let declared_type = object.get("type").and_then(serde_json::Value::as_str);
+    let object_keywords = object.contains_key("properties")
+        || object.contains_key("required")
+        || object.contains_key("additionalProperties");
+    if object_keywords && declared_type != Some("object") {
+        return Err(format!(
+            "object schema at {path} must declare type 'object'"
+        ));
+    }
+    if declared_type == Some("object") {
+        normalize_object_shape(object, path)?;
+    }
+    normalize_children(object, path, depth)
+}
+
+fn validate_keywords(object: &SchemaObject, path: &str) -> Result<(), String> {
     for keyword in object.keys() {
         if !matches!(
             keyword.as_str(),
@@ -111,7 +127,6 @@ fn normalize_schema_node(
             ));
         }
     }
-
     if let Some(draft) = object.get("$schema")
         && draft.as_str() != Some("https://json-schema.org/draft/2020-12/schema")
     {
@@ -130,6 +145,10 @@ fn normalize_schema_node(
             pointer(path, "$ref")
         ));
     }
+    Ok(())
+}
+
+fn validate_annotations(object: &SchemaObject, path: &str) -> Result<(), String> {
     if let Some(kind) = object.get("type") {
         let Some(kind) = kind.as_str() else {
             return Err(format!(
@@ -164,99 +183,97 @@ fn normalize_schema_node(
             pointer(path, "enum")
         ));
     }
+    Ok(())
+}
 
-    let object_keywords = object.contains_key("properties")
-        || object.contains_key("required")
-        || object.contains_key("additionalProperties");
-    if object_keywords && object.get("type").and_then(serde_json::Value::as_str) != Some("object") {
+fn normalize_object_shape(object: &mut SchemaObject, path: &str) -> Result<(), String> {
+    let property_names = declared_property_names(object, path)?;
+    let required = required_property_names(object, path)?;
+    if let Some(unknown) = required.difference(&property_names).next() {
         return Err(format!(
-            "object schema at {path} must declare type 'object'"
+            "required property '{unknown}' is not declared at {}",
+            pointer(path, "required")
         ));
     }
-    if object.get("type").and_then(serde_json::Value::as_str) == Some("object") {
-        let property_names = object
-            .get("properties")
-            .map(|value| {
-                value
-                    .as_object()
-                    .map(|properties| properties.keys().cloned().collect::<BTreeSet<_>>())
-                    .ok_or_else(|| {
-                        format!(
-                            "JSON Schema properties must be an object at {}",
-                            pointer(path, "properties")
-                        )
-                    })
-            })
-            .transpose()?
-            .unwrap_or_default();
-        let required = object
-            .get("required")
-            .map(|value| {
-                let items = value.as_array().ok_or_else(|| {
-                    format!(
-                        "JSON Schema required must be an array at {}",
-                        pointer(path, "required")
-                    )
-                })?;
-                let mut names = BTreeSet::new();
-                for item in items {
-                    let name = item.as_str().ok_or_else(|| {
-                        format!(
-                            "JSON Schema required entries must be strings at {}",
-                            pointer(path, "required")
-                        )
-                    })?;
-                    if !names.insert(name.to_owned()) {
-                        return Err(format!(
-                            "duplicate required property '{name}' at {}",
-                            pointer(path, "required")
-                        ));
-                    }
-                }
-                Ok(names)
-            })
-            .transpose()?
-            .unwrap_or_default();
-        if let Some(unknown) = required.difference(&property_names).next() {
+    if let Some(optional) = property_names.difference(&required).next() {
+        return Err(format!(
+            "unsupported optional property '{optional}' at {}",
+            pointer(&pointer(path, "properties"), optional)
+        ));
+    }
+    if !required.is_empty() {
+        object.insert(
+            "required".to_owned(),
+            serde_json::Value::Array(
+                required
+                    .into_iter()
+                    .map(serde_json::Value::String)
+                    .collect(),
+            ),
+        );
+    }
+    match object.get("additionalProperties") {
+        None => {
+            object.insert(
+                "additionalProperties".to_owned(),
+                serde_json::Value::Bool(false),
+            );
+        }
+        Some(serde_json::Value::Bool(false)) => {}
+        Some(_) => {
             return Err(format!(
-                "required property '{unknown}' is not declared at {}",
+                "additionalProperties must be false at {}",
+                pointer(path, "additionalProperties")
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn declared_property_names(object: &SchemaObject, path: &str) -> Result<BTreeSet<String>, String> {
+    let Some(value) = object.get("properties") else {
+        return Ok(BTreeSet::new());
+    };
+    value
+        .as_object()
+        .map(|properties| properties.keys().cloned().collect())
+        .ok_or_else(|| {
+            format!(
+                "JSON Schema properties must be an object at {}",
+                pointer(path, "properties")
+            )
+        })
+}
+
+fn required_property_names(object: &SchemaObject, path: &str) -> Result<BTreeSet<String>, String> {
+    let Some(value) = object.get("required") else {
+        return Ok(BTreeSet::new());
+    };
+    let items = value.as_array().ok_or_else(|| {
+        format!(
+            "JSON Schema required must be an array at {}",
+            pointer(path, "required")
+        )
+    })?;
+    let mut names = BTreeSet::new();
+    for item in items {
+        let name = item.as_str().ok_or_else(|| {
+            format!(
+                "JSON Schema required entries must be strings at {}",
+                pointer(path, "required")
+            )
+        })?;
+        if !names.insert(name.to_owned()) {
+            return Err(format!(
+                "duplicate required property '{name}' at {}",
                 pointer(path, "required")
             ));
         }
-        if let Some(optional) = property_names.difference(&required).next() {
-            return Err(format!(
-                "unsupported optional property '{optional}' at {}",
-                pointer(&pointer(path, "properties"), optional)
-            ));
-        }
-        if !required.is_empty() {
-            object.insert(
-                "required".to_owned(),
-                serde_json::Value::Array(
-                    required
-                        .into_iter()
-                        .map(serde_json::Value::String)
-                        .collect(),
-                ),
-            );
-        }
-        match object.get("additionalProperties") {
-            None => {
-                object.insert(
-                    "additionalProperties".to_owned(),
-                    serde_json::Value::Bool(false),
-                );
-            }
-            Some(serde_json::Value::Bool(false)) => {}
-            Some(_) => {
-                return Err(format!(
-                    "additionalProperties must be false at {}",
-                    pointer(path, "additionalProperties")
-                ));
-            }
-        }
     }
+    Ok(names)
+}
 
+fn normalize_children(object: &mut SchemaObject, path: &str, depth: usize) -> Result<(), String> {
     if let Some(definitions) = object.get_mut("$defs") {
         let definitions = definitions.as_object_mut().ok_or_else(|| {
             format!(

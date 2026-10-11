@@ -1,5 +1,5 @@
 //! Real `SQLite` contention through the asynchronous evaluation store boundary.
-use super::*;
+use super::{Connection, EVAL_RUNNER_BUSY, EvalStore, SqliteEvalStore};
 use crate::{EvalSpec, async_store::AsyncEvalStore};
 use std::sync::{
     Arc,
@@ -8,6 +8,13 @@ use std::sync::{
 use std::time::Duration;
 
 static CONTENDED: tokio::sync::Notify = tokio::sync::Notify::const_new();
+
+/// Runs on the `SQLite` caller's blocking thread, never on the async executor.
+fn signal_contention(_attempts: i32) -> bool {
+    CONTENDED.notify_one();
+    std::thread::sleep(Duration::from_millis(1));
+    true
+}
 
 #[tokio::test(flavor = "current_thread")]
 async fn eval_store_keeps_executor_live_and_runner_owned_during_contention() {
@@ -19,11 +26,7 @@ async fn eval_store_keeps_executor_live_and_runner_owned_during_contention() {
         .lock()
         .expect("connection")
         .connection
-        .busy_handler(Some(|_| {
-            CONTENDED.notify_one();
-            std::thread::sleep(Duration::from_millis(1));
-            true
-        }))
+        .busy_handler(Some(signal_contention))
         .expect("busy handler");
     let async_store = AsyncEvalStore::new(store.clone());
     let lease = async_store.acquire_runner().await.expect("lease");

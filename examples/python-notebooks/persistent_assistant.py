@@ -18,6 +18,8 @@ import finstack_ai
 from _knowledge import KnowledgeAgent, build_knowledge_agent
 
 SOURCE = "Policy retention is seven years."
+ANSWER = "seven years"
+POLICY_FILE = "policy.csv"
 
 
 @dataclass
@@ -53,7 +55,7 @@ async def definition(
             await context.wait_cancelled()
             raise asyncio.CancelledError
         return {
-            "json": {"answer": "seven years", "sources": ["policy.csv"]},
+            "json": {"answer": ANSWER, "sources": [POLICY_FILE]},
             "completion_id": "knowledge-answer",
         }
 
@@ -83,13 +85,13 @@ async def exercise(data_dir: Path) -> None:
         "Read the attached policy.",
         attachments=[
             finstack_ai.Attachment(
-                "text/csv", data=f"policy\n{SOURCE}\n".encode(), name="policy.csv"
+                "text/csv", data=f"policy\n{SOURCE}\n".encode(), name=POLICY_FILE
             )
         ],
     )
     events = asyncio.create_task(collect(run))
     result = await run.result()
-    assert result.output == Answer("seven years", ["policy.csv"])
+    assert result.output == Answer(ANSWER, [POLICY_FILE])
     assert "run_completed" in await events
     maintenance = await first.maintain(256)
     assert not maintenance["failures"]
@@ -102,7 +104,7 @@ async def exercise(data_dir: Path) -> None:
     lane = await session.lane("main")
     run = lane.run(second.agent, "What was the retention policy?")
     events = asyncio.create_task(collect(run))
-    assert (await run.result()).output == Answer("seven years", ["policy.csv"])
+    assert (await run.result()).output == Answer(ANSWER, [POLICY_FILE])
     assert "run_completed" in await events
     assert not (await second.maintain(256))["failures"]
     del run, lane, session, second

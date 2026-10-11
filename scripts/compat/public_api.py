@@ -172,6 +172,25 @@ def compare(current: str, baseline: str) -> tuple[list[str], list[str]]:
     return removed, added
 
 
+def print_api_lines(label: str, heading: str, marker: str, lines: list[str]) -> None:
+    print(f"{label}: {heading} public API:", file=sys.stderr)
+    for line in lines:
+        print(f"  {marker} {line}", file=sys.stderr)
+
+
+def baseline_drifted(label: str, current: str) -> bool:
+    path = baseline_path(label)
+    if not path.is_file():
+        print(f"{label}: missing baseline {path}", file=sys.stderr)
+        return True
+    removed, added = compare(current, path.read_text(encoding="utf-8"))
+    if removed:
+        print_api_lines(label, "removed", "-", removed)
+    if added:
+        print_api_lines(label, "added", "+", added)
+    return bool(removed or added)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--write", action="store_true")
@@ -187,24 +206,9 @@ def main() -> int:
         for feature in features:
             label = dump_label(name, feature)
             current = dump_crate(crate_dir, feature)
-            path = baseline_path(label)
             if args.write:
-                write_list(path, current)
-                continue
-            if not path.is_file():
-                print(f"{label}: missing baseline {path}", file=sys.stderr)
-                failed = True
-                continue
-            removed, added = compare(current, path.read_text(encoding="utf-8"))
-            if removed:
-                print(f"{label}: removed public API:", file=sys.stderr)
-                for line in removed:
-                    print(f"  - {line}", file=sys.stderr)
-                failed = True
-            if added:
-                print(f"{label}: added public API:", file=sys.stderr)
-                for line in added:
-                    print(f"  + {line}", file=sys.stderr)
+                write_list(baseline_path(label), current)
+            elif baseline_drifted(label, current):
                 failed = True
     if failed:
         print(

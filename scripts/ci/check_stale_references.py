@@ -35,41 +35,57 @@ def tracked_files() -> list[Path]:
     ]
 
 
+def link_targets(line: str) -> list[str]:
+    """Return the inline and reference-definition link targets on ``line``."""
+    matches = list(INLINE_LINK.finditer(line))
+    reference = REFERENCE_LINK.match(line)
+    if reference is not None:
+        matches.append(reference)
+    return [
+        match.group("target").strip().strip("<>").split(maxsplit=1)[0]
+        for match in matches
+    ]
+
+
+def is_missing_local_target(directory: Path, target: str) -> bool:
+    """Return whether ``target`` names a relative path absent under ``directory``."""
+    if (
+        not target
+        or target.startswith(("#", "/"))
+        or target.lower().startswith(REMOTE_SCHEMES)
+    ):
+        return False
+    local = unquote(target.split("#", 1)[0].split("?", 1)[0])
+    return bool(local) and not (directory / local).exists()
+
+
+def file_failures(path: Path) -> list[str]:
+    """Return stale-reference and broken-link failures for one tracked file."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return []
+    relative = path.relative_to(REPO_ROOT).as_posix()
+    is_markdown = path.suffix.lower() == ".md"
+    failures: list[str] = []
+    for line_number, line in enumerate(text.splitlines(), start=1):
+        if any(pattern.search(line) for pattern in PATTERNS):
+            failures.append(f"{relative}:{line_number}:{line.strip()}")
+        if not is_markdown:
+            continue
+        failures.extend(
+            f"{relative}:{line_number}:missing Markdown link target {target}"
+            for target in link_targets(line)
+            if is_missing_local_target(path.parent, target)
+        )
+    return failures
+
+
 def main() -> int:
     failures: list[str] = []
     for path in tracked_files():
-        if not path.is_file():
-            continue
-        try:
-            text = path.read_text(encoding="utf-8")
-        except UnicodeDecodeError:
-            continue
-        relative_path = path.relative_to(REPO_ROOT)
-        for line_number, line in enumerate(text.splitlines(), start=1):
-            if any(pattern.search(line) for pattern in PATTERNS):
-                failures.append(
-                    f"{relative_path.as_posix()}:{line_number}:{line.strip()}"
-                )
-            if path.suffix.lower() == ".md":
-                matches = list(INLINE_LINK.finditer(line))
-                reference = REFERENCE_LINK.match(line)
-                if reference is not None:
-                    matches.append(reference)
-                for match in matches:
-                    target = match.group("target").strip().strip("<>")
-                    target = target.split(maxsplit=1)[0]
-                    if (
-                        not target
-                        or target.startswith(("#", "/"))
-                        or target.lower().startswith(REMOTE_SCHEMES)
-                    ):
-                        continue
-                    local = unquote(target.split("#", 1)[0].split("?", 1)[0])
-                    if local and not (path.parent / local).exists():
-                        failures.append(
-                            f"{relative_path.as_posix()}:{line_number}:"
-                            f"missing Markdown link target {target}"
-                        )
+        if path.is_file():
+            failures.extend(file_failures(path))
     if failures:
         print("stale repository references found:")
         print("\n".join(failures))

@@ -65,26 +65,28 @@ FORBIDDEN_WASM = frozenset(
         "tokio-rustls",
     }
 )
+README_MD = "README.md"
+MAIN_TS = "main.ts"
 SECRET_ROOTS = (
     REPO_ROOT / "bindings" / "finstack-ai-wasm" / "js" / "src",
-    REPO_ROOT / "bindings" / "finstack-ai-wasm" / "js" / "README.md",
+    REPO_ROOT / "bindings" / "finstack-ai-wasm" / "js" / README_MD,
     REPO_ROOT / "bindings" / "finstack-ai-wasm" / "js" / "harness.html",
     REPO_ROOT / "bindings" / "finstack-ai-wasm" / "js" / "worker-harness.html",
     REPO_ROOT / "bindings" / "finstack-ai-wasm" / "js" / "generated",
     REPO_ROOT / "examples" / "browser-minimal" / "index.html",
-    REPO_ROOT / "examples" / "browser-minimal" / "main.ts",
+    REPO_ROOT / "examples" / "browser-minimal" / MAIN_TS,
     REPO_ROOT / "examples" / "browser-minimal" / "worker.ts",
-    REPO_ROOT / "examples" / "browser-minimal" / "README.md",
+    REPO_ROOT / "examples" / "browser-minimal" / README_MD,
     REPO_ROOT / "examples" / "browser-knowledge" / "index.html",
-    REPO_ROOT / "examples" / "browser-knowledge" / "main.ts",
+    REPO_ROOT / "examples" / "browser-knowledge" / MAIN_TS,
     REPO_ROOT / "examples" / "browser-knowledge" / "worker.ts",
     REPO_ROOT / "examples" / "browser-knowledge" / "retrieval.mjs",
-    REPO_ROOT / "examples" / "browser-knowledge" / "README.md",
-    REPO_ROOT / "examples" / "README.md",
+    REPO_ROOT / "examples" / "browser-knowledge" / README_MD,
+    REPO_ROOT / "examples" / README_MD,
     REPO_ROOT / "bindings" / "finstack-ai-wasm" / "js" / "docs" / "browser-security.md",
     REPO_ROOT / "bindings" / "finstack-ai-wasm" / "js" / "docs" / "benchmarks.md",
-    REPO_ROOT / "examples" / "ts-alpha-install" / "README.md",
-    REPO_ROOT / "examples" / "ts-alpha-install" / "main.ts",
+    REPO_ROOT / "examples" / "ts-alpha-install" / README_MD,
+    REPO_ROOT / "examples" / "ts-alpha-install" / MAIN_TS,
 )
 SECRET_PATTERNS = (
     "apiKey",

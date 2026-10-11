@@ -40,7 +40,7 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 clap = { workspace = true }
 rich_rust = { workspace = true }
-tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread", "signal"] }
+tokio = { workspace = true, features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "signal"] }
 
 [[bin]]
 name = "finstack-know"

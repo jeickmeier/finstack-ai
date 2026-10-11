@@ -11,9 +11,10 @@ use finstack_ai_kernel::{
     RunTag, Sensitivity, SessionId, SessionTag, Stage, StageCursor, StageSettled,
     StructuredResultSource, TerminalState, TextBlock, Timestamp, TransitionEnv, TurnTag,
 };
+use finstack_ai_runtime::commit::CommitCoordinator;
 use finstack_ai_runtime::events::{
-    EventBatchConfig, EventFilter, EventHubConfig, EventLagPolicy, EventSubscriptionConfig,
-    ProgressCoalescing,
+    EventBatchConfig, EventFilter, EventHubConfig, EventLagPolicy, EventSubscription,
+    EventSubscriptionConfig, ProgressCoalescing,
 };
 use finstack_ai_runtime::ids::UuidV7Generator;
 use finstack_ai_runtime::ports::context::ContextProvider;
@@ -45,6 +46,7 @@ use finstack_ai_runtime::native_driver as driver;
 
 use super::drive::output_from_live_state;
 use super::handle::Agent;
+use super::lifecycle::ExecutionLifecycle;
 use super::run::{AgentRunInner, publish_start_failure, publish_started};
 use super::types::{
     AGENT_RUN_INVALID_CONFIGURATION, AgentRunError, AgentRunOutput, AgentRunRequest,
@@ -215,186 +217,28 @@ impl Agent {
         Ok(prepared)
     }
 
-    #[expect(
-        clippy::too_many_lines,
-        reason = "bootstrap and sibling-lane start share one acquire/release path"
-    )]
     pub(super) async fn execute_started(
         &self,
         prepared: PreparedAgentRun,
         execution: &Weak<AgentRunInner>,
     ) -> Result<AgentRunOutput, AgentRunError> {
-        let runtime = if let Some(session) = &prepared.session {
-            match session.runtime().await {
-                Ok(runtime) => runtime,
-                Err(error) => {
-                    let error = session_error(&error);
-                    publish_start_failure(execution, &error);
-                    return Err(error);
-                }
-            }
-        } else {
-            match create_session_runtime(
-                Arc::clone(&prepared.store),
-                prepared.request.security.tenant_scope(),
-                prepared.session_id,
-                prepared.lane_id,
-            )
-            .await
-            {
-                Ok(runtime) => runtime,
-                Err(error) => {
-                    publish_start_failure(execution, &error);
-                    return Err(error);
-                }
-            }
-        };
+        let (runtime, context_seed) =
+            report_start_failure(execution, start_lane_run(&prepared).await)?;
         let session_id = prepared.session_id;
         let lane_id = prepared.lane_id;
         let run_id = prepared.accepted.run_id();
-        let context_seed = match append_lane_input(
-            &runtime,
-            lane_id,
-            run_id,
-            &prepared.request.input,
-            &prepared.request.attachments,
-        )
-        .await
-        {
-            Ok(seed) => seed,
-            Err(error) => {
-                publish_start_failure(execution, &error);
-                return Err(error);
-            }
-        };
-        let seeded_leaf = runtime
-            .projection()
-            .ok()
-            .and_then(|projection| projection.lane_by_id(lane_id).and_then(|lane| lane.leaf_id));
-        if seeded_leaf != Some(context_seed.source_leaf_id)
-            || context_seed.journal_sequence == 0
-            || context_seed.head_checksum.is_none()
-        {
-            runtime.release_run(lane_id, run_id);
-            let error = AgentRunError::runtime_message(
-                "accepted lane context does not match the confirmed session head",
-            );
-            publish_start_failure(execution, &error);
-            return Err(error);
-        }
         let lifecycle = execution
             .upgrade()
             .map(|inner| Arc::clone(&inner.lifecycle));
         loop {
-            let mut coordinator = match runtime.coordinator_for_run(Some(run_id)).await {
-                Ok(coordinator) => coordinator,
-                Err(error) => {
-                    runtime.release_run(lane_id, run_id);
-                    let error = session_error(&error);
-                    publish_start_failure(execution, &error);
-                    return Err(error);
-                }
-            };
-            coordinator
-                .install_middleware_chain(Arc::clone(self.resolved.run_plan().middleware_chain()));
-            coordinator.install_capability_owners(self.capability_index.as_arc_owners());
-            let providers: Arc<[Arc<dyn ContextProvider>]> = self
-                .resolved
-                .run_plan()
-                .context_providers()
-                .iter()
-                .map(|component| Arc::clone(component.handle()))
-                .collect::<Vec<_>>()
-                .into();
-            coordinator.install_context_providers(providers);
-            if let Ok(mut cache) = self.history_cache.lock()
-                && let Some(checkpoint) =
-                    cache.candidate(session_id, lane_id, prepared.profile.digest)
-            {
-                coordinator.seed_compaction_checkpoint(checkpoint);
-            }
-            let observer_count = self.resolved.run_plan().observers().len();
-            let approval_grant = self
-                .resolved
-                .spec()
-                .map(|spec| spec.policy.approval_grant)
-                .unwrap_or_default();
-            let owner = if self.tools.is_empty() {
-                Box::pin(RunTaskOwner::spawn_with_model_and_artifacts(
-                    coordinator,
-                    run_task_config(observer_count, approval_grant),
-                    model_task_config(),
-                    Arc::clone(&prepared.model),
-                    prepared.profile.clone(),
-                    self.artifact_store
-                        .clone()
-                        .map(|store| (store, prepared.locator.clone())),
-                    AgentClock,
-                    AgentRandom,
-                ))
-                .await
-                .map_err(AgentRunError::runtime)
-            } else {
-                Box::pin(RunTaskOwner::spawn_with_model_tools_and_artifacts(
-                    coordinator,
-                    run_task_config(observer_count, approval_grant),
-                    model_task_config(),
-                    tool_task_config(),
-                    Arc::clone(&prepared.model),
-                    prepared.profile.clone(),
-                    Arc::clone(&self.tools),
-                    self.artifact_store
-                        .clone()
-                        .map(|store| (store, prepared.locator.clone())),
-                    AgentClock,
-                    AgentRandom,
-                ))
-                .await
-                .map_err(AgentRunError::runtime)
-            };
-            let mut owner = match owner {
-                Ok(owner) => owner,
-                Err(error) => {
-                    runtime.release_run(lane_id, run_id);
-                    publish_start_failure(execution, &error);
-                    return Err(error);
-                }
-            };
-            let handle = owner.handle();
-            if let Err(error) = runtime.bind_run_handle(lane_id, run_id, handle.clone()) {
-                let _shutdown = owner.shutdown().await;
-                runtime.release_run(lane_id, run_id);
-                let error = session_error(&error);
-                publish_start_failure(execution, &error);
-                return Err(error);
-            }
-            let subscription = match handle
-                .subscribe_events(event_subscription(Sensitivity::Confidential))
-                .await
-            {
-                Ok(subscription) => subscription,
-                Err(error) => {
-                    let error = AgentRunError::runtime_message(error.to_string());
-                    let _shutdown = owner.shutdown().await;
-                    runtime.release_run(lane_id, run_id);
-                    publish_start_failure(execution, &error);
-                    return Err(error);
-                }
-            };
+            let (mut owner, handle, subscription) =
+                report_start_failure(execution, self.start_run_owner(&runtime, &prepared).await)?;
             attach_plan_observers(&mut owner, self.resolved.run_plan().observers()).await;
             publish_started(execution, handle.clone(), subscription);
             let timeout = prepared.request.timeout;
             let locator = prepared.locator.clone();
             let effective_deadline = prepared.accepted.effective_deadline();
-            let remaining = effective_deadline.map_or(timeout, |deadline| {
-                Duration::from_millis(
-                    u64::try_from(deadline.as_unix_ms().saturating_sub(
-                        NativeIds::now().map_or(deadline.as_unix_ms(), Timestamp::as_unix_ms),
-                    ))
-                    .unwrap_or(0),
-                )
-                .min(timeout)
-            });
+            let remaining = remaining_run_time(timeout, effective_deadline);
             let result = driver::timeout(
                 remaining,
                 Box::pin(self.drive(
@@ -411,61 +255,13 @@ impl Agent {
             .await;
             let result = match result {
                 Ok(Ok(output)) => Ok(output),
-                Ok(Err(error)) => {
-                    let state = handle.live_state();
-                    if matches!(state.terminal, Some(TerminalState::Cancelled(_))) {
-                        Err(AgentRunError::Cancelled)
-                    } else if state.terminal.is_none()
-                        && !lifecycle.as_ref().is_some_and(|control| control.parking())
-                    {
-                        match settle_controller_cancellation(
-                            &handle,
-                            CancellationInitiator::RuntimeShutdown,
-                            None,
-                        )
-                        .await
-                        {
-                            Ok(_) => Err(error),
-                            Err(uncertain) => Err(uncertain),
-                        }
-                    } else {
-                        Err(error)
-                    }
-                }
+                Ok(Err(error)) => settle_drive_failure(&handle, error, lifecycle.as_deref()).await,
                 Err(_) => {
                     settle_deadline_timeout(&handle, locator, timeout, effective_deadline).await
                 }
             };
-            let shutdown = owner.shutdown().await;
-            let graceful = matches!(
-                shutdown.outcome,
-                finstack_ai_runtime::run::ShutdownOutcome::Graceful
-            ) && !matches!(
-                handle.status(),
-                finstack_ai_runtime::run::RunStatus::Faulted { .. }
-            );
-            if graceful {
-                let Some(update) = owner.take_session_head() else {
-                    let _invalidated = runtime.invalidate_session_head();
-                    runtime.release_run(lane_id, run_id);
-                    return Err(runtime_uncertainty(
-                        "graceful owner shutdown did not retain a confirmed session head",
-                    ));
-                };
-                if let Err(error) = runtime.adopt_session_head(update).await {
-                    let _invalidated = runtime.invalidate_session_head();
-                    runtime.release_run(lane_id, run_id);
-                    return Err(session_error(&error));
-                }
-                if let Some(checkpoint) = owner.take_compaction_checkpoint()
-                    && let Ok(mut cache) = self.history_cache.lock()
-                {
-                    cache.insert(session_id, lane_id, checkpoint);
-                }
-            } else if let Err(error) = runtime.invalidate_session_head() {
-                runtime.release_run(lane_id, run_id);
-                return Err(session_error(&error));
-            }
+            self.settle_session_head(&mut owner, &runtime, &handle, session_id, lane_id, run_id)
+                .await?;
             if handle.live_state().terminal.is_none()
                 && let Some(control) = &lifecycle
                 && control.parking()
@@ -475,16 +271,7 @@ impl Agent {
             }
             if let Ok(output) = &result
                 && let Err(error) = runtime
-                    .append_message_from_run(
-                        lane_id,
-                        run_id,
-                        &output.message,
-                        LaneAppendIds {
-                            entry_record_id: NativeIds::generate()?,
-                            lane_moved_record_id: NativeIds::generate()?,
-                            batch_id: NativeIds::generate()?,
-                        },
-                    )
+                    .append_message_from_run(lane_id, run_id, &output.message, lane_append_ids()?)
                     .await
             {
                 runtime.release_run(lane_id, run_id);
@@ -493,6 +280,168 @@ impl Agent {
             runtime.release_run(lane_id, run_id);
             return result;
         }
+    }
+
+    async fn start_run_owner(
+        &self,
+        runtime: &SessionRuntime,
+        prepared: &PreparedAgentRun,
+    ) -> Result<(RunTaskOwner, RunHandle, EventSubscription), AgentRunError> {
+        let lane_id = prepared.lane_id;
+        let run_id = prepared.accepted.run_id();
+        let mut coordinator = match runtime.coordinator_for_run(Some(run_id)).await {
+            Ok(coordinator) => coordinator,
+            Err(error) => {
+                runtime.release_run(lane_id, run_id);
+                return Err(session_error(&error));
+            }
+        };
+        self.install_run_components(&mut coordinator, prepared);
+        let mut owner = match self.spawn_run_owner(coordinator, prepared).await {
+            Ok(owner) => owner,
+            Err(error) => {
+                runtime.release_run(lane_id, run_id);
+                return Err(error);
+            }
+        };
+        let handle = owner.handle();
+        if let Err(error) = runtime.bind_run_handle(lane_id, run_id, handle.clone()) {
+            let _shutdown = owner.shutdown().await;
+            runtime.release_run(lane_id, run_id);
+            return Err(session_error(&error));
+        }
+        match handle
+            .subscribe_events(event_subscription(Sensitivity::Confidential))
+            .await
+        {
+            Ok(subscription) => Ok((owner, handle, subscription)),
+            Err(error) => {
+                let error = AgentRunError::runtime_message(error.to_string());
+                let _shutdown = owner.shutdown().await;
+                runtime.release_run(lane_id, run_id);
+                Err(error)
+            }
+        }
+    }
+
+    fn install_run_components(
+        &self,
+        coordinator: &mut CommitCoordinator,
+        prepared: &PreparedAgentRun,
+    ) {
+        coordinator
+            .install_middleware_chain(Arc::clone(self.resolved.run_plan().middleware_chain()));
+        coordinator.install_capability_owners(self.capability_index.as_arc_owners());
+        let providers: Arc<[Arc<dyn ContextProvider>]> = self
+            .resolved
+            .run_plan()
+            .context_providers()
+            .iter()
+            .map(|component| Arc::clone(component.handle()))
+            .collect::<Vec<_>>()
+            .into();
+        coordinator.install_context_providers(providers);
+        if let Ok(mut cache) = self.history_cache.lock()
+            && let Some(checkpoint) = cache.candidate(
+                prepared.session_id,
+                prepared.lane_id,
+                prepared.profile.digest,
+            )
+        {
+            coordinator.seed_compaction_checkpoint(checkpoint);
+        }
+    }
+
+    async fn spawn_run_owner(
+        &self,
+        coordinator: CommitCoordinator,
+        prepared: &PreparedAgentRun,
+    ) -> Result<RunTaskOwner, AgentRunError> {
+        let observer_count = self.resolved.run_plan().observers().len();
+        let approval_grant = self
+            .resolved
+            .spec()
+            .map(|spec| spec.policy.approval_grant)
+            .unwrap_or_default();
+        if self.tools.is_empty() {
+            Box::pin(RunTaskOwner::spawn_with_model_and_artifacts(
+                coordinator,
+                run_task_config(observer_count, approval_grant),
+                model_task_config(),
+                Arc::clone(&prepared.model),
+                prepared.profile.clone(),
+                self.artifact_store
+                    .clone()
+                    .map(|store| (store, prepared.locator.clone())),
+                AgentClock,
+                AgentRandom,
+            ))
+            .await
+            .map_err(AgentRunError::runtime)
+        } else {
+            Box::pin(RunTaskOwner::spawn_with_model_tools_and_artifacts(
+                coordinator,
+                run_task_config(observer_count, approval_grant),
+                model_task_config(),
+                tool_task_config(),
+                Arc::clone(&prepared.model),
+                prepared.profile.clone(),
+                Arc::clone(&self.tools),
+                self.artifact_store
+                    .clone()
+                    .map(|store| (store, prepared.locator.clone())),
+                AgentClock,
+                AgentRandom,
+            ))
+            .await
+            .map_err(AgentRunError::runtime)
+        }
+    }
+
+    /// Shut the owner down and adopt or invalidate the session head. Every
+    /// error path releases the lane run before returning.
+    async fn settle_session_head(
+        &self,
+        owner: &mut RunTaskOwner,
+        runtime: &SessionRuntime,
+        handle: &RunHandle,
+        session_id: SessionId,
+        lane_id: LaneId,
+        run_id: finstack_ai_kernel::RunId,
+    ) -> Result<(), AgentRunError> {
+        let shutdown = owner.shutdown().await;
+        let graceful = matches!(
+            shutdown.outcome,
+            finstack_ai_runtime::run::ShutdownOutcome::Graceful
+        ) && !matches!(
+            handle.status(),
+            finstack_ai_runtime::run::RunStatus::Faulted { .. }
+        );
+        if !graceful {
+            if let Err(error) = runtime.invalidate_session_head() {
+                runtime.release_run(lane_id, run_id);
+                return Err(session_error(&error));
+            }
+            return Ok(());
+        }
+        let Some(update) = owner.take_session_head() else {
+            let _invalidated = runtime.invalidate_session_head();
+            runtime.release_run(lane_id, run_id);
+            return Err(runtime_uncertainty(
+                "graceful owner shutdown did not retain a confirmed session head",
+            ));
+        };
+        if let Err(error) = runtime.adopt_session_head(update).await {
+            let _invalidated = runtime.invalidate_session_head();
+            runtime.release_run(lane_id, run_id);
+            return Err(session_error(&error));
+        }
+        if let Some(checkpoint) = owner.take_compaction_checkpoint()
+            && let Ok(mut cache) = self.history_cache.lock()
+        {
+            cache.insert(session_id, lane_id, checkpoint);
+        }
+        Ok(())
     }
 
     pub(super) fn context_messages(
@@ -692,6 +641,97 @@ pub(super) async fn submit(
         )));
     }
     Ok(())
+}
+
+fn report_start_failure<T>(
+    execution: &Weak<AgentRunInner>,
+    result: Result<T, AgentRunError>,
+) -> Result<T, AgentRunError> {
+    result.inspect_err(|error| publish_start_failure(execution, error))
+}
+
+/// Resolve the session runtime and append the run input, confirming the seeded
+/// context matches the session head.
+async fn start_lane_run(
+    prepared: &PreparedAgentRun,
+) -> Result<(Arc<SessionRuntime>, LaneRunContext), AgentRunError> {
+    let runtime = if let Some(session) = &prepared.session {
+        session
+            .runtime()
+            .await
+            .map_err(|error| session_error(&error))?
+    } else {
+        create_session_runtime(
+            Arc::clone(&prepared.store),
+            prepared.request.security.tenant_scope(),
+            prepared.session_id,
+            prepared.lane_id,
+        )
+        .await?
+    };
+    let lane_id = prepared.lane_id;
+    let run_id = prepared.accepted.run_id();
+    let context_seed = append_lane_input(
+        &runtime,
+        lane_id,
+        run_id,
+        &prepared.request.input,
+        &prepared.request.attachments,
+    )
+    .await?;
+    let seeded_leaf = runtime
+        .projection()
+        .ok()
+        .and_then(|projection| projection.lane_by_id(lane_id).and_then(|lane| lane.leaf_id));
+    if seeded_leaf != Some(context_seed.source_leaf_id)
+        || context_seed.journal_sequence == 0
+        || context_seed.head_checksum.is_none()
+    {
+        runtime.release_run(lane_id, run_id);
+        return Err(AgentRunError::runtime_message(
+            "accepted lane context does not match the confirmed session head",
+        ));
+    }
+    Ok((runtime, context_seed))
+}
+
+fn remaining_run_time(timeout: Duration, effective_deadline: Option<Timestamp>) -> Duration {
+    effective_deadline.map_or(timeout, |deadline| {
+        Duration::from_millis(
+            u64::try_from(deadline.as_unix_ms().saturating_sub(
+                NativeIds::now().map_or(deadline.as_unix_ms(), Timestamp::as_unix_ms),
+            ))
+            .unwrap_or(0),
+        )
+        .min(timeout)
+    })
+}
+
+async fn settle_drive_failure(
+    handle: &RunHandle,
+    error: AgentRunError,
+    lifecycle: Option<&ExecutionLifecycle>,
+) -> Result<AgentRunOutput, AgentRunError> {
+    let state = handle.live_state();
+    if matches!(state.terminal, Some(TerminalState::Cancelled(_))) {
+        return Err(AgentRunError::Cancelled);
+    }
+    if state.terminal.is_some() || lifecycle.is_some_and(ExecutionLifecycle::parking) {
+        return Err(error);
+    }
+    match settle_controller_cancellation(handle, CancellationInitiator::RuntimeShutdown, None).await
+    {
+        Ok(_) => Err(error),
+        Err(uncertain) => Err(uncertain),
+    }
+}
+
+fn lane_append_ids() -> Result<LaneAppendIds, AgentRunError> {
+    Ok(LaneAppendIds {
+        entry_record_id: NativeIds::generate()?,
+        lane_moved_record_id: NativeIds::generate()?,
+        batch_id: NativeIds::generate()?,
+    })
 }
 
 pub(super) async fn settle_deadline_timeout(
@@ -1025,16 +1065,7 @@ pub(super) async fn append_lane_input(
         attachments,
     )?;
     runtime
-        .begin_run_with_message(
-            lane_id,
-            run_id,
-            &message,
-            LaneAppendIds {
-                entry_record_id: NativeIds::generate()?,
-                lane_moved_record_id: NativeIds::generate()?,
-                batch_id: NativeIds::generate()?,
-            },
-        )
+        .begin_run_with_message(lane_id, run_id, &message, lane_append_ids()?)
         .await
         .map_err(|error| session_error(&error))
 }

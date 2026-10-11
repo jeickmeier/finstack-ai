@@ -445,50 +445,7 @@ fn run_typed_id(fixture: &PublicApiFixture) -> Result<(), PublicApiFixtureError>
         .ok_or_else(|| fail("typed-id input.canonical required"))?;
     match fixture.subject.as_str() {
         "run_id" => match RunId::parse(canonical) {
-            Ok(id) => {
-                if !fixture.expect.ok {
-                    return Err(fail("expected run_id parse failure"));
-                }
-                let round = id.to_canonical_string();
-                let expected = fixture
-                    .expect
-                    .extras
-                    .get("canonical")
-                    .and_then(Value::as_str)
-                    .unwrap_or(canonical);
-                if round != expected {
-                    return Err(fail(format!("canonical mismatch: {round} != {expected}")));
-                }
-                let json = serde_json::to_string(&id).map_err(|error| fail(error.to_string()))?;
-                let de: RunId =
-                    serde_json::from_str(&json).map_err(|error| fail(error.to_string()))?;
-                if de != id {
-                    return Err(fail("run_id serde round-trip mismatch"));
-                }
-                if let Some(Value::Array(reject)) = fixture.expect.extras.get("reject_as") {
-                    for item in reject {
-                        let name = item
-                            .as_str()
-                            .ok_or_else(|| fail("reject_as entries must be strings"))?;
-                        // Cross-type confusion is a compile-time property; fixtures
-                        // still assert that distinct parse targets remain distinct
-                        // values when fed the same canonical text.
-                        match name {
-                            "session_id" => {
-                                let session = SessionId::parse(canonical)
-                                    .map_err(|error| fail(error.to_string()))?;
-                                if session.to_canonical_string() != round {
-                                    return Err(fail("session_id canonical diverged"));
-                                }
-                            }
-                            other => {
-                                return Err(fail(format!("unsupported reject_as {other}")));
-                            }
-                        }
-                    }
-                }
-                Ok(())
-            }
+            Ok(id) => check_run_id(&fixture.expect, canonical, &id),
             Err(_) => assert_error_code(&fixture.expect, "invalid_uuid"),
         },
         "session_id" => match SessionId::parse(canonical) {
@@ -516,6 +473,55 @@ fn run_typed_id(fixture: &PublicApiFixture) -> Result<(), PublicApiFixtureError>
             Err(_) => assert_error_code(&fixture.expect, "invalid_key"),
         },
         other => Err(fail(format!("unsupported typed-id subject {other}"))),
+    }
+}
+
+fn check_run_id(expect: &Expect, canonical: &str, id: &RunId) -> Result<(), PublicApiFixtureError> {
+    if !expect.ok {
+        return Err(fail("expected run_id parse failure"));
+    }
+    let round = id.to_canonical_string();
+    let expected = expect
+        .extras
+        .get("canonical")
+        .and_then(Value::as_str)
+        .unwrap_or(canonical);
+    if round != expected {
+        return Err(fail(format!("canonical mismatch: {round} != {expected}")));
+    }
+    let json = serde_json::to_string(id).map_err(|error| fail(error.to_string()))?;
+    let de: RunId = serde_json::from_str(&json).map_err(|error| fail(error.to_string()))?;
+    if de != *id {
+        return Err(fail("run_id serde round-trip mismatch"));
+    }
+    if let Some(Value::Array(reject)) = expect.extras.get("reject_as") {
+        for item in reject {
+            check_reject_as(item, canonical, &round)?;
+        }
+    }
+    Ok(())
+}
+
+fn check_reject_as(
+    item: &Value,
+    canonical: &str,
+    round: &str,
+) -> Result<(), PublicApiFixtureError> {
+    let name = item
+        .as_str()
+        .ok_or_else(|| fail("reject_as entries must be strings"))?;
+    // Cross-type confusion is a compile-time property; fixtures
+    // still assert that distinct parse targets remain distinct
+    // values when fed the same canonical text.
+    match name {
+        "session_id" => {
+            let session = SessionId::parse(canonical).map_err(|error| fail(error.to_string()))?;
+            if session.to_canonical_string() != round {
+                return Err(fail("session_id canonical diverged"));
+            }
+            Ok(())
+        }
+        other => Err(fail(format!("unsupported reject_as {other}"))),
     }
 }
 
@@ -635,62 +641,69 @@ fn run_timestamp(fixture: &PublicApiFixture) -> Result<(), PublicApiFixtureError
         return Err(fail("timestamp input needs unix_ms or rfc3339"));
     };
     match result {
-        Ok(ts) => {
-            if !fixture.expect.ok {
-                return Err(fail("expected timestamp failure"));
-            }
-            assert_i64_field(&fixture.expect.extras, "unix_ms", ts.as_unix_ms())?;
-            if let Some(expected) = fixture.expect.extras.get("rfc3339") {
-                let expected = expected
-                    .as_str()
-                    .ok_or_else(|| fail("expect.rfc3339 must be a string"))?;
-                if ts.to_rfc3339() != expected {
-                    return Err(fail(format!(
-                        "rfc3339 mismatch: {} != {expected}",
-                        ts.to_rfc3339()
-                    )));
-                }
-            }
-            if let Some(expected) = fixture.expect.extras.get("cbor_integer") {
-                let expected = expected
-                    .as_i64()
-                    .ok_or_else(|| fail("expect.cbor_integer must be an integer"))?;
-                if ts.as_unix_ms() != expected {
-                    return Err(fail("cbor_integer projection mismatch"));
-                }
-            }
-            if let Some(python) = fixture.expect.extras.get("python") {
-                let int_ms = python
-                    .get("int_ms")
-                    .and_then(Value::as_i64)
-                    .ok_or_else(|| fail("python.int_ms required"))?;
-                if int_ms != ts.as_unix_ms() {
-                    return Err(fail("python.int_ms mismatch"));
-                }
-                let aware = python
-                    .get("aware_utc_datetime")
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| fail("python.aware_utc_datetime required"))?;
-                if aware != ts.to_rfc3339() {
-                    return Err(fail("python.aware_utc_datetime mismatch"));
-                }
-            }
-            if let Some(javascript) = fixture.expect.extras.get("javascript") {
-                let number_ms = javascript
-                    .get("number_ms")
-                    .and_then(Value::as_i64)
-                    .ok_or_else(|| fail("javascript.number_ms required"))?;
-                if number_ms != ts.as_unix_ms() {
-                    return Err(fail("javascript.number_ms mismatch"));
-                }
-            }
-            if ts.as_unix_ms() < TIMESTAMP_MIN_MS || ts.as_unix_ms() > TIMESTAMP_MAX_MS {
-                return Err(fail("timestamp escaped canonical range"));
-            }
-            Ok(())
-        }
+        Ok(ts) => check_timestamp(&fixture.expect, ts),
         Err(error) => assert_error_code(&fixture.expect, time_error_code(&error)),
     }
+}
+
+fn check_timestamp(expect: &Expect, ts: Timestamp) -> Result<(), PublicApiFixtureError> {
+    if !expect.ok {
+        return Err(fail("expected timestamp failure"));
+    }
+    assert_i64_field(&expect.extras, "unix_ms", ts.as_unix_ms())?;
+    if let Some(expected) = expect.extras.get("rfc3339") {
+        let expected = expected
+            .as_str()
+            .ok_or_else(|| fail("expect.rfc3339 must be a string"))?;
+        if ts.to_rfc3339() != expected {
+            return Err(fail(format!(
+                "rfc3339 mismatch: {} != {expected}",
+                ts.to_rfc3339()
+            )));
+        }
+    }
+    if let Some(expected) = expect.extras.get("cbor_integer") {
+        let expected = expected
+            .as_i64()
+            .ok_or_else(|| fail("expect.cbor_integer must be an integer"))?;
+        if ts.as_unix_ms() != expected {
+            return Err(fail("cbor_integer projection mismatch"));
+        }
+    }
+    check_timestamp_bindings(&expect.extras, ts)?;
+    if ts.as_unix_ms() < TIMESTAMP_MIN_MS || ts.as_unix_ms() > TIMESTAMP_MAX_MS {
+        return Err(fail("timestamp escaped canonical range"));
+    }
+    Ok(())
+}
+
+fn check_timestamp_bindings(extras: &Value, ts: Timestamp) -> Result<(), PublicApiFixtureError> {
+    if let Some(python) = extras.get("python") {
+        let int_ms = python
+            .get("int_ms")
+            .and_then(Value::as_i64)
+            .ok_or_else(|| fail("python.int_ms required"))?;
+        if int_ms != ts.as_unix_ms() {
+            return Err(fail("python.int_ms mismatch"));
+        }
+        let aware = python
+            .get("aware_utc_datetime")
+            .and_then(Value::as_str)
+            .ok_or_else(|| fail("python.aware_utc_datetime required"))?;
+        if aware != ts.to_rfc3339() {
+            return Err(fail("python.aware_utc_datetime mismatch"));
+        }
+    }
+    if let Some(javascript) = extras.get("javascript") {
+        let number_ms = javascript
+            .get("number_ms")
+            .and_then(Value::as_i64)
+            .ok_or_else(|| fail("javascript.number_ms required"))?;
+        if number_ms != ts.as_unix_ms() {
+            return Err(fail("javascript.number_ms mismatch"));
+        }
+    }
+    Ok(())
 }
 
 fn run_duration(fixture: &PublicApiFixture) -> Result<(), PublicApiFixtureError> {

@@ -1,5 +1,7 @@
 //! `MoviePlan` v1 types and plan-level validation.
 
+use std::collections::BTreeSet;
+
 use finstack_ai_kernel::ArtifactRef;
 use serde::de::{self, Deserializer};
 use serde::{Deserialize, Serialize};
@@ -260,22 +262,11 @@ pub fn validate_plan(plan: &MoviePlan, limits: &PlanLimits) -> Result<PlanBudget
     if plan.scenes.len() > limits.max_scenes {
         return Err("movie plan exceeds the scene ceiling");
     }
-    let mut seen = std::collections::BTreeSet::new();
+    let mut seen = BTreeSet::new();
     let mut total_video_s: u64 = 0;
     let mut any_cues = false;
     for scene in &plan.scenes {
-        let valid_id = !scene.id.is_empty()
-            && scene.id.len() <= 64
-            && scene
-                .id
-                .bytes()
-                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
-        if !valid_id {
-            return Err("scene id must match [a-z0-9-]{1,64}");
-        }
-        if !seen.insert(scene.id.as_str()) {
-            return Err("scene ids must be unique");
-        }
+        register_scene_id(&mut seen, &scene.id)?;
         if scene.video_prompt.is_empty() {
             return Err("scene video prompt must not be empty");
         }
@@ -283,42 +274,12 @@ pub fn validate_plan(plan: &MoviePlan, limits: &PlanLimits) -> Result<PlanBudget
         if !(1..=60).contains(&duration) {
             return Err("scene duration must be between 1 and 60 seconds");
         }
-        // Mirrors the video tool schema's `reference_images` maxItems, and its
-        // requirement that every reference resolve to a URL or stored artifact:
-        // a prompt has no resolution path here, so rejecting beats dropping it.
         if let Some(references) = &scene.reference_images {
-            if references.len() > 4 {
-                return Err("scene has more than 4 reference images");
-            }
-            if references
-                .iter()
-                .any(|source| matches!(source, FrameSource::Prompt { .. }))
-            {
-                return Err("reference images must be pinned artifacts or urls");
-            }
+            validate_reference_images(references)?;
         }
         if let Some(cues) = &scene.captions {
-            if cues.len() > 32 {
-                return Err("scene has more than 32 caption cues");
-            }
-            if !cues.is_empty() {
-                any_cues = true;
-            }
-            let mut previous_end = 0.0_f64;
-            for cue in cues {
-                if cue.text.is_empty() || cue.text.chars().count() > 200 {
-                    return Err("caption text must be 1 to 200 characters");
-                }
-                let in_order = cue.start_s.is_finite()
-                    && cue.end_s.is_finite()
-                    && cue.start_s >= previous_end
-                    && cue.end_s > cue.start_s
-                    && cue.end_s <= f64::from(duration);
-                if !in_order {
-                    return Err("caption cues must be ordered and inside the scene duration");
-                }
-                previous_end = cue.end_s;
-            }
+            validate_captions(cues, duration)?;
+            any_cues |= !cues.is_empty();
         }
         total_video_s = total_video_s.saturating_add(u64::from(duration));
     }
@@ -334,9 +295,76 @@ pub fn validate_plan(plan: &MoviePlan, limits: &PlanLimits) -> Result<PlanBudget
     {
         return Err("captions delivery requested but no scene has cues");
     }
+    validate_transitions(plan, &seen)?;
+    validate_schema_bounds(plan)?;
+    Ok(PlanBudget {
+        scene_count: plan.scenes.len(),
+        total_video_s,
+    })
+}
+
+/// Check `id` against `[a-z0-9-]{1,64}` and record it, rejecting repeats.
+fn register_scene_id<'a>(seen: &mut BTreeSet<&'a str>, id: &'a str) -> Result<(), &'static str> {
+    let valid_id = !id.is_empty()
+        && id.len() <= 64
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
+    if !valid_id {
+        return Err("scene id must match [a-z0-9-]{1,64}");
+    }
+    if !seen.insert(id) {
+        return Err("scene ids must be unique");
+    }
+    Ok(())
+}
+
+/// Mirrors the video tool schema's `reference_images` maxItems, and its
+/// requirement that every reference resolve to a URL or stored artifact:
+/// a prompt has no resolution path here, so rejecting beats dropping it.
+fn validate_reference_images(references: &[FrameSource]) -> Result<(), &'static str> {
+    if references.len() > 4 {
+        return Err("scene has more than 4 reference images");
+    }
+    if references
+        .iter()
+        .any(|source| matches!(source, FrameSource::Prompt { .. }))
+    {
+        return Err("reference images must be pinned artifacts or urls");
+    }
+    Ok(())
+}
+
+/// Bound a scene's caption cues: at most 32, non-overlapping, in order, and
+/// inside the scene's `duration` seconds.
+fn validate_captions(cues: &[CaptionCue], duration: u32) -> Result<(), &'static str> {
+    if cues.len() > 32 {
+        return Err("scene has more than 32 caption cues");
+    }
+    let mut previous_end = 0.0_f64;
+    for cue in cues {
+        if cue.text.is_empty() || cue.text.chars().count() > 200 {
+            return Err("caption text must be 1 to 200 characters");
+        }
+        let in_order = cue.start_s.is_finite()
+            && cue.end_s.is_finite()
+            && cue.start_s >= previous_end
+            && cue.end_s > cue.start_s
+            && cue.end_s <= f64::from(duration);
+        if !in_order {
+            return Err("caption cues must be ordered and inside the scene duration");
+        }
+        previous_end = cue.end_s;
+    }
+    Ok(())
+}
+
+/// Every transition must follow a known, non-final scene with a bounded
+/// duration.
+fn validate_transitions(plan: &MoviePlan, scene_ids: &BTreeSet<&str>) -> Result<(), &'static str> {
     let last_id = plan.scenes.last().map(|scene| scene.id.as_str());
     for transition in plan.transitions.iter().flatten() {
-        if !seen.contains(transition.after.as_str()) {
+        if !scene_ids.contains(transition.after.as_str()) {
             return Err("transition names an unknown scene");
         }
         if Some(transition.after.as_str()) == last_id {
@@ -352,11 +380,7 @@ pub fn validate_plan(plan: &MoviePlan, limits: &PlanLimits) -> Result<PlanBudget
             return Err("transition duration must be between 0.05 and 5 seconds");
         }
     }
-    validate_schema_bounds(plan)?;
-    Ok(PlanBudget {
-        scene_count: plan.scenes.len(),
-        total_video_s,
-    })
+    Ok(())
 }
 
 /// Enforce the published schema's enum members and numeric ranges.
