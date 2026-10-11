@@ -40,3 +40,26 @@ def test_rc_examples_only_inherit_declared_workspace_dependencies() -> None:
     assert "finstack-ai-kernel" in minimal
     durable = dependencies_block(examples[1])
     assert "finstack-ai-workflow-local" in durable
+
+
+def test_dependencies_block_keeps_a_table_that_ends_the_file(tmp_path: Path) -> None:
+    manifest = tmp_path / "Cargo.toml"
+    manifest.write_text(
+        '[package]\nname = "example"\n\n[dependencies]\nfoo = { workspace = true }\n',
+        encoding="utf-8",
+    )
+    block = dependencies_block(manifest)
+    assert block.startswith("[dependencies]\n")
+    assert "foo = { workspace = true }" in block
+    assert "[package]" not in block
+
+
+def test_dependencies_block_stops_at_the_next_section(tmp_path: Path) -> None:
+    manifest = tmp_path / "Cargo.toml"
+    manifest.write_text(
+        "[dependencies]\nfoo = { workspace = true }\n\n[lints]\nworkspace = true\n",
+        encoding="utf-8",
+    )
+    block = dependencies_block(manifest)
+    assert "foo = { workspace = true }" in block
+    assert "[lints]" not in block

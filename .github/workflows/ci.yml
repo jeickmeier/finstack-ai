@@ -39,7 +39,9 @@ jobs:
       postgres:
         image: postgres@sha256:e17e86066e5ef83e0952a9347f5c792b7ece00972e2aa787a6986f471b3dd3d5 # postgres:16
         env:
-          POSTGRES_PASSWORD: postgres
+          # Loopback-only container discarded with the job. Trust auth avoids
+          # committing a database credential in this workflow.
+          POSTGRES_HOST_AUTH_METHOD: trust
         ports:
           - 5432:5432
         options: >-
@@ -71,7 +73,7 @@ jobs:
 
       - name: Rust CI
         env:
-          FINSTACK_PG_TEST_URL: postgres://postgres:postgres@localhost:5432/postgres
+          FINSTACK_PG_TEST_URL: postgres://postgres@localhost:5432/postgres
         run: mise run ci-rust
 
   ci-python:
@@ -176,7 +178,9 @@ jobs:
       postgres:
         image: postgres@sha256:e17e86066e5ef83e0952a9347f5c792b7ece00972e2aa787a6986f471b3dd3d5 # postgres:16
         env:
-          POSTGRES_PASSWORD: postgres
+          # Loopback-only container discarded with the job. Trust auth avoids
+          # committing a database credential in this workflow.
+          POSTGRES_HOST_AUTH_METHOD: trust
         ports:
           - 5432:5432
         options: >-
@@ -208,7 +212,7 @@ jobs:
 
       - name: Rust coverage
         env:
-          FINSTACK_PG_TEST_URL: postgres://postgres:postgres@localhost:5432/postgres
+          FINSTACK_PG_TEST_URL: postgres://postgres@localhost:5432/postgres
         run: mise run coverage-rust
 
       - name: Upload Rust coverage

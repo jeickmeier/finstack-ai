@@ -112,25 +112,35 @@ def rewrite_members(text: str, members: list[str]) -> str:
     return re.sub(r"members = \[[^\]]*\]", block, text, count=1, flags=re.S)
 
 
-_DEPENDENCIES = re.compile(
-    r"^\[dependencies\]\n.*?(?=^\[|\Z)",
-    re.MULTILINE | re.DOTALL,
-)
-
-
 def dependencies_block(manifest: Path) -> str:
     """Return the `[dependencies]` table from an example manifest.
 
     The staged RC crate copies that example's sources, so its dependency
     table has to stay identical. A second handwritten list drifted to the
     removed `finstack-ai-context-memory` name and nightly lockfile generation
-    failed.
+    failed. The table ends at the next line that opens a section, or at the
+    end of the file when `[dependencies]` is last.
     """
-    text = manifest.read_text(encoding="utf-8")
-    match = _DEPENDENCIES.search(text)
-    if match is None:
+    lines = manifest.read_text(encoding="utf-8").splitlines(keepends=True)
+    start = next(
+        (
+            index
+            for index, line in enumerate(lines)
+            if line.rstrip("\r\n") == "[dependencies]"
+        ),
+        None,
+    )
+    if start is None:
         raise SystemExit(f"{manifest} has no [dependencies] table")
-    return match.group(0).rstrip() + "\n"
+    end = next(
+        (
+            index
+            for index, line in enumerate(lines[start + 1 :], start + 1)
+            if line.startswith("[")
+        ),
+        len(lines),
+    )
+    return "".join(lines[start:end]).rstrip() + "\n"
 
 
 def write_rc_example(dest: Path, name: str, source: Path, extra: str) -> None:

@@ -60,15 +60,30 @@ def test_benchmark_argv_uses_typed_fields(tmp_path: Path) -> None:
 
     assert argv == [
         str(binary.resolve()),
-        "--root",
-        str(root.resolve()),
-        "--chunks",
-        "100",
-        "--memories",
-        "100",
-        "--journal-entries",
-        "100",
-        "--samples",
-        "5",
+        f"--root={root.resolve().as_posix()}",
+        "--chunks=100",
+        "--memories=100",
+        "--journal-entries=100",
+        "--samples=5",
         "--reuse",
     ]
+
+
+def test_benchmark_argv_rejects_a_negative_sample_count(tmp_path: Path) -> None:
+    target = tmp_path / "target"
+    binary = target / "search_scale"
+    binary.parent.mkdir(parents=True)
+    binary.write_bytes(b"")
+
+    with pytest.raises(SystemExit, match="samples"):
+        benchmark_argv(
+            binary,
+            tmp_path / "corpus",
+            100,
+            100,
+            100,
+            -1,
+            reuse=False,
+            memory_only=False,
+            target_root=target,
+        )

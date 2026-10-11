@@ -19,6 +19,13 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TARGET_DIR = REPO_ROOT / "target"
 _BINARY_PART = re.compile(r"[A-Za-z0-9._-]+")
+_COUNT = re.compile(r"\d{1,9}\Z", re.ASCII)
+_OPTION = re.compile(
+    r"--(?:chunks|memories|journal-entries|samples)=\d{1,9}\Z"
+    r"|--root=/.+\Z"
+    r"|--(?:reuse|memory-only)\Z",
+    re.ASCII,
+)
 _BINARY_ERROR = (
     "benchmark binary must be an existing file named search_scale under target/"
 )
@@ -49,6 +56,34 @@ def approved_binary(candidate: Path, target_root: Path = TARGET_DIR) -> Path:
     return approved
 
 
+def _allow(pattern: re.Pattern[str], value: str, label: str) -> str:
+    match = pattern.fullmatch(value)
+    if match is None:
+        raise SystemExit(f"rejected benchmark {label}")
+    return match.group(0)
+
+
+def count_option(name: str, value: int) -> str:
+    """Return ``--name=<digits>`` for a non-negative count.
+
+    Only the digits matched by the allowlist are copied into the argument, so
+    a caller-supplied value cannot arrive as a second flag.
+    """
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise SystemExit(f"--{name} must be a non-negative integer")
+    digits = _allow(_COUNT, str(value), name)
+    return _allow(_OPTION, f"--{name}={digits}", name)
+
+
+def root_option(root: Path) -> str:
+    """Return ``--root=<absolute path>`` with no extra argument."""
+    resolved = Path(root).expanduser().resolve()
+    text = resolved.as_posix()
+    if not text.startswith("/") or "\n" in text or "\x00" in text:
+        raise SystemExit("benchmark root must be an absolute path")
+    return _allow(_OPTION, f"--root={text}", "root")
+
+
 def benchmark_argv(
     binary: Path,
     root: Path,
@@ -64,21 +99,16 @@ def benchmark_argv(
     """Build the native search_scale argument vector from typed fields."""
     argv = [
         str(approved_binary(binary, target_root)),
-        "--root",
-        str(Path(root).expanduser().resolve()),
-        "--chunks",
-        str(chunks),
-        "--memories",
-        str(memories),
-        "--journal-entries",
-        str(journal_entries),
-        "--samples",
-        str(samples),
+        root_option(root),
+        count_option("chunks", chunks),
+        count_option("memories", memories),
+        count_option("journal-entries", journal_entries),
+        count_option("samples", samples),
     ]
     if reuse:
-        argv.append("--reuse")
+        argv.append(_allow(_OPTION, "--reuse", "reuse"))
     if memory_only:
-        argv.append("--memory-only")
+        argv.append(_allow(_OPTION, "--memory-only", "memory-only"))
     return argv
 
 
@@ -161,18 +191,12 @@ def _child_command(
         sys.executable,
         __file__,
         "_measure",
-        "--binary",
-        str(binary),
-        "--root",
-        str(root),
-        "--chunks",
-        str(chunks),
-        "--memories",
-        str(memories),
-        "--journal-entries",
-        str(journal_entries),
-        "--samples",
-        str(samples),
+        f"--binary={binary}",
+        root_option(root),
+        count_option("chunks", chunks),
+        count_option("memories", memories),
+        count_option("journal-entries", journal_entries),
+        count_option("samples", samples),
     ]
     if reuse:
         command.append("--reuse")

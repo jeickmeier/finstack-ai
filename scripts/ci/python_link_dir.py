@@ -7,17 +7,52 @@ searches the old directory and reports ``unable to find library -lpythonX.Y``.
 
 rust-lld also only accepts ``libpythonX.Y.so`` (or ``.dylib`` / ``.a``). A
 python-build-standalone tree may ship only ``libpythonX.Y.so.1.0``, or a GNU
-ld script of the unversioned name, which rust-lld will not open.
+ld script of the unversioned name, which rust-lld will not open. Script text
+is never used as a path: only filenames derived from the interpreter version,
+or ``LDLIBRARY`` when it is itself one of those filenames, are opened.
 """
 
 from __future__ import annotations
 
+import re
 import sys
 import sysconfig
 from pathlib import Path
 
+_VERSION = re.compile(r"\d+\.\d+\Z", re.ASCII)
+_LIBRARY_NAME = re.compile(
+    r"libpython\d+(?:\.\d+)*(?:\.so(?:\.\d+)*|\.dylib|\.a)\Z",
+    re.ASCII,
+)
 
-def linker_names(version: str) -> tuple[str, ...]:
+
+def _version(version: str) -> str | None:
+    match = _VERSION.fullmatch(version)
+    if match is None:
+        return None
+    return match.group(0)
+
+
+def _library_name(name: str) -> str | None:
+    match = _LIBRARY_NAME.fullmatch(name)
+    if match is None:
+        return None
+    return match.group(0)
+
+
+def _library_path(root: Path, name: str) -> Path | None:
+    """Return ``name`` inside ``root`` when it is a single library filename."""
+    safe_name = _library_name(name)
+    if safe_name is None:
+        return None
+    base = root.expanduser().resolve()
+    candidate = base / safe_name
+    if candidate.parent != base:
+        return None
+    return candidate
+
+
+def linker_names(version: str) -> tuple[str, str, str]:
     """Filenames ``-lpython{version}`` searches for."""
     return (
         f"libpython{version}.so",
@@ -28,21 +63,26 @@ def linker_names(version: str) -> tuple[str, ...]:
 
 def alias_name(ldlibrary: str, version: str) -> str | None:
     """Unversioned linker filename for a versioned ``LDLIBRARY``."""
-    if ".dylib" in ldlibrary:
-        return f"libpython{version}.dylib"
-    if ".so" in ldlibrary:
-        return f"libpython{version}.so"
-    if ldlibrary.endswith(".a"):
-        return f"libpython{version}.a"
+    safe = _version(version)
+    library = _library_name(ldlibrary)
+    if safe is None or library is None:
+        return None
+    if library.endswith(".dylib"):
+        return f"libpython{safe}.dylib"
+    if ".so" in library:
+        return f"libpython{safe}.so"
+    if library.endswith(".a"):
+        return f"libpython{safe}.a"
     return None
 
 
 def is_linker_script(path: Path) -> bool:
     """True when ``path`` is a GNU ld script rather than an object file."""
-    if not path.is_file():
+    candidate = _library_path(path.parent, path.name)
+    if candidate is None or not candidate.is_file():
         return False
     try:
-        head = path.read_bytes()[:64].lstrip()
+        head = candidate.read_bytes()[:64].lstrip()
     except OSError:
         return False
     return head.startswith((b"/*", b"GROUP", b"INPUT", b"OUTPUT_FORMAT"))
@@ -50,38 +90,36 @@ def is_linker_script(path: Path) -> bool:
 
 def is_linkable(path: Path) -> bool:
     """True when rust-lld can open ``path`` as ``-l`` input."""
-    return path.is_file() and not is_linker_script(path)
-
-
-def _script_member(path: Path) -> str | None:
-    try:
-        text = path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return None
-    for token in text.replace("(", " ").replace(")", " ").split():
-        if token.startswith("libpython"):
-            return token
-    return None
+    candidate = _library_path(path.parent, path.name)
+    if candidate is None:
+        return False
+    return candidate.is_file() and not is_linker_script(candidate)
 
 
 def shared_object(libdir: Path, ldlibrary: str, version: str) -> Path | None:
     """Real shared or static library behind ``LDLIBRARY`` or a linker script."""
+    safe = _version(version)
+    if safe is None:
+        return None
     names: list[str] = []
-    script = libdir / f"libpython{version}.so"
-    if is_linker_script(script):
-        member = _script_member(script)
-        if member is not None:
-            names.append(member)
-    if ldlibrary:
-        names.append(ldlibrary)
-    names.append(f"libpython{version}.so.1.0")
+    library = _library_name(ldlibrary)
+    if library is not None:
+        names.append(library)
+    names.extend(
+        (
+            f"libpython{safe}.so.1.0",
+            f"libpython{safe}.so.1",
+            f"libpython{safe}.dylib",
+            f"libpython{safe}.a",
+        )
+    )
     seen: set[str] = set()
     for name in names:
         if name in seen:
             continue
         seen.add(name)
-        candidate = libdir / name
-        if is_linkable(candidate):
+        candidate = _library_path(libdir, name)
+        if candidate is not None and is_linkable(candidate):
             return candidate
     return None
 
@@ -96,16 +134,23 @@ def ensure_python_link_dir(
 
     ``None`` means ``libdir`` already contains a name the linker accepts.
     """
-    if any(is_linkable(libdir / name) for name in linker_names(version)):
+    safe = _version(version)
+    if safe is None:
         return None
-    real = shared_object(libdir, ldlibrary, version)
+    for name in linker_names(safe):
+        candidate = _library_path(libdir, name)
+        if candidate is not None and is_linkable(candidate):
+            return None
+    real = shared_object(libdir, ldlibrary, safe)
     if real is None:
         return None
-    alias = alias_name(real.name, version)
+    alias = alias_name(real.name, safe)
     if alias is None or real.name == alias:
         return None
     dest.mkdir(parents=True, exist_ok=True)
-    link = dest / alias
+    link = _library_path(dest, alias)
+    if link is None:
+        return None
     target = real.resolve()
     if link.is_symlink() and link.resolve() == target:
         return dest

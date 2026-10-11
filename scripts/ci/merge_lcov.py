@@ -158,6 +158,25 @@ def render(reports: dict[str, FileCoverage]) -> str:
     return "\n".join(chunks) + "\n"
 
 
+def report_destination(args: argparse.Namespace) -> Path:
+    """Return the single path this invocation writes."""
+    if args.relativize:
+        if args.output is not None or len(args.reports) != 1:
+            raise SystemExit(
+                "--relativize rewrites exactly one report and takes no --output"
+            )
+        report = args.reports[0]
+        if not isinstance(report, Path):
+            raise SystemExit(
+                "--relativize rewrites exactly one report and takes no --output"
+            )
+        return report
+    output = args.output
+    if not isinstance(output, Path):
+        raise SystemExit("--output is required unless --relativize is set")
+    return output
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("reports", nargs="+", type=Path)
@@ -169,14 +188,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--root", type=Path, default=REPO_ROOT)
     args = parser.parse_args(argv)
+    destination = report_destination(args)
     root = args.root.resolve()
-    if args.relativize and (args.output is not None or len(args.reports) != 1):
-        parser.error("--relativize rewrites exactly one report and takes no --output")
     texts = [path.read_text(encoding="utf-8") for path in args.reports]
     rendered = merge_reports(texts, root)
-    destination = args.reports[0] if args.relativize else args.output
-    if destination is None:
-        parser.error("--output is required unless --relativize is set")
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(rendered, encoding="utf-8")
     return 0

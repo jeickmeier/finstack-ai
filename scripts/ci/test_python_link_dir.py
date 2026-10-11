@@ -69,3 +69,23 @@ def test_linker_script_is_aliased_ahead_of_libdir(tmp_path: Path) -> None:
     link = dest / "libpython3.14.so"
     assert link.is_symlink()
     assert link.resolve() == soname.resolve()
+
+
+def test_linker_script_cannot_escape_the_library_directory(tmp_path: Path) -> None:
+    libdir = tmp_path / "lib"
+    libdir.mkdir()
+    (libdir / "libpython3.14.so").write_text(
+        "GROUP ( libpython../../secret.so libpython3.14.so.1.0 )\n",
+        encoding="utf-8",
+    )
+    secret = tmp_path / "secret.so"
+    secret.write_bytes(b"secret")
+    soname = libdir / "libpython3.14.so.1.0"
+    soname.write_bytes(b"\x7fELF")
+    dest = tmp_path / "link"
+    found = link_search_dirs(libdir, "libpython../../secret.so", "3.14", dest)
+    assert found == [dest, libdir]
+    link = dest / "libpython3.14.so"
+    assert link.is_symlink()
+    assert link.resolve() == soname.resolve()
+    assert secret.read_bytes() == b"secret"

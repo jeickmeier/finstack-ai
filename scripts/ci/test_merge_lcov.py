@@ -73,6 +73,34 @@ end_of_record
     assert "rustc" not in rendered
 
 
+def test_main_writes_one_merged_report(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    source = root / "crates" / "kernel" / "src"
+    source.mkdir(parents=True)
+    report = tmp_path / "native.info"
+    report.write_text(
+        f"SF:{source / 'lib.rs'}\nDA:1,1\nend_of_record\n",
+        encoding="utf-8",
+    )
+    output = tmp_path / "out" / "lcov.info"
+
+    assert (
+        _MODULE.main([str(report), "--output", str(output), "--root", str(root)]) == 0
+    )
+
+    rendered = output.read_text(encoding="utf-8")
+    assert "SF:crates/kernel/src/lib.rs" in rendered
+
+
+def test_main_requires_an_output_path() -> None:
+    try:
+        _MODULE.main(["coverage.info"])
+    except SystemExit as error:
+        assert "output" in str(error)
+    else:
+        raise AssertionError("missing --output must fail")
+
+
 def test_merge_rejects_a_report_with_no_repository_files() -> None:
     try:
         merge_reports(["SF:/tmp/other.rs\nDA:1,1\nend_of_record\n"], Path("/repo"))
