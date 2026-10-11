@@ -72,11 +72,14 @@ async def exercise(phase: str, directory: Path) -> None:
             )
         ],
     )
+    # The approved path fsyncs a tool effect and then completes. A 1s drive
+    # budget loses that race on a loaded runner and the tick counts a failure
+    # instead of a resume. The lease has to outlive the drive budget.
     host = await finstack_ai.DurableHost.open(
         str(directory / "host.sqlite"),
         {"approval": agent},
-        drive_timeout_seconds=1.0,
-        lease_ttl_seconds=2.0,
+        drive_timeout_seconds=8.0,
+        lease_ttl_seconds=12.0,
     )
     if phase == "park":
         locator = await host.start("approval", "write one value", timeout_seconds=120)
